@@ -6,9 +6,9 @@
 
 #include "jvs/io.h"
 
-char *getNextToken(char *buffer, char *seperator, char **saveptr)
+char *getNextToken(char *buffer, char *separator, char **saveptr)
 {
-    char *token = strtok_r(buffer, seperator, saveptr);
+    char *token = strtok_r(buffer, separator, saveptr);
     if (token == NULL)
         return NULL;
 

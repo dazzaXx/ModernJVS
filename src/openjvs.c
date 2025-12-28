@@ -56,7 +56,7 @@ int main(int argc, char **argv)
 
     debug(0, "OpenJVS Version %s\n\n", PROJECT_VER);
 
-    /* Init the thread managre */
+    /* Init the thread manager */
     ThreadStatus threadStatus = initThreadManager();
     if (threadStatus != THREAD_STATUS_SUCCESS)
     {
@@ -71,7 +71,7 @@ int main(int argc, char **argv)
         return EXIT_FAILURE;
     }
 
-    /* Init the rotrary status*/
+    /* Init the rotary status*/
     JVSRotaryStatus rotaryStatus = JVS_ROTARY_STATUS_UNUSED;
     int rotaryValue = -1;
     if (strcmp(config.defaultGamePath, "rotary") == 0 || strcmp(config.defaultGamePath, "ROTARY") == 0)
@@ -161,7 +161,7 @@ int main(int argc, char **argv)
             return EXIT_FAILURE;
         }
 
-        debug(1, "ABOUT TO PAARSE Second IO\n");
+        debug(1, "ABOUT TO PARSE Second IO\n");
 
         if (config.secondCapabilitiesPath[0] != 0x00)
         {
@@ -229,13 +229,13 @@ int main(int argc, char **argv)
             switch (processingStatus)
             {
             case JVS_STATUS_ERROR_CHECKSUM:
-                debug(0, "Error: A checksum error occoured\n");
+                debug(0, "Error: A checksum error occurred\n");
                 break;
             case JVS_STATUS_ERROR_WRITE_FAIL:
-                debug(0, "Error: A write failure occoured\n");
+                debug(0, "Error: A write failure occurred\n");
                 break;
             case JVS_STATUS_ERROR:
-                debug(0, "Error: A generic error occoured\n");
+                debug(0, "Error: A generic error occurred\n");
                 break;
             default:
                 break;

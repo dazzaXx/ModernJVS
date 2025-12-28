@@ -42,7 +42,7 @@ int initJVS(JVSIO *jvsIO)
  * Disconnects from the device communicating with the
  * arcade machine so JVS can be shutdown safely.
  *
- * @returns 1 if the device disconnected succesfully, 0 otherwise.
+ * @returns 1 if the device disconnected successfully, 0 otherwise.
  */
 int disconnectJVS()
 {

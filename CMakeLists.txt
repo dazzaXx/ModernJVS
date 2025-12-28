@@ -17,7 +17,7 @@ endif()
 
 configure_file(src/version.h.in version.h)
 
-include_directories(${THREAD_INLCUDE_DIRS} ${PROJECT_SOURCE_DIR}/src ${PROJECT_BINARY_DIR})
+include_directories(${THREAD_INCLUDE_DIRS} ${PROJECT_SOURCE_DIR}/src ${PROJECT_BINARY_DIR})
 
 # Add libgpiod includes if found
 if(LIBGPIOD_FOUND)
