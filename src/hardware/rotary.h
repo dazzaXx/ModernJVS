@@ -8,7 +8,7 @@ typedef enum
     JVS_ROTARY_STATUS_SUCCESS
 } JVSRotaryStatus;
 
-JVSRotaryStatus initRotary();
-int getRotaryValue();
+JVSRotaryStatus initRotary(void);
+int getRotaryValue(void);
 
 #endif // ROTARY_H_

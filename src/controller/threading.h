@@ -22,10 +22,10 @@ typedef struct
     int ThreadsRunning;
 } ThreadSharedData;
 
-ThreadStatus initThreadManager();
+ThreadStatus initThreadManager(void);
 ThreadStatus createThread(void *thread_entry(void *), void *args);
-void stopAllThreads();
+void stopAllThreads(void);
 void setThreadsRunning(int Running);
-int getThreadsRunning();
+int getThreadsRunning(void);
 
 #endif // THREADING_H_

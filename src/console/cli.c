@@ -7,6 +7,15 @@
 #include "console/debug.h"
 #include "version.h"
 
+/* Forward declarations for internal functions */
+static JVSCLIStatus printUsage(void);
+static JVSCLIStatus printVersion(void);
+static JVSCLIStatus editFile(char *filePath);
+static JVSCLIStatus enableDevice(char *deviceName);
+static JVSCLIStatus disableDevice(char *deviceName);
+static JVSCLIStatus printDeviceListing(Device *device);
+static JVSCLIStatus printListing(void);
+
 /**
  * Print usage information
  * 
@@ -15,7 +24,7 @@
  * 
  * @returns The status of the action performed
  **/
-JVSCLIStatus printUsage()
+static JVSCLIStatus printUsage(void)
 {
     debug(0, "Usage: openjvs ( options [controller] | [game] )\n\n");
     debug(0, "Options:\n");
@@ -37,7 +46,7 @@ JVSCLIStatus printUsage()
  * 
  * @returns The status of the action performed
  **/
-JVSCLIStatus printVersion()
+static JVSCLIStatus printVersion(void)
 {
     debug(0, "%s\n", PROJECT_VER);
     return JVS_CLI_STATUS_SUCCESS_CLOSE;
@@ -50,7 +59,7 @@ JVSCLIStatus printVersion()
  *
  * @returns The status of the action performed
  **/
-JVSCLIStatus editFile(char *filePath)
+static JVSCLIStatus editFile(char *filePath)
 {
     char mainName[1024];
     int ret = snprintf(mainName, sizeof(mainName), "%s%s", DEFAULT_DEVICE_MAPPING_PATH, filePath);
@@ -95,7 +104,7 @@ JVSCLIStatus editFile(char *filePath)
  * @param deviceName The name of the device to enable
  * @returns The status of the action performed
  */
-JVSCLIStatus enableDevice(char *deviceName)
+static JVSCLIStatus enableDevice(char *deviceName)
 {
     if (!deviceName)
     {
@@ -170,7 +179,7 @@ JVSCLIStatus enableDevice(char *deviceName)
  * @param deviceName The name of the device to disable
  * @returns The status of the action performed
  */
-JVSCLIStatus disableDevice(char *deviceName)
+static JVSCLIStatus disableDevice(char *deviceName)
 {
     if (!deviceName)
     {
@@ -225,7 +234,7 @@ JVSCLIStatus disableDevice(char *deviceName)
     return JVS_CLI_STATUS_SUCCESS_CLOSE;
 }
 
-JVSCLIStatus printDeviceListing(Device *device)
+static JVSCLIStatus printDeviceListing(Device *device)
 {
     printf("  - %s (%s)\n", device->name, device->physicalLocation);
 
@@ -239,7 +248,7 @@ JVSCLIStatus printDeviceListing(Device *device)
  * 
  * @returns The status of the action performed
  **/
-JVSCLIStatus printListing()
+static JVSCLIStatus printListing(void)
 {
     DeviceList *deviceList = NULL;
     deviceList = malloc(sizeof(DeviceList));

@@ -8,7 +8,7 @@
 static ThreadSharedData ThreadManagerData;
 
 /* Only call this function once from main-thread */
-ThreadStatus initThreadManager()
+ThreadStatus initThreadManager(void)
 {
     memset(&ThreadManagerData, 0, sizeof(ThreadManagerData));
     pthread_mutex_init(&ThreadManagerData.mutex_manager, NULL);
@@ -35,7 +35,7 @@ ThreadStatus createThread(void *thread_entry(void *), void *args)
     return status;
 }
 
-void stopAllThreads()
+void stopAllThreads(void)
 {
     /* Set flags for all threads to terminate itself */
     setThreadsRunning(0);
@@ -53,7 +53,7 @@ void stopAllThreads()
     pthread_mutex_unlock(&ThreadManagerData.mutex_manager);
 }
 
-int getThreadsRunning()
+int getThreadsRunning(void)
 {
     int threadsRunning = -1;
     pthread_rwlock_rdlock(&ThreadManagerData.rwlock_threads);

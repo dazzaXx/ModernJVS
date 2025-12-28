@@ -18,7 +18,7 @@
 /* Time between reinit in ms */
 #define TIME_REINIT 200
 
-void cleanup();
+void cleanup(void);
 void handleSignal(int signal);
 
 volatile int running = 1;
@@ -257,7 +257,7 @@ int main(int argc, char **argv)
     return EXIT_SUCCESS;
 }
 
-void cleanup()
+void cleanup(void)
 {
     /* Stop threads managed by ThreadManager */
     stopAllThreads();

@@ -20,7 +20,7 @@
 #define HIGH 1
 
 int initDevice(char *devicePath, int senseLineType, int senseLinePin);
-int closeDevice();
+int closeDevice(void);
 int readBytes(unsigned char *buffer, int amount);
 int writeBytes(unsigned char *buffer, int amount);
 int setSenseLine(int state);

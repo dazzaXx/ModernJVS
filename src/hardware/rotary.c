@@ -10,7 +10,7 @@
  * 
  * @returns JVS_ROTARY_STATUS_SUCCESS if it inited correctly.
  */
-JVSRotaryStatus initRotary()
+JVSRotaryStatus initRotary(void)
 {
     setupGPIO(18);
     if (!setGPIODirection(18, IN))
@@ -51,7 +51,7 @@ JVSRotaryStatus initRotary()
  * 
  * @returns The value from 0 to 15 on the rotary encoder
  */
-int getRotaryValue()
+int getRotaryValue(void)
 {
     int value = 0;
     value = value | readGPIO(18) << 0;
