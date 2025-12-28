@@ -239,7 +239,8 @@ int setGPIODirection(int pin, int dir)
     return 0;
   }
   
-  int ret = gpiod_line_config_add_line_settings(config, &pin, 1, settings);
+  unsigned int offset = (unsigned int)pin;
+  int ret = gpiod_line_config_add_line_settings(config, &offset, 1, settings);
   if (ret)
   {
     gpiod_line_config_free(config);
@@ -310,7 +311,8 @@ int writeGPIO(int pin, int value)
     return 0;
   }
   
-  int ret = gpiod_line_config_add_line_settings(config, &pin, 1, settings);
+  unsigned int offset = (unsigned int)pin;
+  int ret = gpiod_line_config_add_line_settings(config, &offset, 1, settings);
   if (ret)
   {
     gpiod_line_config_free(config);
@@ -388,7 +390,8 @@ int readGPIO(int pin)
       return -1;
     }
     
-    int ret = gpiod_line_config_add_line_settings(config, &pin, 1, settings);
+    unsigned int offset = (unsigned int)pin;
+    int ret = gpiod_line_config_add_line_settings(config, &offset, 1, settings);
     if (ret)
     {
       gpiod_line_config_free(config);
