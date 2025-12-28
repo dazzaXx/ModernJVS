@@ -54,3 +54,5 @@ dkms.conf
 # Build Files
 bin/
 build/
+_codeql_build_dir/
+_codeql_detected_source_root

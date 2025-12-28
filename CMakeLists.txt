@@ -9,9 +9,20 @@ project(openjvs
 
 find_package(Threads REQUIRED)
 
+# Optionally find libgpiod for modern GPIO character-device API
+find_package(PkgConfig QUIET)
+if(PKG_CONFIG_FOUND)
+	pkg_check_modules(LIBGPIOD QUIET libgpiod)
+endif()
+
 configure_file(src/version.h.in version.h)
 
 include_directories(${THREAD_INLCUDE_DIRS} ${PROJECT_SOURCE_DIR}/src ${PROJECT_BINARY_DIR})
+
+# Add libgpiod includes if found
+if(LIBGPIOD_FOUND)
+	include_directories(${LIBGPIOD_INCLUDE_DIRS})
+endif()
 
 FILE(GLOB_RECURSE Sources src/*.c) #Assume we want to include everything from src/
 
@@ -22,6 +33,12 @@ set_target_properties(${PROJECT_NAME} PROPERTIES
 )
 
 target_compile_options(${PROJECT_NAME} PRIVATE -Wall -Wextra -Wpedantic)
+
+# Enable libgpiod support if found
+if(LIBGPIOD_FOUND)
+	target_compile_definitions(${PROJECT_NAME} PRIVATE USE_LIBGPIOD)
+	target_link_libraries(${PROJECT_NAME} ${LIBGPIOD_LIBRARIES})
+endif()
 
 target_link_libraries(${PROJECT_NAME} ${CMAKE_THREAD_LIBS_INIT} m)
 
