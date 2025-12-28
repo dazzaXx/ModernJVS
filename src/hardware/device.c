@@ -283,13 +283,22 @@ int writeGPIO(int pin, int value)
   if (!chip)
     return 0;
   
-  // Release existing request if we're changing pins
-  if (line_request && current_pin != pin)
+  // Release existing request if we're changing pins or direction
+  if (line_request && (current_pin != pin || current_direction != OUT))
   {
     gpiod_line_request_release(line_request);
     line_request = NULL;
     current_pin = -1;
     current_direction = -1;
+  }
+  
+  // If we already have an output request for this pin, just set the value
+  if (line_request && current_pin == pin && current_direction == OUT)
+  {
+    enum gpiod_line_value gpio_value = (value == LOW) ? GPIOD_LINE_VALUE_INACTIVE : GPIOD_LINE_VALUE_ACTIVE;
+    int ret = gpiod_line_request_set_value(line_request, pin, gpio_value);
+    gpiod_chip_close(chip);
+    return (ret == 0) ? 1 : 0;
   }
   
   struct gpiod_line_settings *settings = gpiod_line_settings_new();
@@ -624,7 +633,7 @@ int setSenseLine(int state)
     }
     else
     {
-      if (!setGPIODirection(localSenseLinePin, OUT) || !writeGPIO(localSenseLinePin, 0))
+      if (!writeGPIO(localSenseLinePin, LOW))
       {
         debug(1, "Warning: Failed to sink sense line %d\n", localSenseLinePin);
         return 0;
