@@ -344,6 +344,12 @@ static void *deviceThread(void *_args)
 static void startThread(EVInputs *inputs, char *devicePath, int wiiMode, int player, JVSIO *jvsIO)
 {
     MappingThreadArguments *args = malloc(sizeof(MappingThreadArguments));
+    if (args == NULL)
+    {
+        debug(0, "Error: Failed to malloc mapping thread arguments\n");
+        return;
+    }
+    
     strcpy(args->devicePath, devicePath);
     memcpy(&args->inputs, inputs, sizeof(EVInputs));
     args->player = player;
@@ -351,11 +357,17 @@ static void startThread(EVInputs *inputs, char *devicePath, int wiiMode, int pla
 
     if (wiiMode)
     {
-        createThread(wiiDeviceThread, args);
+        if (createThread(wiiDeviceThread, args) != THREAD_STATUS_SUCCESS)
+        {
+            free(args);
+        }
     }
     else
     {
-        createThread(deviceThread, args);
+        if (createThread(deviceThread, args) != THREAD_STATUS_SUCCESS)
+        {
+            free(args);
+        }
     }
 }
 

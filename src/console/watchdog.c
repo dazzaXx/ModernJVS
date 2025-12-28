@@ -81,11 +81,18 @@ static void *watchdogThread(void *_args)
 WatchdogStatus initWatchdog(volatile int *running, JVSRotaryStatus rotaryStatus)
 {
     WatchdogThreadArguments *args = malloc(sizeof(WatchdogThreadArguments));
+    if (args == NULL)
+    {
+        debug(0, "Error: Failed to malloc watchdog arguments\n");
+        return WATCHDOG_STATUS_ERROR;
+    }
+    
     args->running = running;
     args->rotaryStatus = rotaryStatus;
 
     if (THREAD_STATUS_SUCCESS != createThread(watchdogThread, args))
     {
+        free(args);
         return WATCHDOG_STATUS_ERROR;
     }
 
