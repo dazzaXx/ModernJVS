@@ -42,7 +42,7 @@ typedef struct
     int player;
 } MappingThreadArguments;
 
-void *wiiDeviceThread(void *_args)
+static void *wiiDeviceThread(void *_args)
 {
     MappingThreadArguments *args = (MappingThreadArguments *)_args;
 
@@ -160,7 +160,7 @@ void *wiiDeviceThread(void *_args)
     return 0;
 }
 
-void *deviceThread(void *_args)
+static void *deviceThread(void *_args)
 {
     MappingThreadArguments *args = (MappingThreadArguments *)_args;
 
@@ -341,7 +341,7 @@ void *deviceThread(void *_args)
 
     return 0;
 }
-void startThread(EVInputs *inputs, char *devicePath, int wiiMode, int player, JVSIO *jvsIO)
+static void startThread(EVInputs *inputs, char *devicePath, int wiiMode, int player, JVSIO *jvsIO)
 {
     MappingThreadArguments *args = malloc(sizeof(MappingThreadArguments));
     strcpy(args->devicePath, devicePath);
@@ -405,7 +405,7 @@ static const char *stringFromControllerInput(ControllerInput controllerInput)
     return NULL;
 }
 
-int processMappings(InputMappings *inputMappings, OutputMappings *outputMappings, EVInputs *evInputs, ControllerPlayer player)
+static int processMappings(InputMappings *inputMappings, OutputMappings *outputMappings, EVInputs *evInputs, ControllerPlayer player)
 {
     for (int i = 0; i < inputMappings->length; i++)
     {
@@ -491,12 +491,12 @@ int processMappings(InputMappings *inputMappings, OutputMappings *outputMappings
     return 1;
 }
 
-int isEventDevice(const struct dirent *dir)
+static int isEventDevice(const struct dirent *dir)
 {
     return strncmp("event", dir->d_name, 5) == 0;
 }
 
-int getNumberOfDevices()
+int getNumberOfDevices(void)
 {
     struct dirent **namelist;
     return scandir(DEV_INPUT_EVENT, &namelist, isEventDevice, NULL);

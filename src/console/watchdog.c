@@ -20,7 +20,7 @@ typedef struct
 
 } WatchdogThreadArguments;
 
-void *watchdogThread(void *_args)
+static void *watchdogThread(void *_args)
 {
     int error = 0;
     WatchdogThreadArguments *args = (WatchdogThreadArguments *)_args;

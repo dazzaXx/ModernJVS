@@ -77,7 +77,7 @@ int initDevice(char *devicePath, int senseLineType, int senseLinePin)
   return 1;
 }
 
-int closeDevice()
+int closeDevice(void)
 {
   tcflush(serialIO, TCIOFLUSH);
   

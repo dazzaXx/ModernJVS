@@ -111,7 +111,7 @@ typedef enum
 
 int initJVS(JVSIO *jvsIO);
 
-int disconnectJVS();
+int disconnectJVS(void);
 
 JVSStatus processPacket(JVSIO *jvsIO);
 

@@ -44,7 +44,7 @@ int initJVS(JVSIO *jvsIO)
  *
  * @returns 1 if the device disconnected successfully, 0 otherwise.
  */
-int disconnectJVS()
+int disconnectJVS(void)
 {
 	return closeDevice();
 }
@@ -61,7 +61,7 @@ int disconnectJVS()
  * @param arg1 The second argument of the capability
  * @param arg2 The final argument of the capability
  */
-void writeFeature(JVSPacket *outputPacket, char capability, char arg0, char arg1, char arg2)
+static void writeFeature(JVSPacket *outputPacket, char capability, char arg0, char arg1, char arg2)
 {
 	outputPacket->data[outputPacket->length] = capability;
 	outputPacket->data[outputPacket->length + 1] = arg0;
@@ -79,7 +79,7 @@ void writeFeature(JVSPacket *outputPacket, char capability, char arg0, char arg1
  * @param outputPacket The packet to write to.
  * @param capabilities The capabilities object to read from
  */
-void writeFeatures(JVSPacket *outputPacket, JVSCapabilities *capabilities)
+static void writeFeatures(JVSPacket *outputPacket, JVSCapabilities *capabilities)
 {
 	outputPacket->data[outputPacket->length] = REPORT_SUCCESS;
 	outputPacket->length += 1;

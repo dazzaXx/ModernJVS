@@ -2419,6 +2419,6 @@ int evDevFromString(char *evDevString);
 JVSInputStatus getInputs(DeviceList *deviceList);
 ControllerInput controllerInputFromString(char *controllerInputString);
 ControllerPlayer controllerPlayerFromString(char *controllerPlayerString);
-int getNumberOfDevices();
+int getNumberOfDevices(void);
 
 #endif // INPUT_H_
