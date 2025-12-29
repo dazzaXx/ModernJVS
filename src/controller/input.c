@@ -201,6 +201,17 @@ static void *wiiDeviceThread(void *_args)
  */
 static void applyDeadzone(double x, double y, double deadzone, double *outX, double *outY)
 {
+    /* Clamp deadzone to valid range to prevent division by zero */
+    if (deadzone >= 1.0)
+    {
+        *outX = 0.5;
+        *outY = 0.5;
+        return;
+    }
+    
+    if (deadzone < 0.0)
+        deadzone = 0.0;
+    
     /* Convert from 0.0-1.0 range to -1.0 to 1.0 range (center at 0) */
     double dx = (x - 0.5) * 2.0;
     double dy = (y - 0.5) * 2.0;
@@ -391,6 +402,8 @@ static void *deviceThread(void *_args)
                     int isLeftStick = (event.code == ABS_X || event.code == ABS_Y);
                     int isRightStick = (event.code == ABS_RX || event.code == ABS_RY || event.code == ABS_Z || event.code == ABS_RZ);
                     
+                    double finalValue = scaled;  /* Default to unprocessed value */
+                    
                     if (isLeftStick && args->deadzoneLeft > 0.0)
                     {
                         /* Update the appropriate axis value */
@@ -405,9 +418,15 @@ static void *deviceThread(void *_args)
                         
                         /* Set the processed value for the axis that just changed */
                         if (event.code == ABS_X)
+                        {
+                            finalValue = processedX;
                             setAnalogue(args->jvsIO, args->inputs.abs[event.code].output, args->inputs.abs[event.code].reverse ? 1 - processedX : processedX);
+                        }
                         else if (event.code == ABS_Y)
+                        {
+                            finalValue = processedY;
                             setAnalogue(args->jvsIO, args->inputs.abs[event.code].output, args->inputs.abs[event.code].reverse ? 1 - processedY : processedY);
+                        }
                     }
                     else if (isRightStick && args->deadzoneRight > 0.0)
                     {
@@ -423,9 +442,15 @@ static void *deviceThread(void *_args)
                         
                         /* Set the processed value for the axis that just changed */
                         if (event.code == ABS_RX || event.code == ABS_Z)
+                        {
+                            finalValue = processedX;
                             setAnalogue(args->jvsIO, args->inputs.abs[event.code].output, args->inputs.abs[event.code].reverse ? 1 - processedX : processedX);
+                        }
                         else if (event.code == ABS_RY || event.code == ABS_RZ)
+                        {
+                            finalValue = processedY;
                             setAnalogue(args->jvsIO, args->inputs.abs[event.code].output, args->inputs.abs[event.code].reverse ? 1 - processedY : processedY);
+                        }
                     }
                     else
                     {
@@ -433,7 +458,8 @@ static void *deviceThread(void *_args)
                         setAnalogue(args->jvsIO, args->inputs.abs[event.code].output, args->inputs.abs[event.code].reverse ? 1 - scaled : scaled);
                     }
                     
-                    setGun(args->jvsIO, args->inputs.abs[event.code].output, args->inputs.abs[event.code].reverse ? 1 - scaled : scaled);
+                    /* Gun controls - use processed value if deadzone was applied, otherwise use scaled */
+                    setGun(args->jvsIO, args->inputs.abs[event.code].output, args->inputs.abs[event.code].reverse ? 1 - finalValue : finalValue);
                 }
             }
             break;
@@ -894,7 +920,6 @@ JVSInputStatus initInputs(char *outputMappingPath, char *configPath, char *secon
             if (strcmp(deviceList->devices[i].name, AIMTRAK_DEVICE_NAME_REMAP_OUT_SCREEN) != 0 && strcmp(deviceList->devices[i].name, AIMTRAK_DEVICE_NAME_REMAP_JOYSTICK) != 0 && strcmp(deviceList->devices[i].name, WIIMOTE_DEVICE_NAME_IR) != 0)
             {
                 debug(0, "  Player %d:\t\t%s%s\n", playerNumber, deviceName, specialMap);
-                playerNumber++;
                 playerNumber++;
             }
         }
