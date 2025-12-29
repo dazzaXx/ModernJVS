@@ -343,7 +343,7 @@ static void *deviceThread(void *_args)
                     scaled = scaled < 0 ? 0 : scaled;
 
                     /* Apply deadzone only to analog stick inputs (X and Y) for players 1 and 2 */
-                    if (args->analogDeadzone > 0 && 
+                    if (args->analogDeadzone > 0 && args->analogDeadzone < 0.5 &&
                         (args->player == 1 || args->player == 2) &&
                         args->inputs.abs[event.code].type == ANALOGUE &&
                         (args->inputs.abs[event.code].input == CONTROLLER_ANALOGUE_X || 
