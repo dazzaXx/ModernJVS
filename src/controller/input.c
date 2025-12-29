@@ -791,18 +791,54 @@ JVSInputStatus getInputs(DeviceList *deviceList)
 
     deviceList->length = validDeviceIndex;
 
+    /* Sort devices to ensure consistent player slot assignment.
+     * Primary sort: bus type (USB before Bluetooth for predictable ordering)
+     * Secondary sort: physical location (USB port path or Bluetooth MAC)
+     * This ensures USB controllers get player 1, 2, etc., and Bluetooth
+     * controllers get subsequent player slots in a stable order.
+     */
     for (int i = 0; i < deviceList->length - 1; i++)
     {
         for (int j = 0; j < deviceList->length - 1 - i; j++)
         {
             Device tmp;
-            if (strcmp(deviceList->devices[j].physicalLocation, deviceList->devices[j + 1].physicalLocation) > 0)
+            int shouldSwap = 0;
+            
+            /* Compare bus types first - lower bus type numbers come first */
+            if (deviceList->devices[j].bus > deviceList->devices[j + 1].bus)
+            {
+                shouldSwap = 1;
+            }
+            /* If same bus type, sort by physical location */
+            else if (deviceList->devices[j].bus == deviceList->devices[j + 1].bus)
+            {
+                if (strcmp(deviceList->devices[j].physicalLocation, deviceList->devices[j + 1].physicalLocation) > 0)
+                {
+                    shouldSwap = 1;
+                }
+            }
+            
+            if (shouldSwap)
             {
                 tmp = deviceList->devices[j];
                 deviceList->devices[j] = deviceList->devices[j + 1];
                 deviceList->devices[j + 1] = tmp;
             }
         }
+    }
+
+    /* Debug output: show detected devices in order after sorting */
+    debug(1, "Detected %d input device(s) after filtering and sorting:\n", deviceList->length);
+    for (int i = 0; i < deviceList->length; i++)
+    {
+        const char *busType = "Unknown";
+        if (deviceList->devices[i].bus == 0x03) busType = "USB";
+        else if (deviceList->devices[i].bus == 0x05) busType = "Bluetooth";
+        
+        debug(1, "  [%d] %s (%s, %s)\n", i, 
+              deviceList->devices[i].name,
+              busType,
+              deviceList->devices[i].physicalLocation);
     }
 
     return JVS_INPUT_STATUS_SUCCESS;
