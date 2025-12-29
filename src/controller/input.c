@@ -402,7 +402,12 @@ static void *deviceThread(void *_args)
                     scaled = scaled > 1 ? 1 : scaled;
                     scaled = scaled < 0 ? 0 : scaled;
 
-                    /* Determine which stick this axis belongs to and apply deadzone */
+                    /* Determine which stick this axis belongs to and apply deadzone.
+                     * Note: ABS_Z and ABS_RZ are intentionally excluded from right stick detection
+                     * as they typically represent trigger axes (L2/R2), not analog sticks.
+                     * Triggers should not have deadzone applied to maintain pressure sensitivity.
+                     * Controllers with non-standard mappings should use custom device mappings.
+                     */
                     int isLeftStick = (event.code == ABS_X || event.code == ABS_Y);
                     int isRightStick = (event.code == ABS_RX || event.code == ABS_RY);
                     int shouldApplyDeadzone = (args->deviceType == DEVICE_TYPE_JOYSTICK && args->deadzone > 0.0);
@@ -460,7 +465,10 @@ static void *deviceThread(void *_args)
                     }
                     else
                     {
-                        /* No deadzone or not a joystick device - pass through directly */
+                        /* No deadzone or not a joystick device - pass through directly.
+                         * This path also handles trigger axes (ABS_Z/ABS_RZ, ABS_GAS/ABS_BRAKE)
+                         * and other analog inputs that should not have circular deadzone applied.
+                         */
                         setAnalogue(args->jvsIO, args->inputs.abs[event.code].output, args->inputs.abs[event.code].reverse ? 1 - scaled : scaled);
                     }
                     
