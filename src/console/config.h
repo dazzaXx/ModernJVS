@@ -17,10 +17,8 @@
 #define DEFAULT_SENSE_LINE_TYPE 0
 #define DEFAULT_AUTO_CONTROLLER_DETECTION 1
 #define DEFAULT_PLAYER -1
-#define DEFAULT_DEADZONE_P1_LEFT 0.0
-#define DEFAULT_DEADZONE_P1_RIGHT 0.0
-#define DEFAULT_DEADZONE_P2_LEFT 0.0
-#define DEFAULT_DEADZONE_P2_RIGHT 0.0
+#define DEFAULT_DEADZONE_P1 0.0
+#define DEFAULT_DEADZONE_P2 0.0
 
 #define MAX_PATH_LENGTH 1024
 #define MAX_LINE_LENGTH 1024
@@ -35,10 +33,8 @@ typedef struct
     char capabilitiesPath[MAX_PATH_LENGTH];
     char secondCapabilitiesPath[MAX_PATH_LENGTH];
     int autoControllerDetection;
-    double deadzoneP1Left;
-    double deadzoneP1Right;
-    double deadzoneP2Left;
-    double deadzoneP2Right;
+    double deadzoneP1;
+    double deadzoneP2;
 } JVSConfig;
 
 typedef enum

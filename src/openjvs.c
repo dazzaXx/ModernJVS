@@ -101,7 +101,7 @@ int main(int argc, char **argv)
         io.chainedIO = NULL;
 
         debug(1, "Init inputs\n");
-        JVSInputStatus inputStatus = initInputs(config.defaultGamePath, config.capabilitiesPath, config.secondCapabilitiesPath, &io, config.autoControllerDetection, config.deadzoneP1Left, config.deadzoneP1Right, config.deadzoneP2Left, config.deadzoneP2Right);
+        JVSInputStatus inputStatus = initInputs(config.defaultGamePath, config.capabilitiesPath, config.secondCapabilitiesPath, &io, config.autoControllerDetection, config.deadzoneP1, config.deadzoneP2);
 
         // Only report these errors if the status has changed
         // from the last run. Since we restart this thread every 200ms
