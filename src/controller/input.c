@@ -43,8 +43,10 @@ static const char *FILTERED_DEVICE_PATTERNS[] = {
     "headphone",          // Headphone jack detection
     "Headphone",          // Headphone jack detection (capitalized)
     
-    // Sound devices
-    "snd_",               // ALSA sound devices (snd_bcm2835, etc.)
+    // Sound devices (specific ALSA devices)
+    "snd_bcm2835",        // Raspberry Pi audio
+    "snd_hda",            // HD Audio devices
+    "snd_usb",            // USB audio devices
     "pcspkr",             // PC Speaker
     "PC Speaker",         // PC Speaker (capitalized)
     
@@ -54,9 +56,8 @@ static const char *FILTERED_DEVICE_PATTERNS[] = {
     "Sleep Button",       // Sleep buttons
     "Lid Switch",         // Lid switches
     
-    // Video/Camera devices
-    "Video Bus",          // Video4Linux devices
-    "video",              // Generic video devices
+    // Video/Camera devices (specific patterns)
+    "Video Bus",          // Video4Linux bus devices
     
     NULL  // Sentinel value to mark end of array
 };
