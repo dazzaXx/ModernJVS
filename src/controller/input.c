@@ -33,8 +33,9 @@
 #define DEV_INPUT_EVENT "/dev/input"
 #define test_bit(bit, array) (array[bit / 8] & (1 << (bit % 8)))
 
-/* Analog stick center value for deadzone calculations */
+/* Analog stick constants for deadzone calculations */
 #define ANALOG_CENTER_VALUE 0.5
+#define MIN_DIVISION_THRESHOLD 0.0001
 
 // Device name patterns to filter out (non-controller devices)
 // These patterns match device names that should not be treated as game controllers
@@ -361,7 +362,7 @@ static void *deviceThread(void *_args)
                         {
                             scaled = ANALOG_CENTER_VALUE;
                         }
-                        else if (MAX_ANALOG_DEADZONE - args->analogDeadzone > 0.0001)
+                        else if (MAX_ANALOG_DEADZONE - args->analogDeadzone > MIN_DIVISION_THRESHOLD)
                         {
                             /* Scale the remaining range outside the deadzone (with safety check for division) */
                             double sign = (centered > 0) ? 1.0 : -1.0;
