@@ -401,11 +401,12 @@ static void *deviceThread(void *_args)
                     /* Determine which stick this axis belongs to and apply deadzone */
                     int isLeftStick = (event.code == ABS_X || event.code == ABS_Y);
                     int isRightStick = (event.code == ABS_RX || event.code == ABS_RY || event.code == ABS_Z || event.code == ABS_RZ);
+                    int shouldApplyDeadzone = (args->deviceType == DEVICE_TYPE_JOYSTICK && args->deadzone > 0.0);
                     
                     double finalValue = scaled;  /* Default to unprocessed value */
                     
                     /* Only apply deadzone to joystick devices with analog sticks */
-                    if (args->deviceType == DEVICE_TYPE_JOYSTICK && isLeftStick && args->deadzone > 0.0)
+                    if (shouldApplyDeadzone && isLeftStick)
                     {
                         /* Update the appropriate axis value */
                         if (event.code == ABS_X)
@@ -429,7 +430,7 @@ static void *deviceThread(void *_args)
                             setAnalogue(args->jvsIO, args->inputs.abs[event.code].output, args->inputs.abs[event.code].reverse ? 1 - processedY : processedY);
                         }
                     }
-                    else if (args->deviceType == DEVICE_TYPE_JOYSTICK && isRightStick && args->deadzone > 0.0)
+                    else if (shouldApplyDeadzone && isRightStick)
                     {
                         /* Update the appropriate axis value - handle both RX/RY and Z/RZ mappings */
                         if (event.code == ABS_RX || event.code == ABS_Z)
