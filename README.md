@@ -30,7 +30,7 @@ Questions can be asked in the discord channel: https://arcade.community. If it a
 
 ## Installation
 
-Installation is done from the git repository as follows:
+Installation is done from the git repository as follows, using RaspiOS Lite:
 
 ```
 sudo apt install build-essential cmake git file libgpiod-dev
@@ -39,7 +39,14 @@ make
 sudo make install
 ```
 
-This is assuming you are using RaspiOS Lite as the OS, if using dietpi for example, you will also need to install pkg-config.
+If using DietPi:
+
+```
+sudo apt install build-essential cmake git file libgpiod-dev pkg-config
+git clone https://github.com/dazzaXx/OpenJVS-Updated-libgpiod
+make
+sudo make install
+```
 
 On games that require a sense line, the following has to be wired up:
 
