@@ -346,7 +346,7 @@ static void *deviceThread(void *_args)
                     scaled = scaled > 1 ? 1 : scaled;
                     scaled = scaled < 0 ? 0 : scaled;
 
-                    /* Apply deadzone to analog stick inputs (X and Y) for players 1-4 */
+                    /* Apply deadzone to analog stick inputs (X and Y) for players 1-4 (if configured) */
                     if (args->analogDeadzone > 0 && args->analogDeadzone < MAX_ANALOG_DEADZONE &&
                         (args->player >= 1 && args->player <= 4) &&
                         args->inputs.abs[event.code].type == ANALOGUE &&
@@ -741,11 +741,8 @@ JVSInputStatus getInputs(DeviceList *deviceList)
 
 static double getPlayerDeadzone(int player, double p1, double p2, double p3, double p4)
 {
-    if (player == 1) return p1;
-    else if (player == 2) return p2;
-    else if (player == 3) return p3;
-    else if (player == 4) return p4;
-    return 0.0;
+    double deadzones[] = {0.0, p1, p2, p3, p4};
+    return (player >= 1 && player <= 4) ? deadzones[player] : 0.0;
 }
 
 /**
