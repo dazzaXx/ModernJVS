@@ -550,7 +550,19 @@ static int shouldFilterDevice(const char *deviceName)
 int getNumberOfDevices(void)
 {
     struct dirent **namelist;
-    return scandir(DEV_INPUT_EVENT, &namelist, isEventDevice, NULL);
+    int count = scandir(DEV_INPUT_EVENT, &namelist, isEventDevice, NULL);
+    
+    // Free the allocated memory
+    if (count > 0)
+    {
+        for (int i = 0; i < count; i++)
+        {
+            free(namelist[i]);
+        }
+        free(namelist);
+    }
+    
+    return count;
 }
 
 JVSInputStatus getInputs(DeviceList *deviceList)

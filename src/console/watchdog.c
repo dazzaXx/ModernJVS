@@ -22,51 +22,34 @@ typedef struct
 
 static void *watchdogThread(void *_args)
 {
-    int error = 0;
     WatchdogThreadArguments *args = (WatchdogThreadArguments *)_args;
 
-    DeviceList *deviceList = NULL;
-    deviceList = malloc(sizeof(DeviceList));
+    int originalDevicesCount = 0;
+    originalDevicesCount = getNumberOfDevices();
 
-    if (deviceList == NULL)
+    int rotaryValue = -1;
+
+    if (args->rotaryStatus == JVS_ROTARY_STATUS_SUCCESS)
     {
-        debug(0, "Error: Failed to malloc\n");
-        error = -1;
+        rotaryValue = getRotaryValue();
     }
 
-    if (error == 0)
+    while (getThreadsRunning())
     {
-        int originalDevicesCount = 0;
-        originalDevicesCount = getNumberOfDevices();
-
-        int rotaryValue = -1;
-
-        if (args->rotaryStatus == JVS_ROTARY_STATUS_SUCCESS)
+        if ((args->rotaryStatus == JVS_ROTARY_STATUS_SUCCESS) && (rotaryValue != getRotaryValue()))
         {
-            rotaryValue = getRotaryValue();
+            *args->running = 0;
+            break;
         }
 
-        while (getThreadsRunning())
+        // Check if device count has changed or if we can't enumerate devices
+        int currentDeviceCount = getNumberOfDevices();
+        if ((currentDeviceCount == -1) || (currentDeviceCount != originalDevicesCount))
         {
-            if ((args->rotaryStatus == JVS_ROTARY_STATUS_SUCCESS) && (rotaryValue != getRotaryValue()))
-            {
-                *args->running = 0;
-                break;
-            }
-
-            if ((getInputs(deviceList) == 0) || (deviceList->length != originalDevicesCount))
-            {
-                *args->running = 0;
-                break;
-            }
-            sleep(TIME_POLL_ROTARY);
+            *args->running = 0;
+            break;
         }
-    }
-
-    if (deviceList != NULL)
-    {
-        free(deviceList);
-        deviceList = NULL;
+        sleep(TIME_POLL_ROTARY);
     }
 
     if (_args != NULL)
