@@ -6,7 +6,7 @@
 DEFAULT_GAME generic-driving
 
 # Setup which IO to emulate by default
-EMULATE sega-type-3
+EMULATE namco-FCA1
 
 # Setup the sense line
 # SENSE_LINE_TYPE 0 - USB to RS485 with no sense line
@@ -18,7 +18,7 @@ SENSE_LINE_PIN 12
 # Setup the debug mode for outputting debug information
 # DEBUG_MODE 1 - This will show the JVS outputs
 # DEBUG_MODE 2 - This will show the raw packet outputs
-DEBUG_MODE 0
+DEBUG_MODE 2
 
 # Setup the device path
 DEVICE_PATH /dev/ttyUSB0
