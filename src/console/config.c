@@ -22,6 +22,16 @@ static char *getNextToken(char *buffer, char *separator, char **saveptr)
     return token;
 }
 
+static double clampDeadzone(double deadzone)
+{
+    /* Clamp deadzone to valid range [0.0, MAX_ANALOG_DEADZONE) to prevent division by zero */
+    if (deadzone < 0.0)
+        return 0.0;
+    else if (deadzone >= MAX_ANALOG_DEADZONE)
+        return MAX_ANALOG_DEADZONE - DEADZONE_CLAMP_OFFSET;
+    return deadzone;
+}
+
 JVSConfigStatus getDefaultConfig(JVSConfig *config)
 {
     config->senseLineType = DEFAULT_SENSE_LINE_TYPE;
@@ -86,48 +96,16 @@ JVSConfigStatus parseConfig(char *path, JVSConfig *config)
             config->autoControllerDetection = atoi(getNextToken(NULL, " ", &saveptr));
 
         else if (strcmp(command, "ANALOG_DEADZONE_PLAYER_1") == 0)
-        {
-            double deadzone = atof(getNextToken(NULL, " ", &saveptr));
-            /* Clamp deadzone to valid range [0.0, MAX_ANALOG_DEADZONE) to prevent division by zero */
-            if (deadzone < 0.0)
-                deadzone = 0.0;
-            else if (deadzone >= MAX_ANALOG_DEADZONE)
-                deadzone = MAX_ANALOG_DEADZONE - DEADZONE_CLAMP_OFFSET;
-            config->analogDeadzonePlayer1 = deadzone;
-        }
+            config->analogDeadzonePlayer1 = clampDeadzone(atof(getNextToken(NULL, " ", &saveptr)));
 
         else if (strcmp(command, "ANALOG_DEADZONE_PLAYER_2") == 0)
-        {
-            double deadzone = atof(getNextToken(NULL, " ", &saveptr));
-            /* Clamp deadzone to valid range [0.0, MAX_ANALOG_DEADZONE) to prevent division by zero */
-            if (deadzone < 0.0)
-                deadzone = 0.0;
-            else if (deadzone >= MAX_ANALOG_DEADZONE)
-                deadzone = MAX_ANALOG_DEADZONE - DEADZONE_CLAMP_OFFSET;
-            config->analogDeadzonePlayer2 = deadzone;
-        }
+            config->analogDeadzonePlayer2 = clampDeadzone(atof(getNextToken(NULL, " ", &saveptr)));
 
         else if (strcmp(command, "ANALOG_DEADZONE_PLAYER_3") == 0)
-        {
-            double deadzone = atof(getNextToken(NULL, " ", &saveptr));
-            /* Clamp deadzone to valid range [0.0, MAX_ANALOG_DEADZONE) to prevent division by zero */
-            if (deadzone < 0.0)
-                deadzone = 0.0;
-            else if (deadzone >= MAX_ANALOG_DEADZONE)
-                deadzone = MAX_ANALOG_DEADZONE - DEADZONE_CLAMP_OFFSET;
-            config->analogDeadzonePlayer3 = deadzone;
-        }
+            config->analogDeadzonePlayer3 = clampDeadzone(atof(getNextToken(NULL, " ", &saveptr)));
 
         else if (strcmp(command, "ANALOG_DEADZONE_PLAYER_4") == 0)
-        {
-            double deadzone = atof(getNextToken(NULL, " ", &saveptr));
-            /* Clamp deadzone to valid range [0.0, MAX_ANALOG_DEADZONE) to prevent division by zero */
-            if (deadzone < 0.0)
-                deadzone = 0.0;
-            else if (deadzone >= MAX_ANALOG_DEADZONE)
-                deadzone = MAX_ANALOG_DEADZONE - DEADZONE_CLAMP_OFFSET;
-            config->analogDeadzonePlayer4 = deadzone;
-        }
+            config->analogDeadzonePlayer4 = clampDeadzone(atof(getNextToken(NULL, " ", &saveptr)));
 
         else
             printf("Error: Unknown configuration command %s\n", command);

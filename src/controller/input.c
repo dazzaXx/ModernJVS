@@ -739,6 +739,15 @@ JVSInputStatus getInputs(DeviceList *deviceList)
     return JVS_INPUT_STATUS_SUCCESS;
 }
 
+static double getPlayerDeadzone(int player, double p1, double p2, double p3, double p4)
+{
+    if (player == 1) return p1;
+    else if (player == 2) return p2;
+    else if (player == 3) return p3;
+    else if (player == 4) return p4;
+    return 0.0;
+}
+
 /**
  * Initialise all of the input devices and start the threads
  * 
@@ -840,23 +849,13 @@ JVSInputStatus initInputs(char *outputMappingPath, char *configPath, char *secon
 
         if (inputMappings.player != -1)
         {
-            double playerDeadzone = 0.0;
-            if (inputMappings.player == 1) playerDeadzone = analogDeadzoneP1;
-            else if (inputMappings.player == 2) playerDeadzone = analogDeadzoneP2;
-            else if (inputMappings.player == 3) playerDeadzone = analogDeadzoneP3;
-            else if (inputMappings.player == 4) playerDeadzone = analogDeadzoneP4;
-            
+            double playerDeadzone = getPlayerDeadzone(inputMappings.player, analogDeadzoneP1, analogDeadzoneP2, analogDeadzoneP3, analogDeadzoneP4);
             startThread(&evInputs, device->path, strcmp(device->name, WIIMOTE_DEVICE_NAME_IR) == 0, inputMappings.player, jvsIO, playerDeadzone);
             debug(0, "  Player %d (Fixed via config):\t\t%s%s\n", inputMappings.player, deviceList->devices[i].name, specialMap);
         }
         else
         {
-            double playerDeadzone = 0.0;
-            if (playerNumber == 1) playerDeadzone = analogDeadzoneP1;
-            else if (playerNumber == 2) playerDeadzone = analogDeadzoneP2;
-            else if (playerNumber == 3) playerDeadzone = analogDeadzoneP3;
-            else if (playerNumber == 4) playerDeadzone = analogDeadzoneP4;
-            
+            double playerDeadzone = getPlayerDeadzone(playerNumber, analogDeadzoneP1, analogDeadzoneP2, analogDeadzoneP3, analogDeadzoneP4);
             startThread(&evInputs, device->path, strcmp(device->name, WIIMOTE_DEVICE_NAME_IR) == 0, playerNumber, jvsIO, playerDeadzone);
             if (strcmp(deviceList->devices[i].name, AIMTRAK_DEVICE_NAME_REMAP_OUT_SCREEN) != 0 && strcmp(deviceList->devices[i].name, AIMTRAK_DEVICE_NAME_REMAP_JOYSTICK) != 0 && strcmp(deviceList->devices[i].name, WIIMOTE_DEVICE_NAME_IR) != 0)
             {
