@@ -33,10 +33,6 @@
 #define DEV_INPUT_EVENT "/dev/input"
 #define test_bit(bit, array) (array[bit / 8] & (1 << (bit % 8)))
 
-/* Bus type constants from linux/input.h for device sorting */
-#define BUS_TYPE_USB 0x03
-#define BUS_TYPE_BLUETOOTH 0x05
-
 // Device name patterns to filter out (non-controller devices)
 // These patterns match device names that should not be treated as game controllers
 static const char *FILTERED_DEVICE_PATTERNS[] = {
@@ -402,13 +398,7 @@ static void *deviceThread(void *_args)
                     scaled = scaled > 1 ? 1 : scaled;
                     scaled = scaled < 0 ? 0 : scaled;
 
-                    /* Determine which stick this axis belongs to and apply deadzone.
-                     * Only ABS_X/ABS_Y (left stick) and ABS_RX/ABS_RY (right stick) get deadzone.
-                     * ABS_Z and ABS_RZ are excluded as they are commonly used for triggers
-                     * (L2/R2 on PlayStation controllers, LT/RT on some Xbox controllers),
-                     * and should maintain full pressure sensitivity without deadzone.
-                     * Controllers with non-standard mappings should use custom device mappings.
-                     */
+                    /* Determine which stick this axis belongs to and apply deadzone */
                     int isLeftStick = (event.code == ABS_X || event.code == ABS_Y);
                     int isRightStick = (event.code == ABS_RX || event.code == ABS_RY || event.code == ABS_Z || event.code == ABS_RZ);
                     int shouldApplyDeadzone = (args->deviceType == DEVICE_TYPE_JOYSTICK && args->deadzone > 0.0);
@@ -466,11 +456,7 @@ static void *deviceThread(void *_args)
                     }
                     else
                     {
-                        /* No deadzone or not a joystick device - pass through directly.
-                         * This path handles all other analog inputs including trigger axes
-                         * (ABS_Z, ABS_RZ, ABS_THROTTLE, ABS_BRAKE, etc.) that should not
-                         * have circular deadzone applied.
-                         */
+                        /* No deadzone or not a joystick device - pass through directly */
                         setAnalogue(args->jvsIO, args->inputs.abs[event.code].output, args->inputs.abs[event.code].reverse ? 1 - scaled : scaled);
                     }
                     
@@ -805,58 +791,17 @@ JVSInputStatus getInputs(DeviceList *deviceList)
 
     deviceList->length = validDeviceIndex;
 
-    /* Sort devices to ensure consistent player slot assignment.
-     * Primary sort: bus type (USB before Bluetooth for predictable ordering)
-     * Secondary sort: physical location (USB port path or Bluetooth MAC)
-     * This ensures USB controllers get player 1, 2, etc., and Bluetooth
-     * controllers get subsequent player slots in a stable order.
-     */
     for (int i = 0; i < deviceList->length - 1; i++)
     {
         for (int j = 0; j < deviceList->length - 1 - i; j++)
         {
             Device tmp;
-            int shouldSwap = 0;
-            
-            /* Compare bus types first - lower bus type numbers come first */
-            if (deviceList->devices[j].bus > deviceList->devices[j + 1].bus)
-            {
-                shouldSwap = 1;
-            }
-            /* If same bus type, sort by physical location */
-            else if (deviceList->devices[j].bus == deviceList->devices[j + 1].bus)
-            {
-                if (strcmp(deviceList->devices[j].physicalLocation, deviceList->devices[j + 1].physicalLocation) > 0)
-                {
-                    shouldSwap = 1;
-                }
-            }
-            
-            if (shouldSwap)
+            if (strcmp(deviceList->devices[j].physicalLocation, deviceList->devices[j + 1].physicalLocation) > 0)
             {
                 tmp = deviceList->devices[j];
                 deviceList->devices[j] = deviceList->devices[j + 1];
                 deviceList->devices[j + 1] = tmp;
             }
-        }
-    }
-
-    /* Debug output: show detected devices in order after sorting */
-    if (deviceList->length > 0)
-    {
-        debug(1, "Detected %d input device%s after filtering and sorting:\n", 
-              deviceList->length, 
-              deviceList->length == 1 ? "" : "s");
-        for (int i = 0; i < deviceList->length; i++)
-        {
-            const char *busType = "Unknown";
-            if (deviceList->devices[i].bus == BUS_TYPE_USB) busType = "USB";
-            else if (deviceList->devices[i].bus == BUS_TYPE_BLUETOOTH) busType = "Bluetooth";
-            
-            debug(1, "  [%d] %s (%s, %s)\n", i, 
-                  deviceList->devices[i].name,
-                  busType,
-                  deviceList->devices[i].physicalLocation);
         }
     }
 
