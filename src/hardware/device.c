@@ -176,7 +176,7 @@ int setSerialAttributes(int fd, int myBaud)
   {
     // Device doesn't support TIOCGSERIAL (e.g., Bluetooth serial port)
     // This is normal for some device types, continue without setting the flag
-    debug(1, "Info: Serial device does not support TIOCGSERIAL ioctl (normal for Bluetooth devices)\n");
+    debug(1, "Serial device does not support TIOCGSERIAL ioctl (normal for Bluetooth devices)\n");
   }
 
   tcflush(serialIO, TCIOFLUSH);
