@@ -28,3 +28,12 @@ DEVICE_PATH /dev/ttyUSB0
 # that haven't already been mapped.
 AUTO_CONTROLLER_DETECTION 1
 
+# Analog Stick Deadzones (0.0 to 1.0)
+# Deadzone values define the circular radius within which stick movement is ignored
+# Higher values = larger deadzone (less sensitive near center)
+# Recommended values: 0.0 (no deadzone) to 0.2 (moderate deadzone)
+DEADZONE_P1_LEFT 0.1
+DEADZONE_P1_RIGHT 0.1
+DEADZONE_P2_LEFT 0.1
+DEADZONE_P2_RIGHT 0.1
+

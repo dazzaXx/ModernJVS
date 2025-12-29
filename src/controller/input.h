@@ -5,6 +5,9 @@
 
 #include "jvs/io.h"
 
+/* Forward declaration to avoid circular dependency */
+struct JVSConfig;
+
 #define WIIMOTE_DEVICE_NAME "nintendo-wii-remote"
 #define WIIMOTE_DEVICE_NAME_IR "nintendo-wii-remote-ir"
 #define WIIMOTE_DEVICE_NAME_NUNCHUCK "nintendo-wii-remote-nunchuk"
@@ -2414,7 +2417,7 @@ typedef enum
     JVS_INPUT_STATUS_SUCCESS
 } JVSInputStatus;
 
-JVSInputStatus initInputs(char *outputMappingPath, char *configPath, char *secondConfigPath, JVSIO *jvsIO, int autoDetect);
+JVSInputStatus initInputs(char *outputMappingPath, char *configPath, char *secondConfigPath, JVSIO *jvsIO, int autoDetect, double dzP1Left, double dzP1Right, double dzP2Left, double dzP2Right);
 int evDevFromString(char *evDevString);
 JVSInputStatus getInputs(DeviceList *deviceList);
 ControllerInput controllerInputFromString(char *controllerInputString);

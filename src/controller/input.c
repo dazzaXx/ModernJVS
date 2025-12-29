@@ -69,6 +69,8 @@ typedef struct
     char devicePath[MAX_PATH_LENGTH];
     EVInputs inputs;
     int player;
+    double deadzoneLeft;
+    double deadzoneRight;
 } MappingThreadArguments;
 
 static void *wiiDeviceThread(void *_args)
@@ -189,6 +191,44 @@ static void *wiiDeviceThread(void *_args)
     return 0;
 }
 
+/**
+ * Apply circular deadzone to analog stick values
+ * @param x The X axis value (0.0 to 1.0, where 0.5 is center)
+ * @param y The Y axis value (0.0 to 1.0, where 0.5 is center)
+ * @param deadzone The deadzone radius (0.0 to 1.0)
+ * @param outX Pointer to store the processed X value
+ * @param outY Pointer to store the processed Y value
+ */
+static void applyDeadzone(double x, double y, double deadzone, double *outX, double *outY)
+{
+    /* Convert from 0.0-1.0 range to -1.0 to 1.0 range (center at 0) */
+    double dx = (x - 0.5) * 2.0;
+    double dy = (y - 0.5) * 2.0;
+    
+    /* Calculate magnitude */
+    double magnitude = sqrt(dx * dx + dy * dy);
+    
+    /* If within deadzone, set to center */
+    if (magnitude < deadzone)
+    {
+        *outX = 0.5;
+        *outY = 0.5;
+        return;
+    }
+    
+    /* Scale the input to account for deadzone */
+    double scale = (magnitude - deadzone) / (1.0 - deadzone);
+    if (scale > 1.0) scale = 1.0;
+    
+    /* Normalize and apply scale */
+    double nx = (magnitude > 0.0) ? (dx / magnitude) : 0.0;
+    double ny = (magnitude > 0.0) ? (dy / magnitude) : 0.0;
+    
+    /* Convert back to 0.0-1.0 range */
+    *outX = (nx * scale + 1.0) * 0.5;
+    *outY = (ny * scale + 1.0) * 0.5;
+}
+
 static void *deviceThread(void *_args)
 {
     MappingThreadArguments *args = (MappingThreadArguments *)_args;
@@ -227,6 +267,12 @@ static void *deviceThread(void *_args)
 
     fd_set file_descriptor;
     struct timeval tv;
+
+    /* Track current analog stick values for deadzone processing */
+    double leftStickX = 0.5;  /* Center position */
+    double leftStickY = 0.5;
+    double rightStickX = 0.5;
+    double rightStickY = 0.5;
 
     while (getThreadsRunning())
     {
@@ -341,7 +387,52 @@ static void *deviceThread(void *_args)
                     scaled = scaled > 1 ? 1 : scaled;
                     scaled = scaled < 0 ? 0 : scaled;
 
-                    setAnalogue(args->jvsIO, args->inputs.abs[event.code].output, args->inputs.abs[event.code].reverse ? 1 - scaled : scaled);
+                    /* Determine which stick this axis belongs to and apply deadzone */
+                    int isLeftStick = (event.code == ABS_X || event.code == ABS_Y);
+                    int isRightStick = (event.code == ABS_RX || event.code == ABS_RY || event.code == ABS_Z || event.code == ABS_RZ);
+                    
+                    if (isLeftStick && args->deadzoneLeft > 0.0)
+                    {
+                        /* Update the appropriate axis value */
+                        if (event.code == ABS_X)
+                            leftStickX = scaled;
+                        else if (event.code == ABS_Y)
+                            leftStickY = scaled;
+                        
+                        /* Apply deadzone to both axes */
+                        double processedX, processedY;
+                        applyDeadzone(leftStickX, leftStickY, args->deadzoneLeft, &processedX, &processedY);
+                        
+                        /* Set the processed value for the axis that just changed */
+                        if (event.code == ABS_X)
+                            setAnalogue(args->jvsIO, args->inputs.abs[event.code].output, args->inputs.abs[event.code].reverse ? 1 - processedX : processedX);
+                        else if (event.code == ABS_Y)
+                            setAnalogue(args->jvsIO, args->inputs.abs[event.code].output, args->inputs.abs[event.code].reverse ? 1 - processedY : processedY);
+                    }
+                    else if (isRightStick && args->deadzoneRight > 0.0)
+                    {
+                        /* Update the appropriate axis value - handle both RX/RY and Z/RZ mappings */
+                        if (event.code == ABS_RX || event.code == ABS_Z)
+                            rightStickX = scaled;
+                        else if (event.code == ABS_RY || event.code == ABS_RZ)
+                            rightStickY = scaled;
+                        
+                        /* Apply deadzone to both axes */
+                        double processedX, processedY;
+                        applyDeadzone(rightStickX, rightStickY, args->deadzoneRight, &processedX, &processedY);
+                        
+                        /* Set the processed value for the axis that just changed */
+                        if (event.code == ABS_RX || event.code == ABS_Z)
+                            setAnalogue(args->jvsIO, args->inputs.abs[event.code].output, args->inputs.abs[event.code].reverse ? 1 - processedX : processedX);
+                        else if (event.code == ABS_RY || event.code == ABS_RZ)
+                            setAnalogue(args->jvsIO, args->inputs.abs[event.code].output, args->inputs.abs[event.code].reverse ? 1 - processedY : processedY);
+                    }
+                    else
+                    {
+                        /* No deadzone or not a stick axis - pass through directly */
+                        setAnalogue(args->jvsIO, args->inputs.abs[event.code].output, args->inputs.abs[event.code].reverse ? 1 - scaled : scaled);
+                    }
+                    
                     setGun(args->jvsIO, args->inputs.abs[event.code].output, args->inputs.abs[event.code].reverse ? 1 - scaled : scaled);
                 }
             }
@@ -370,7 +461,7 @@ static void *deviceThread(void *_args)
 
     return 0;
 }
-static void startThread(EVInputs *inputs, char *devicePath, int wiiMode, int player, JVSIO *jvsIO)
+static void startThread(EVInputs *inputs, char *devicePath, int wiiMode, int player, JVSIO *jvsIO, double deadzoneLeft, double deadzoneRight)
 {
     MappingThreadArguments *args = malloc(sizeof(MappingThreadArguments));
     if (args == NULL)
@@ -383,6 +474,8 @@ static void startThread(EVInputs *inputs, char *devicePath, int wiiMode, int pla
     memcpy(&args->inputs, inputs, sizeof(EVInputs));
     args->player = player;
     args->jvsIO = jvsIO;
+    args->deadzoneLeft = deadzoneLeft;
+    args->deadzoneRight = deadzoneRight;
 
     if (wiiMode)
     {
@@ -699,7 +792,7 @@ JVSInputStatus getInputs(DeviceList *deviceList)
  * @param autoDetect If we should automatically map controllers without mappings
  * @returns The status of the operation
  **/
-JVSInputStatus initInputs(char *outputMappingPath, char *configPath, char *secondConfigPath, JVSIO *jvsIO, int autoDetect)
+JVSInputStatus initInputs(char *outputMappingPath, char *configPath, char *secondConfigPath, JVSIO *jvsIO, int autoDetect, double dzP1Left, double dzP1Right, double dzP2Left, double dzP2Right)
 {
     OutputMappings outputMappings = {0};
     DeviceList *deviceList = (DeviceList *)malloc(sizeof(DeviceList));
@@ -788,15 +881,20 @@ JVSInputStatus initInputs(char *outputMappingPath, char *configPath, char *secon
 
         if (inputMappings.player != -1)
         {
-            startThread(&evInputs, device->path, strcmp(device->name, WIIMOTE_DEVICE_NAME_IR) == 0, inputMappings.player, jvsIO);
+            double dzLeft = (inputMappings.player == 1) ? dzP1Left : dzP2Left;
+            double dzRight = (inputMappings.player == 1) ? dzP1Right : dzP2Right;
+            startThread(&evInputs, device->path, strcmp(device->name, WIIMOTE_DEVICE_NAME_IR) == 0, inputMappings.player, jvsIO, dzLeft, dzRight);
             debug(0, "  Player %d (Fixed via config):\t\t%s%s\n", inputMappings.player, deviceList->devices[i].name, specialMap);
         }
         else
         {
-            startThread(&evInputs, device->path, strcmp(device->name, WIIMOTE_DEVICE_NAME_IR) == 0, playerNumber, jvsIO);
+            double dzLeft = (playerNumber == 1) ? dzP1Left : dzP2Left;
+            double dzRight = (playerNumber == 1) ? dzP1Right : dzP2Right;
+            startThread(&evInputs, device->path, strcmp(device->name, WIIMOTE_DEVICE_NAME_IR) == 0, playerNumber, jvsIO, dzLeft, dzRight);
             if (strcmp(deviceList->devices[i].name, AIMTRAK_DEVICE_NAME_REMAP_OUT_SCREEN) != 0 && strcmp(deviceList->devices[i].name, AIMTRAK_DEVICE_NAME_REMAP_JOYSTICK) != 0 && strcmp(deviceList->devices[i].name, WIIMOTE_DEVICE_NAME_IR) != 0)
             {
                 debug(0, "  Player %d:\t\t%s%s\n", playerNumber, deviceName, specialMap);
+                playerNumber++;
                 playerNumber++;
             }
         }
