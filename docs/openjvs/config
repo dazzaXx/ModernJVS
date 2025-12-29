@@ -28,3 +28,11 @@ DEVICE_PATH /dev/ttyUSB0
 # that haven't already been mapped.
 AUTO_CONTROLLER_DETECTION 1
 
+# Analog Stick Deadzone
+# Sets the deadzone for analog sticks on joystick controllers (0.0 to 1.0)
+# Values within the deadzone are treated as centered (no input)
+# Typical values: 0.0 (no deadzone), 0.1 (10%), 0.15 (15%), 0.2 (20%)
+# This only applies to analog stick axes (X, Y, Z), not triggers, pedals, or light guns
+# Default: 0.0 (no deadzone)
+ANALOG_DEADZONE 0.0
+

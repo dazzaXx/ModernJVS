@@ -62,6 +62,54 @@ static const char *FILTERED_DEVICE_PATTERNS[] = {
     NULL  // Sentinel value to mark end of array
 };
 
+/**
+ * Apply deadzone to an analog stick value
+ * 
+ * This function applies a circular deadzone to analog stick inputs.
+ * Values within the deadzone are set to center (0.5), and values outside
+ * are scaled to use the full output range.
+ * 
+ * @param value The input value (0.0 to 1.0, where 0.5 is center)
+ * @param deadzone The deadzone threshold (0.0 to 1.0, typically 0.0-0.3)
+ * @param controllerInput The type of controller input (to check if it's a stick axis)
+ * @param deviceType The type of device (only applies to joysticks)
+ * @return The processed value with deadzone applied
+ */
+static double applyAnalogDeadzone(double value, double deadzone, ControllerInput controllerInput, DeviceType deviceType)
+{
+    // Only apply deadzone to joystick devices with analog stick axes
+    if (deviceType != DEVICE_TYPE_JOYSTICK)
+        return value;
+    
+    // Only apply to analog stick axes (X, Y, Z), not triggers/pedals (R, L, T)
+    if (controllerInput != CONTROLLER_ANALOGUE_X && 
+        controllerInput != CONTROLLER_ANALOGUE_Y && 
+        controllerInput != CONTROLLER_ANALOGUE_Z)
+        return value;
+    
+    // If no deadzone configured, return original value
+    if (deadzone <= 0.0)
+        return value;
+    
+    // Convert from 0.0-1.0 range to -1.0-1.0 range (centered at 0)
+    double centered = (value - 0.5) * 2.0;
+    
+    // Calculate distance from center
+    double magnitude = fabs(centered);
+    
+    // If within deadzone, return center position
+    if (magnitude < deadzone)
+        return 0.5;
+    
+    // Scale the value to use the full output range
+    // Map from [deadzone, 1.0] to [0.0, 1.0]
+    double sign = (centered >= 0) ? 1.0 : -1.0;
+    double scaled = sign * ((magnitude - deadzone) / (1.0 - deadzone));
+    
+    // Convert back to 0.0-1.0 range
+    return (scaled / 2.0) + 0.5;
+}
+
 typedef struct
 {
     ThreadSharedData *sharedData_p;
@@ -69,6 +117,8 @@ typedef struct
     char devicePath[MAX_PATH_LENGTH];
     EVInputs inputs;
     int player;
+    double analogDeadzone;
+    DeviceType deviceType;
 } MappingThreadArguments;
 
 static void *wiiDeviceThread(void *_args)
@@ -341,6 +391,9 @@ static void *deviceThread(void *_args)
                     scaled = scaled > 1 ? 1 : scaled;
                     scaled = scaled < 0 ? 0 : scaled;
 
+                    /* Apply deadzone to analog stick inputs from joysticks */
+                    scaled = applyAnalogDeadzone(scaled, args->analogDeadzone, args->inputs.abs[event.code].input, args->deviceType);
+
                     setAnalogue(args->jvsIO, args->inputs.abs[event.code].output, args->inputs.abs[event.code].reverse ? 1 - scaled : scaled);
                     setGun(args->jvsIO, args->inputs.abs[event.code].output, args->inputs.abs[event.code].reverse ? 1 - scaled : scaled);
                 }
@@ -370,7 +423,7 @@ static void *deviceThread(void *_args)
 
     return 0;
 }
-static void startThread(EVInputs *inputs, char *devicePath, int wiiMode, int player, JVSIO *jvsIO)
+static void startThread(EVInputs *inputs, char *devicePath, int wiiMode, int player, JVSIO *jvsIO, double analogDeadzone, DeviceType deviceType)
 {
     MappingThreadArguments *args = malloc(sizeof(MappingThreadArguments));
     if (args == NULL)
@@ -383,6 +436,8 @@ static void startThread(EVInputs *inputs, char *devicePath, int wiiMode, int pla
     memcpy(&args->inputs, inputs, sizeof(EVInputs));
     args->player = player;
     args->jvsIO = jvsIO;
+    args->analogDeadzone = analogDeadzone;
+    args->deviceType = deviceType;
 
     if (wiiMode)
     {
@@ -719,9 +774,10 @@ JVSInputStatus getInputs(DeviceList *deviceList)
  * @param configPath The path to the configuration file
  * @param jvsIO The JVS IO object that we will send inputs to
  * @param autoDetect If we should automatically map controllers without mappings
+ * @param analogDeadzone The deadzone value for analog sticks (0.0 to 1.0)
  * @returns The status of the operation
  **/
-JVSInputStatus initInputs(char *outputMappingPath, char *configPath, char *secondConfigPath, JVSIO *jvsIO, int autoDetect)
+JVSInputStatus initInputs(char *outputMappingPath, char *configPath, char *secondConfigPath, JVSIO *jvsIO, int autoDetect, double analogDeadzone)
 {
     OutputMappings outputMappings = {0};
     DeviceList *deviceList = (DeviceList *)malloc(sizeof(DeviceList));
@@ -810,12 +866,12 @@ JVSInputStatus initInputs(char *outputMappingPath, char *configPath, char *secon
 
         if (inputMappings.player != -1)
         {
-            startThread(&evInputs, device->path, strcmp(device->name, WIIMOTE_DEVICE_NAME_IR) == 0, inputMappings.player, jvsIO);
+            startThread(&evInputs, device->path, strcmp(device->name, WIIMOTE_DEVICE_NAME_IR) == 0, inputMappings.player, jvsIO, analogDeadzone, device->type);
             debug(0, "  Player %d (Fixed via config):\t\t%s%s\n", inputMappings.player, deviceList->devices[i].name, specialMap);
         }
         else
         {
-            startThread(&evInputs, device->path, strcmp(device->name, WIIMOTE_DEVICE_NAME_IR) == 0, playerNumber, jvsIO);
+            startThread(&evInputs, device->path, strcmp(device->name, WIIMOTE_DEVICE_NAME_IR) == 0, playerNumber, jvsIO, analogDeadzone, device->type);
             if (strcmp(deviceList->devices[i].name, AIMTRAK_DEVICE_NAME_REMAP_OUT_SCREEN) != 0 && strcmp(deviceList->devices[i].name, AIMTRAK_DEVICE_NAME_REMAP_JOYSTICK) != 0 && strcmp(deviceList->devices[i].name, WIIMOTE_DEVICE_NAME_IR) != 0)
             {
                 debug(0, "  Player %d:\t\t%s%s\n", playerNumber, deviceName, specialMap);
