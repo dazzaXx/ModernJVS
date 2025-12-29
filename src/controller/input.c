@@ -33,6 +33,10 @@
 #define DEV_INPUT_EVENT "/dev/input"
 #define test_bit(bit, array) (array[bit / 8] & (1 << (bit % 8)))
 
+/* Bus type constants from linux/input.h for device sorting */
+#define BUS_TYPE_USB 0x03
+#define BUS_TYPE_BLUETOOTH 0x05
+
 // Device name patterns to filter out (non-controller devices)
 // These patterns match device names that should not be treated as game controllers
 static const char *FILTERED_DEVICE_PATTERNS[] = {
@@ -828,17 +832,22 @@ JVSInputStatus getInputs(DeviceList *deviceList)
     }
 
     /* Debug output: show detected devices in order after sorting */
-    debug(1, "Detected %d input device(s) after filtering and sorting:\n", deviceList->length);
-    for (int i = 0; i < deviceList->length; i++)
+    if (deviceList->length > 0)
     {
-        const char *busType = "Unknown";
-        if (deviceList->devices[i].bus == 0x03) busType = "USB";
-        else if (deviceList->devices[i].bus == 0x05) busType = "Bluetooth";
-        
-        debug(1, "  [%d] %s (%s, %s)\n", i, 
-              deviceList->devices[i].name,
-              busType,
-              deviceList->devices[i].physicalLocation);
+        debug(1, "Detected %d input device%s after filtering and sorting:\n", 
+              deviceList->length, 
+              deviceList->length == 1 ? "" : "s");
+        for (int i = 0; i < deviceList->length; i++)
+        {
+            const char *busType = "Unknown";
+            if (deviceList->devices[i].bus == BUS_TYPE_USB) busType = "USB";
+            else if (deviceList->devices[i].bus == BUS_TYPE_BLUETOOTH) busType = "Bluetooth";
+            
+            debug(1, "  [%d] %s (%s, %s)\n", i, 
+                  deviceList->devices[i].name,
+                  busType,
+                  deviceList->devices[i].physicalLocation);
+        }
     }
 
     return JVS_INPUT_STATUS_SUCCESS;
