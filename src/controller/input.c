@@ -519,9 +519,9 @@ JVSInputStatus getInputs(DeviceList *deviceList)
     memset(deviceList, 0, sizeof(DeviceList));
     struct dirent **namelist;
 
-    deviceList->length = scandir(DEV_INPUT_EVENT, &namelist, isEventDevice, alphasort);
+    int scannedCount = scandir(DEV_INPUT_EVENT, &namelist, isEventDevice, alphasort);
 
-    if (deviceList->length == 0)
+    if (scannedCount == 0)
         return JVS_INPUT_STATUS_NO_DEVICE_ERROR;
 
     char aimtrakRemap[3][32] = {
@@ -530,58 +530,74 @@ JVSInputStatus getInputs(DeviceList *deviceList)
         AIMTRAK_DEVICE_NAME_REMAP_IN_SCREEN};
     int aimtrakCount = 0;
 
-    for (int i = 0; i < deviceList->length; i++)
+    int validDeviceIndex = 0;
+    for (int i = 0; i < scannedCount; i++)
     {
-        snprintf(deviceList->devices[i].path, sizeof(deviceList->devices[i].path), "%s/%s", DEV_INPUT_EVENT, namelist[i]->d_name);
+        char tempPath[MAX_PATH];
+        snprintf(tempPath, sizeof(tempPath), "%s/%s", DEV_INPUT_EVENT, namelist[i]->d_name);
         free(namelist[i]);
 
-        strcpy(deviceList->devices[i].name, "unknown");
-        strcpy(deviceList->devices[i].fullName, "Unknown");
-        deviceList->devices[i].type = DEVICE_TYPE_UNKNOWN;
-
-        int device = open(deviceList->devices[i].path, O_RDONLY);
+        int device = open(tempPath, O_RDONLY);
         if (device < 0)
             continue;
+
+        char tempFullName[MAX_PATH] = "Unknown";
+        
+        // Get the name string first to check if we should filter this device
+        ioctl(device, EVIOCGNAME(sizeof(tempFullName)), tempFullName);
+
+        // Filter out non-controller devices (HDMI, sound cards, etc.)
+        // Check for known device name patterns that are not input controllers
+        if (strstr(tempFullName, "vc4-hdmi") != NULL ||
+            strstr(tempFullName, "HDMI") != NULL)
+        {
+            close(device);
+            continue;
+        }
+
+        // This is a valid device, so add it to our list
+        Device *dev = &deviceList->devices[validDeviceIndex];
+        strcpy(dev->path, tempPath);
+        strcpy(dev->fullName, tempFullName);
+        strcpy(dev->name, "unknown");
+        dev->type = DEVICE_TYPE_UNKNOWN;
 
         // Get product vendor and ID information
         struct input_id device_info;
         ioctl(device, EVIOCGID, &device_info);
-        deviceList->devices[i].vendorID = device_info.vendor;
-        deviceList->devices[i].productID = device_info.product;
-        deviceList->devices[i].version = device_info.version;
-        deviceList->devices[i].bus = device_info.bustype;
-
-        // Get the name string
-        ioctl(device, EVIOCGNAME(sizeof(deviceList->devices[i].fullName)), deviceList->devices[i].fullName);
+        dev->vendorID = device_info.vendor;
+        dev->productID = device_info.product;
+        dev->version = device_info.version;
+        dev->bus = device_info.bustype;
 
         // Get the physical location string
-        ioctl(device, EVIOCGPHYS(sizeof(deviceList->devices[i].physicalLocation)), deviceList->devices[i].physicalLocation);
-        for (size_t j = 0; j < strlen(deviceList->devices[i].physicalLocation); j++)
+        ioctl(device, EVIOCGPHYS(sizeof(dev->physicalLocation)), dev->physicalLocation);
+        for (size_t j = 0; j < strlen(dev->physicalLocation); j++)
         {
-            if (deviceList->devices[i].physicalLocation[j] == '/')
+            if (dev->physicalLocation[j] == '/')
             {
-                deviceList->devices[i].physicalLocation[j] = 0;
+                dev->physicalLocation[j] = 0;
                 break;
             }
         }
 
         // Make it lower case and replace letters
-        for (size_t j = 0; j < strlen(deviceList->devices[i].fullName); j++)
+        for (size_t j = 0; j < strlen(dev->fullName); j++)
         {
-            deviceList->devices[i].name[j] = tolower(deviceList->devices[i].fullName[j]);
-            if (deviceList->devices[i].name[j] == ' ' ||
-                deviceList->devices[i].name[j] == '/' ||
-                deviceList->devices[i].name[j] == '(' ||
-                deviceList->devices[i].name[j] == ')')
+            dev->name[j] = tolower(dev->fullName[j]);
+            if (dev->name[j] == ' ' ||
+                dev->name[j] == '/' ||
+                dev->name[j] == '(' ||
+                dev->name[j] == ')')
             {
-                deviceList->devices[i].name[j] = '-';
+                dev->name[j] = '-';
             }
         }
 
         // Assign the correct names for the aimtracks
-        if (strcmp(deviceList->devices[i].name, AIMTRAK_DEVICE_NAME) == 0)
+        if (strcmp(dev->name, AIMTRAK_DEVICE_NAME) == 0)
         {
-            strcpy(deviceList->devices[i].name, aimtrakRemap[aimtrakCount++]);
+            strcpy(dev->name, aimtrakRemap[aimtrakCount++]);
             if (aimtrakCount == 3)
                 aimtrakCount = 0;
         }
@@ -593,12 +609,12 @@ JVSInputStatus getInputs(DeviceList *deviceList)
 
         // If it does repeating events and key events, it's probably a keyboard.
         if (!test_bit_diff(EV_ABS, bit[0]) && test_bit_diff(EV_REP, bit[0]) && test_bit_diff(EV_KEY, bit[0]))
-            deviceList->devices[i].type = DEVICE_TYPE_KEYBOARD;
+            dev->type = DEVICE_TYPE_KEYBOARD;
 
         // Relative events means its a mouse!
         if (test_bit_diff(EV_REL, bit[0]))
         {
-            deviceList->devices[i].type = DEVICE_TYPE_MOUSE;
+            dev->type = DEVICE_TYPE_MOUSE;
         }
 
         // If it has a start button then it's probably a joystick!
@@ -606,13 +622,16 @@ JVSInputStatus getInputs(DeviceList *deviceList)
         {
             ioctl(device, EVIOCGBIT(EV_KEY, KEY_MAX), bit[EV_KEY]);
             if (test_bit_diff(BTN_START, bit[EV_KEY]))
-                deviceList->devices[i].type = DEVICE_TYPE_JOYSTICK;
+                dev->type = DEVICE_TYPE_JOYSTICK;
         }
 
         close(device);
+        validDeviceIndex++;
     }
 
     free(namelist);
+
+    deviceList->length = validDeviceIndex;
 
     for (int i = 0; i < deviceList->length - 1; i++)
     {
