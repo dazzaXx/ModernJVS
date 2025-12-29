@@ -39,6 +39,8 @@ make
 sudo make install
 ```
 
+This is assuming you are using RaspiOS Lite as the OS, if using dietpi for example, you will also need to install pkg-config.
+
 On games that require a sense line, the following has to be wired up:
 
 ```
