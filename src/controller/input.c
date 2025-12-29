@@ -400,7 +400,7 @@ static void *deviceThread(void *_args)
 
                     /* Determine which stick this axis belongs to and apply deadzone */
                     int isLeftStick = (event.code == ABS_X || event.code == ABS_Y);
-                    int isRightStick = (event.code == ABS_RX || event.code == ABS_RY || event.code == ABS_Z || event.code == ABS_RZ);
+                    int isRightStick = (event.code == ABS_RX || event.code == ABS_RY);
                     int shouldApplyDeadzone = (args->deviceType == DEVICE_TYPE_JOYSTICK && args->deadzone > 0.0);
                     
                     double finalValue = scaled;  /* Default to unprocessed value */
@@ -432,10 +432,10 @@ static void *deviceThread(void *_args)
                     }
                     else if (shouldApplyDeadzone && isRightStick)
                     {
-                        /* Update the appropriate axis value - handle both RX/RY and Z/RZ mappings */
-                        if (event.code == ABS_RX || event.code == ABS_Z)
+                        /* Update the appropriate axis value */
+                        if (event.code == ABS_RX)
                             rightStickX = scaled;
-                        else if (event.code == ABS_RY || event.code == ABS_RZ)
+                        else if (event.code == ABS_RY)
                             rightStickY = scaled;
                         
                         /* Apply deadzone to both axes */
@@ -443,12 +443,12 @@ static void *deviceThread(void *_args)
                         applyDeadzone(rightStickX, rightStickY, args->deadzone, &processedX, &processedY);
                         
                         /* Set the processed value for the axis that just changed */
-                        if (event.code == ABS_RX || event.code == ABS_Z)
+                        if (event.code == ABS_RX)
                         {
                             finalValue = processedX;
                             setAnalogue(args->jvsIO, args->inputs.abs[event.code].output, args->inputs.abs[event.code].reverse ? 1 - processedX : processedX);
                         }
-                        else if (event.code == ABS_RY || event.code == ABS_RZ)
+                        else if (event.code == ABS_RY)
                         {
                             finalValue = processedY;
                             setAnalogue(args->jvsIO, args->inputs.abs[event.code].output, args->inputs.abs[event.code].reverse ? 1 - processedY : processedY);
