@@ -34,7 +34,10 @@ typedef struct
     char capabilitiesPath[MAX_PATH_LENGTH];
     char secondCapabilitiesPath[MAX_PATH_LENGTH];
     int autoControllerDetection;
-    double analogDeadzone;
+    double analogDeadzonePlayer1;
+    double analogDeadzonePlayer2;
+    double analogDeadzonePlayer3;
+    double analogDeadzonePlayer4;
 } JVSConfig;
 
 typedef enum
