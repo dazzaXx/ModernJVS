@@ -159,10 +159,25 @@ int setSerialAttributes(int fd, int myBaud)
 
   struct serial_struct serial_settings;
 
-  ioctl(fd, TIOCGSERIAL, &serial_settings);
-
-  serial_settings.flags |= ASYNC_LOW_LATENCY;
-  ioctl(fd, TIOCSSERIAL, &serial_settings);
+  // Try to set ASYNC_LOW_LATENCY flag if supported by the device
+  // This ioctl is not supported by all serial devices (e.g., Bluetooth serial ports)
+  // so we check for errors and continue gracefully if it fails
+  if (ioctl(fd, TIOCGSERIAL, &serial_settings) == 0)
+  {
+    serial_settings.flags |= ASYNC_LOW_LATENCY;
+    if (ioctl(fd, TIOCSSERIAL, &serial_settings) != 0)
+    {
+      // Failed to set serial settings, but continue anyway
+      // This is not critical for operation
+      debug(1, "Warning: Could not set ASYNC_LOW_LATENCY flag (not supported by device)\n");
+    }
+  }
+  else
+  {
+    // Device doesn't support TIOCGSERIAL (e.g., Bluetooth serial port)
+    // This is normal for some device types, continue without setting the flag
+    debug(1, "Info: Serial device does not support TIOCGSERIAL ioctl (normal for Bluetooth devices)\n");
+  }
 
   tcflush(serialIO, TCIOFLUSH);
   usleep(100 * 1000); // Required to make flush work, for some reason
