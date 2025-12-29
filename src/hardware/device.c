@@ -169,7 +169,7 @@ int setSerialAttributes(int fd, int myBaud)
     {
       // Failed to set serial settings, but continue anyway
       // This is not critical for operation
-      debug(1, "Warning: Could not set ASYNC_LOW_LATENCY flag (not supported by device)\n");
+      debug(0, "Warning: Could not set ASYNC_LOW_LATENCY flag (not supported by device)\n");
     }
   }
   else
