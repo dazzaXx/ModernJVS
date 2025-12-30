@@ -670,21 +670,6 @@ JVSInputStatus getInputs(DeviceList *deviceList)
             }
         }
 
-        // Get the unique ID (important for Bluetooth devices on same adapter)
-        // This allows multiple BT controllers via one USB adapter to be distinguished
-        dev->uniqueID[0] = '\0';  // Initialize to empty string
-        int hasUniqueID = (ioctl(device, EVIOCGUNIQ(sizeof(dev->uniqueID)), dev->uniqueID) >= 0 && dev->uniqueID[0] != '\0');
-        
-        if (!hasUniqueID)
-        {
-            // If EVIOCGUNIQ fails or returns empty, create a fallback unique ID
-            // Uses vendor:product:eventName (eventX is unique per device)
-            snprintf(dev->uniqueID, sizeof(dev->uniqueID), "FALLBACK:%04x:%04x:%s", 
-                     dev->vendorID, dev->productID, namelist[i]->d_name);
-        }
-        // Ensure uniqueID is null-terminated
-        dev->uniqueID[MAX_PATH - 1] = '\0';
-
         // Make it lower case and replace letters
         for (size_t j = 0; j < strlen(dev->fullName); j++)
         {
@@ -737,24 +722,12 @@ JVSInputStatus getInputs(DeviceList *deviceList)
 
     deviceList->length = validDeviceIndex;
 
-    // Sort devices by physicalLocation first, then by uniqueID
-    // This ensures consistent player slot assignment for Bluetooth controllers
-    // connected via the same USB adapter
     for (int i = 0; i < deviceList->length - 1; i++)
     {
         for (int j = 0; j < deviceList->length - 1 - i; j++)
         {
             Device tmp;
-            int cmp = strcmp(deviceList->devices[j].physicalLocation, deviceList->devices[j + 1].physicalLocation);
-            
-            // If physical locations are the same, sort by uniqueID
-            // This is critical for multiple Bluetooth controllers on one adapter
-            if (cmp == 0)
-            {
-                cmp = strcmp(deviceList->devices[j].uniqueID, deviceList->devices[j + 1].uniqueID);
-            }
-            
-            if (cmp > 0)
+            if (strcmp(deviceList->devices[j].physicalLocation, deviceList->devices[j + 1].physicalLocation) > 0)
             {
                 tmp = deviceList->devices[j];
                 deviceList->devices[j] = deviceList->devices[j + 1];

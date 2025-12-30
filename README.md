@@ -82,9 +82,3 @@ By default it will emulate the Namco FCA1, as well as the debug level set to 1.
 
 With version 4.6.2, configurable deadzone can now be changed in the config for each players controller. Only affects controllers with analog sticks as it's main use is to eliminate stick drift.
 
-## Bluetooth Multi-Controller Support
-
-OpenJVS now properly supports multiple Bluetooth controllers connected via a single USB Bluetooth adapter. This is especially important for Raspberry Pi 3 and similar systems where the internal Bluetooth cannot be used because the UART is needed for the JVS sense line.
-
-Controllers are assigned to player slots consistently across reboots and reconnections based on their unique identifiers (typically MAC addresses for Bluetooth devices). See [docs/BLUETOOTH_SUPPORT.md](docs/BLUETOOTH_SUPPORT.md) for detailed information.
-
