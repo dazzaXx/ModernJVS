@@ -77,11 +77,8 @@ Check the /etc/openjvs/ios folder to see which I/O boards can be emulated and in
 
 By default it will emulate the Namco FCA1, as well as the debug level set to 1.
 
+
 ## Controller Deadzone Support
 
 With version 4.6.2, configurable deadzone can now be changed in the config for each players controller. Only affects controllers with analog sticks as it's main use is to eliminate stick drift.
-
-##
-
-Make sure to check the original guide.md in the docs folder to find out how to configure it in more detail.
 
