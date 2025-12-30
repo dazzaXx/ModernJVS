@@ -673,11 +673,13 @@ JVSInputStatus getInputs(DeviceList *deviceList)
         // Get the unique ID (important for Bluetooth devices on same adapter)
         // This allows multiple BT controllers via one USB adapter to be distinguished
         dev->uniqueID[0] = '\0';  // Initialize to empty string
-        if (ioctl(device, EVIOCGUNIQ(sizeof(dev->uniqueID)), dev->uniqueID) < 0)
+        int hasUniqueID = (ioctl(device, EVIOCGUNIQ(sizeof(dev->uniqueID)), dev->uniqueID) >= 0 && dev->uniqueID[0] != '\0');
+        
+        if (!hasUniqueID)
         {
-            // If EVIOCGUNIQ fails, create a unique ID from vendor:product
-            // (avoid using full path to prevent truncation)
-            snprintf(dev->uniqueID, sizeof(dev->uniqueID), "%04x:%04x:%s", 
+            // If EVIOCGUNIQ fails or returns empty, create a fallback unique ID
+            // Uses vendor:product:eventName (eventX is unique per device)
+            snprintf(dev->uniqueID, sizeof(dev->uniqueID), "FALLBACK:%04x:%04x:%s", 
                      dev->vendorID, dev->productID, namelist[i]->d_name);
         }
         // Ensure uniqueID is null-terminated

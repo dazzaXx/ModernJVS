@@ -236,8 +236,8 @@ static JVSCLIStatus disableDevice(char *deviceName)
 
 static JVSCLIStatus printDeviceListing(Device *device)
 {
-    // Display unique ID if it's not empty and different from the path fallback
-    if (device->uniqueID[0] != '\0' && strstr(device->uniqueID, device->path) == NULL)
+    // Display unique ID if it's not a fallback ID (real unique IDs are more useful)
+    if (device->uniqueID[0] != '\0' && strncmp(device->uniqueID, "FALLBACK:", 9) != 0)
     {
         printf("  - %s (%s, ID: %s)\n", device->name, device->physicalLocation, device->uniqueID);
     }
