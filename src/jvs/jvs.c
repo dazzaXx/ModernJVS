@@ -61,13 +61,13 @@ int disconnectJVS(void)
  * @param arg1 The second argument of the capability
  * @param arg2 The final argument of the capability
  */
-static void writeFeature(JVSPacket *outputPacket, char capability, char arg0, char arg1, char arg2)
+static void writeFeature(JVSPacket *packet, char capability, char arg0, char arg1, char arg2)
 {
-	outputPacket->data[outputPacket->length] = capability;
-	outputPacket->data[outputPacket->length + 1] = arg0;
-	outputPacket->data[outputPacket->length + 2] = arg1;
-	outputPacket->data[outputPacket->length + 3] = arg2;
-	outputPacket->length += 4;
+	packet->data[packet->length] = capability;
+	packet->data[packet->length + 1] = arg0;
+	packet->data[packet->length + 2] = arg1;
+	packet->data[packet->length + 3] = arg2;
+	packet->length += 4;
 }
 
 /**
@@ -79,58 +79,58 @@ static void writeFeature(JVSPacket *outputPacket, char capability, char arg0, ch
  * @param outputPacket The packet to write to.
  * @param capabilities The capabilities object to read from
  */
-static void writeFeatures(JVSPacket *outputPacket, JVSCapabilities *capabilities)
+static void writeFeatures(JVSPacket *packet, JVSCapabilities *capabilities)
 {
-	outputPacket->data[outputPacket->length] = REPORT_SUCCESS;
-	outputPacket->length += 1;
+	packet->data[packet->length] = REPORT_SUCCESS;
+	packet->length += 1;
 
 	/* Input Functions */
 
 	if (capabilities->players)
-		writeFeature(outputPacket, CAP_PLAYERS, capabilities->players, capabilities->switches, 0x00);
+		writeFeature(packet, CAP_PLAYERS, capabilities->players, capabilities->switches, 0x00);
 
 	if (capabilities->coins)
-		writeFeature(outputPacket, CAP_COINS, capabilities->coins, 0x00, 0x00);
+		writeFeature(packet, CAP_COINS, capabilities->coins, 0x00, 0x00);
 
 	if (capabilities->analogueInChannels)
-		writeFeature(outputPacket, CAP_ANALOG_IN, capabilities->analogueInChannels, capabilities->analogueInBits, 0x00);
+		writeFeature(packet, CAP_ANALOG_IN, capabilities->analogueInChannels, capabilities->analogueInBits, 0x00);
 
 	if (capabilities->rotaryChannels)
-		writeFeature(outputPacket, CAP_ROTARY, capabilities->rotaryChannels, 0x00, 0x00);
+		writeFeature(packet, CAP_ROTARY, capabilities->rotaryChannels, 0x00, 0x00);
 
 	if (capabilities->keypad)
-		writeFeature(outputPacket, CAP_KEYPAD, 0x00, 0x00, 0x00);
+		writeFeature(packet, CAP_KEYPAD, 0x00, 0x00, 0x00);
 
 	if (capabilities->gunChannels)
-		writeFeature(outputPacket, CAP_LIGHTGUN, capabilities->gunXBits, capabilities->gunYBits, capabilities->gunChannels);
+		writeFeature(packet, CAP_LIGHTGUN, capabilities->gunXBits, capabilities->gunYBits, capabilities->gunChannels);
 
 	if (capabilities->generalPurposeInputs)
-		writeFeature(outputPacket, CAP_GPI, 0x00, capabilities->generalPurposeInputs, 0x00);
+		writeFeature(packet, CAP_GPI, 0x00, capabilities->generalPurposeInputs, 0x00);
 
 	/* Output Functions */
 
 	if (capabilities->card)
-		writeFeature(outputPacket, CAP_CARD, capabilities->card, 0x00, 0x00);
+		writeFeature(packet, CAP_CARD, capabilities->card, 0x00, 0x00);
 
 	if (capabilities->hopper)
-		writeFeature(outputPacket, CAP_HOPPER, capabilities->hopper, 0x00, 0x00);
+		writeFeature(packet, CAP_HOPPER, capabilities->hopper, 0x00, 0x00);
 
 	if (capabilities->generalPurposeOutputs)
-		writeFeature(outputPacket, CAP_GPO, capabilities->generalPurposeOutputs, 0x00, 0x00);
+		writeFeature(packet, CAP_GPO, capabilities->generalPurposeOutputs, 0x00, 0x00);
 
 	if (capabilities->analogueOutChannels)
-		writeFeature(outputPacket, CAP_ANALOG_OUT, capabilities->analogueOutChannels, 0x00, 0x00);
+		writeFeature(packet, CAP_ANALOG_OUT, capabilities->analogueOutChannels, 0x00, 0x00);
 
 	if (capabilities->displayOutColumns)
-		writeFeature(outputPacket, CAP_DISPLAY, capabilities->displayOutColumns, capabilities->displayOutRows, capabilities->displayOutEncodings);
+		writeFeature(packet, CAP_DISPLAY, capabilities->displayOutColumns, capabilities->displayOutRows, capabilities->displayOutEncodings);
 
 	/* Other */
 
 	if (capabilities->backup)
-		writeFeature(outputPacket, CAP_BACKUP, 0x00, 0x00, 0x00);
+		writeFeature(packet, CAP_BACKUP, 0x00, 0x00, 0x00);
 
-	outputPacket->data[outputPacket->length] = CAP_END;
-	outputPacket->length += 1;
+	packet->data[packet->length] = CAP_END;
+	packet->length += 1;
 }
 
 /**
