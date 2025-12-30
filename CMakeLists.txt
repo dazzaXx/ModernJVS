@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.10)
 
 project(openjvs
-        VERSION "4.7.2"
+        VERSION "4.6.2"
         LANGUAGES "C"
         DESCRIPTION "An emulator for arcade JVS I/O boards"
         HOMEPAGE_URL "https://github.com/dazzaXx/OpenJVS-Updated-libgpiod"
