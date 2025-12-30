@@ -530,7 +530,7 @@ JVSStatus processPacket(JVSIO *jvsIO)
 				if (!inputPacket.data[index + i])
 					break;
 			}
-			debug(0, "CMD_CONVEY_ID = %s\n", idData);
+			debug(0, "CMD_CONVEY_ID - Main board ID: %s\n", idData);
 		}
 		break;
 
@@ -607,7 +607,7 @@ JVSStatus processPacket(JVSIO *jvsIO)
 
 			default:
 			{
-				debug(0, "CMD_NAMCO_UNSUPPORTED (Unsupported namco command [0x%02hhX])", inputPacket.data[index + 1]);
+				debug(0, "CMD_NAMCO_UNSUPPORTED - Unsupported Namco command: 0x%02hhX\n", inputPacket.data[index + 1]);
 			}
 			}
 		}
@@ -615,7 +615,7 @@ JVSStatus processPacket(JVSIO *jvsIO)
 
 		default:
 		{
-			debug(0, "CMD_UNSUPPORTED (Unsupported command [0x%02hhX])\n", inputPacket.data[index]);
+			debug(0, "CMD_UNSUPPORTED - Unsupported command: 0x%02hhX\n", inputPacket.data[index]);
 		}
 		}
 		index += size;
