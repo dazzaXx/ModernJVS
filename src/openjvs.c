@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <signal.h>
 #include <string.h>
+#include <unistd.h>
 
 #include "console/cli.h"
 #include "console/config.h"
