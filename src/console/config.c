@@ -22,12 +22,26 @@ static char *getNextToken(char *buffer, char *separator, char **saveptr)
     return token;
 }
 
+static double clampDeadzone(double deadzone)
+{
+    /* Clamp deadzone to valid range [0.0, MAX_ANALOG_DEADZONE) to prevent division by zero */
+    if (deadzone < 0.0)
+        return 0.0;
+    else if (deadzone >= MAX_ANALOG_DEADZONE)
+        return MAX_ANALOG_DEADZONE - DEADZONE_CLAMP_OFFSET;
+    return deadzone;
+}
+
 JVSConfigStatus getDefaultConfig(JVSConfig *config)
 {
     config->senseLineType = DEFAULT_SENSE_LINE_TYPE;
     config->senseLinePin = DEFAULT_SENSE_LINE_PIN;
     config->debugLevel = DEFAULT_DEBUG_LEVEL;
     config->autoControllerDetection = DEFAULT_AUTO_CONTROLLER_DETECTION;
+    config->analogDeadzonePlayer1 = DEFAULT_ANALOG_DEADZONE;
+    config->analogDeadzonePlayer2 = DEFAULT_ANALOG_DEADZONE;
+    config->analogDeadzonePlayer3 = DEFAULT_ANALOG_DEADZONE;
+    config->analogDeadzonePlayer4 = DEFAULT_ANALOG_DEADZONE;
     strcpy(config->defaultGamePath, DEFAULT_GAME);
     strcpy(config->devicePath, DEFAULT_DEVICE_PATH);
     strcpy(config->capabilitiesPath, DEFAULT_IO);
@@ -80,6 +94,18 @@ JVSConfigStatus parseConfig(char *path, JVSConfig *config)
 
         else if (strcmp(command, "AUTO_CONTROLLER_DETECTION") == 0)
             config->autoControllerDetection = atoi(getNextToken(NULL, " ", &saveptr));
+
+        else if (strcmp(command, "ANALOG_DEADZONE_PLAYER_1") == 0)
+            config->analogDeadzonePlayer1 = clampDeadzone(atof(getNextToken(NULL, " ", &saveptr)));
+
+        else if (strcmp(command, "ANALOG_DEADZONE_PLAYER_2") == 0)
+            config->analogDeadzonePlayer2 = clampDeadzone(atof(getNextToken(NULL, " ", &saveptr)));
+
+        else if (strcmp(command, "ANALOG_DEADZONE_PLAYER_3") == 0)
+            config->analogDeadzonePlayer3 = clampDeadzone(atof(getNextToken(NULL, " ", &saveptr)));
+
+        else if (strcmp(command, "ANALOG_DEADZONE_PLAYER_4") == 0)
+            config->analogDeadzonePlayer4 = clampDeadzone(atof(getNextToken(NULL, " ", &saveptr)));
 
         else
             printf("Error: Unknown configuration command %s\n", command);
