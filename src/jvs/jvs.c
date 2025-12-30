@@ -10,6 +10,56 @@ JVSPacket inputPacket, outputPacket;
 /* The in and out buffer used to read and write to and from */
 unsigned char outputBuffer[JVS_MAX_PACKET_SIZE], inputBuffer[JVS_MAX_PACKET_SIZE];
 
+/* Packet counter for debugging */
+static unsigned long packetCounter = 0;
+
+/**
+ * Get the name of a JVS command
+ *
+ * Returns a human-readable string for a given JVS command byte.
+ *
+ * @param cmd The command byte
+ * @returns A string containing the command name
+ */
+static const char *getCommandName(unsigned char cmd)
+{
+	switch (cmd)
+	{
+	case CMD_RESET: return "RESET";
+	case CMD_ASSIGN_ADDR: return "ASSIGN_ADDR";
+	case CMD_SET_COMMS_MODE: return "SET_COMMS_MODE";
+	case CMD_REQUEST_ID: return "REQUEST_ID";
+	case CMD_COMMAND_VERSION: return "COMMAND_VERSION";
+	case CMD_JVS_VERSION: return "JVS_VERSION";
+	case CMD_COMMS_VERSION: return "COMMS_VERSION";
+	case CMD_CAPABILITIES: return "CAPABILITIES";
+	case CMD_CONVEY_ID: return "CONVEY_ID";
+	case CMD_READ_SWITCHES: return "READ_SWITCHES";
+	case CMD_READ_COINS: return "READ_COINS";
+	case CMD_READ_ANALOGS: return "READ_ANALOGS";
+	case CMD_READ_ROTARY: return "READ_ROTARY";
+	case CMD_READ_KEYPAD: return "READ_KEYPAD";
+	case CMD_READ_LIGHTGUN: return "READ_LIGHTGUN";
+	case CMD_READ_GPI: return "READ_GPI";
+	case CMD_RETRANSMIT: return "RETRANSMIT";
+	case CMD_DECREASE_COINS: return "DECREASE_COINS";
+	case CMD_WRITE_GPO: return "WRITE_GPO";
+	case CMD_WRITE_ANALOG: return "WRITE_ANALOG";
+	case CMD_WRITE_DISPLAY: return "WRITE_DISPLAY";
+	case CMD_WRITE_COINS: return "WRITE_COINS";
+	case CMD_REMAINING_PAYOUT: return "REMAINING_PAYOUT";
+	case CMD_SET_PAYOUT: return "SET_PAYOUT";
+	case CMD_SUBTRACT_PAYOUT: return "SUBTRACT_PAYOUT";
+	case CMD_WRITE_GPO_BYTE: return "WRITE_GPO_BYTE";
+	case CMD_WRITE_GPO_BIT: return "WRITE_GPO_BIT";
+	case CMD_NAMCO_SPECIFIC: return "NAMCO_SPECIFIC";
+	default:
+		if (cmd >= CMD_MANUFACTURER_START && cmd <= CMD_MANUFACTURER_END)
+			return "MANUFACTURER_SPECIFIC";
+		return "UNKNOWN";
+	}
+}
+
 /**
  * Initialise the JVS emulation
  *
@@ -646,7 +696,32 @@ JVSStatus readPacket(JVSPacket *packet)
 		}
 	}
 
-	debug(2, "INPUT:\n");
+	debug(2, "\n=== INPUT PACKET #%lu ===\n", ++packetCounter);
+	debug(2, "  Destination: 0x%02X  Length: %d bytes\n", packet->destination, packet->length);
+	
+	/* Show commands in packet */
+	if (packet->length > 1)
+	{
+		debug(2, "  Commands: ");
+		for (int i = 0; i < packet->length - 1; )
+		{
+			unsigned char cmd = packet->data[i];
+			debug(2, "%s(0x%02X) ", getCommandName(cmd), cmd);
+			
+			/* Skip past command and its arguments to find next command */
+			i++;
+			/* Simple heuristic: most commands are followed by their arguments */
+			/* For better parsing, we'd need full command structure knowledge */
+			if (i < packet->length - 1 && packet->data[i] < 0x10)
+			{
+				/* Likely an argument, skip it */
+				i++;
+			}
+		}
+		debug(2, "\n");
+	}
+	
+	debug(2, "  Raw data: ");
 	debugBuffer(2, inputBuffer, index);
 
 	return JVS_STATUS_SUCCESS;
@@ -703,7 +778,9 @@ JVSStatus writePacket(JVSPacket *packet)
 		outputBuffer[outputIndex++] = checksum;
 	}
 
-	debug(2, "OUTPUT:\n");
+	debug(2, "\n=== OUTPUT PACKET #%lu ===\n", packetCounter);
+	debug(2, "  Destination: 0x%02X  Length: %d bytes\n", packet->destination, packet->length);
+	debug(2, "  Raw data: ");
 	debugBuffer(2, outputBuffer, outputIndex);
 
 	int written = 0, timeout = 0;
