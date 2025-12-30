@@ -696,33 +696,37 @@ JVSStatus readPacket(JVSPacket *packet)
 		}
 	}
 
-	debug(2, "\n=== INPUT PACKET #%lu ===\n", ++packetCounter);
-	debug(2, "  Destination: 0x%02X  Length: %d bytes\n", packet->destination, packet->length);
-	
-	/* Show commands in packet */
-	if (packet->length > 1)
+	/* Only compute debug output if debug level is high enough */
+	if (getDebugLevel() >= 2)
 	{
-		debug(2, "  Commands: ");
-		for (int i = 0; i < packet->length - 1; )
+		debug(2, "\n=== INPUT PACKET #%lu ===\n", ++packetCounter);
+		debug(2, "  Destination: 0x%02X  Length: %d bytes\n", packet->destination, packet->length);
+		
+		/* Show commands in packet */
+		if (packet->length > 1)
 		{
-			unsigned char cmd = packet->data[i];
-			debug(2, "%s(0x%02X) ", getCommandName(cmd), cmd);
-			
-			/* Skip past command and its arguments to find next command */
-			i++;
-			/* Simple heuristic: most commands are followed by their arguments */
-			/* For better parsing, we'd need full command structure knowledge */
-			if (i < packet->length - 1 && packet->data[i] < 0x10)
+			debug(2, "  Commands: ");
+			for (int i = 0; i < packet->length - 1; )
 			{
-				/* Likely an argument, skip it */
+				unsigned char cmd = packet->data[i];
+				debug(2, "%s(0x%02X) ", getCommandName(cmd), cmd);
+				
+				/* Skip past command and its arguments to find next command */
 				i++;
+				/* Simple heuristic: most commands are followed by their arguments */
+				/* For better parsing, we'd need full command structure knowledge */
+				if (i < packet->length - 1 && packet->data[i] < 0x10)
+				{
+					/* Likely an argument, skip it */
+					i++;
+				}
 			}
+			debug(2, "\n");
 		}
-		debug(2, "\n");
+		
+		debug(2, "  Raw data: ");
+		debugBuffer(2, inputBuffer, index);
 	}
-	
-	debug(2, "  Raw data: ");
-	debugBuffer(2, inputBuffer, index);
 
 	return JVS_STATUS_SUCCESS;
 }
@@ -778,10 +782,14 @@ JVSStatus writePacket(JVSPacket *packet)
 		outputBuffer[outputIndex++] = checksum;
 	}
 
-	debug(2, "\n=== OUTPUT PACKET #%lu ===\n", packetCounter);
-	debug(2, "  Destination: 0x%02X  Length: %d bytes\n", packet->destination, packet->length);
-	debug(2, "  Raw data: ");
-	debugBuffer(2, outputBuffer, outputIndex);
+	/* Only compute debug output if debug level is high enough */
+	if (getDebugLevel() >= 2)
+	{
+		debug(2, "\n=== OUTPUT PACKET #%lu ===\n", packetCounter);
+		debug(2, "  Destination: 0x%02X  Length: %d bytes\n", packet->destination, packet->length);
+		debug(2, "  Raw data: ");
+		debugBuffer(2, outputBuffer, outputIndex);
+	}
 
 	int written = 0, timeout = 0;
 	while (written < outputIndex)
