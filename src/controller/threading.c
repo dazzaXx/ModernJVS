@@ -21,7 +21,7 @@ ThreadStatus createThread(void *thread_entry(void *), void *args)
     pthread_mutex_lock(&ThreadManagerData.mutex_manager);
 
     ThreadStatus status = THREAD_STATUS_SUCCESS;
-    if (ThreadManagerData.threadCount > THREAD_MAX_NUMBER)
+    if (ThreadManagerData.threadCount >= THREAD_MAX_NUMBER)
         status = THREAD_STATUS_TOO_MANY_THREADS;
 
     if (status == THREAD_STATUS_SUCCESS)
