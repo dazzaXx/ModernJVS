@@ -233,6 +233,13 @@ static void *deviceThread(void *_args)
              * which may report stale values until the first input event is received */
             if (args->inputs.absEnabled[axisIndex])
             {
+                /* Check for valid range to prevent division by zero */
+                if (args->inputs.absMax[axisIndex] == args->inputs.absMin[axisIndex])
+                {
+                    /* Invalid axis range - skip initialization */
+                    continue;
+                }
+                
                 double scaled = ((double)absoluteFeatures.value - args->inputs.absMin[axisIndex]) / 
                                (args->inputs.absMax[axisIndex] - args->inputs.absMin[axisIndex]);
                 
