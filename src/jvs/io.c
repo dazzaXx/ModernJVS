@@ -50,6 +50,10 @@ int incrementCoin(JVSIO *io, JVSPlayer player, int amount)
 	if (player == SYSTEM)
 		return 0;
 
+	// Bounds check to prevent array overflow
+	if (player - 1 >= io->capabilities.coins)
+		return 0;
+
 	io->state.coinCount[player - 1] = io->state.coinCount[player - 1] + amount;
 	return 1;
 }
@@ -64,6 +68,10 @@ int setAnalogue(JVSIO *io, JVSInput channel, double value)
 
 int setGun(JVSIO *io, JVSInput channel, double value)
 {
+	// Bounds check to prevent array overflow
+	if (channel >= io->capabilities.gunChannels * 2)
+		return 0;
+
 	if (channel % 2 == 0)
 	{
 		io->state.gunChannel[channel] = (int)((double)value * (double)io->gunXMax);

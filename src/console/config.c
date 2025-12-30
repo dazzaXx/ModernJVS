@@ -66,47 +66,88 @@ JVSConfigStatus parseConfig(char *path, JVSConfig *config)
             continue;
 
         char *command = getNextToken(buffer, " ", &saveptr);
+        if (!command)
+            continue;
 
         /* This will get overwritten! Need to do defaults somewhere else */
         if (strcmp(command, "INCLUDE") == 0)
-            parseConfig(getNextToken(NULL, " ", &saveptr), config);
-
+        {
+            char *token = getNextToken(NULL, " ", &saveptr);
+            if (token)
+                parseConfig(token, config);
+        }
         else if (strcmp(command, "SENSE_LINE_TYPE") == 0)
-            config->senseLineType = atoi(getNextToken(NULL, " ", &saveptr));
-
+        {
+            char *token = getNextToken(NULL, " ", &saveptr);
+            if (token)
+                config->senseLineType = atoi(token);
+        }
         else if (strcmp(command, "EMULATE") == 0)
-            strcpy(config->capabilitiesPath, getNextToken(NULL, " ", &saveptr));
-
+        {
+            char *token = getNextToken(NULL, " ", &saveptr);
+            if (token)
+                strcpy(config->capabilitiesPath, token);
+        }
         else if (strcmp(command, "EMULATE_SECOND") == 0)
-            strcpy(config->secondCapabilitiesPath, getNextToken(NULL, " ", &saveptr));
-
+        {
+            char *token = getNextToken(NULL, " ", &saveptr);
+            if (token)
+                strcpy(config->secondCapabilitiesPath, token);
+        }
         else if (strcmp(command, "SENSE_LINE_PIN") == 0)
-            config->senseLinePin = atoi(getNextToken(NULL, " ", &saveptr));
-
+        {
+            char *token = getNextToken(NULL, " ", &saveptr);
+            if (token)
+                config->senseLinePin = atoi(token);
+        }
         else if (strcmp(command, "DEFAULT_GAME") == 0)
-            strcpy(config->defaultGamePath, getNextToken(NULL, " ", &saveptr));
-
+        {
+            char *token = getNextToken(NULL, " ", &saveptr);
+            if (token)
+                strcpy(config->defaultGamePath, token);
+        }
         else if (strcmp(command, "DEBUG_MODE") == 0)
-            config->debugLevel = atoi(getNextToken(NULL, " ", &saveptr));
-
+        {
+            char *token = getNextToken(NULL, " ", &saveptr);
+            if (token)
+                config->debugLevel = atoi(token);
+        }
         else if (strcmp(command, "DEVICE_PATH") == 0)
-            strcpy(config->devicePath, getNextToken(NULL, " ", &saveptr));
-
+        {
+            char *token = getNextToken(NULL, " ", &saveptr);
+            if (token)
+                strcpy(config->devicePath, token);
+        }
         else if (strcmp(command, "AUTO_CONTROLLER_DETECTION") == 0)
-            config->autoControllerDetection = atoi(getNextToken(NULL, " ", &saveptr));
-
+        {
+            char *token = getNextToken(NULL, " ", &saveptr);
+            if (token)
+                config->autoControllerDetection = atoi(token);
+        }
         else if (strcmp(command, "ANALOG_DEADZONE_PLAYER_1") == 0)
-            config->analogDeadzonePlayer1 = clampDeadzone(atof(getNextToken(NULL, " ", &saveptr)));
-
+        {
+            char *token = getNextToken(NULL, " ", &saveptr);
+            if (token)
+                config->analogDeadzonePlayer1 = clampDeadzone(atof(token));
+        }
         else if (strcmp(command, "ANALOG_DEADZONE_PLAYER_2") == 0)
-            config->analogDeadzonePlayer2 = clampDeadzone(atof(getNextToken(NULL, " ", &saveptr)));
-
+        {
+            char *token = getNextToken(NULL, " ", &saveptr);
+            if (token)
+                config->analogDeadzonePlayer2 = clampDeadzone(atof(token));
+        }
         else if (strcmp(command, "ANALOG_DEADZONE_PLAYER_3") == 0)
-            config->analogDeadzonePlayer3 = clampDeadzone(atof(getNextToken(NULL, " ", &saveptr)));
-
+        {
+            char *token = getNextToken(NULL, " ", &saveptr);
+            if (token)
+                config->analogDeadzonePlayer3 = clampDeadzone(atof(token));
+        }
         else if (strcmp(command, "ANALOG_DEADZONE_PLAYER_4") == 0)
-            config->analogDeadzonePlayer4 = clampDeadzone(atof(getNextToken(NULL, " ", &saveptr)));
-
+        {
+            char *token = getNextToken(NULL, " ", &saveptr);
+            if (token)
+                config->analogDeadzonePlayer4 = clampDeadzone(atof(token));
+        }
         else
             printf("Error: Unknown configuration command %s\n", command);
     }
@@ -140,45 +181,64 @@ JVSConfigStatus parseInputMapping(char *path, InputMappings *inputMappings)
             continue;
 
         char *command = getNextToken(buffer, " ", &saveptr);
+        if (!command)
+            continue;
 
         if (strcmp(command, "INCLUDE") == 0)
         {
-            InputMappings tempInputMappings;
-            JVSConfigStatus status = parseInputMapping(getNextToken(NULL, " ", &saveptr), &tempInputMappings);
-            if (status == JVS_CONFIG_STATUS_SUCCESS)
-                memcpy(inputMappings, &tempInputMappings, sizeof(InputMappings));
+            char *token = getNextToken(NULL, " ", &saveptr);
+            if (token)
+            {
+                InputMappings tempInputMappings;
+                JVSConfigStatus status = parseInputMapping(token, &tempInputMappings);
+                if (status == JVS_CONFIG_STATUS_SUCCESS)
+                    memcpy(inputMappings, &tempInputMappings, sizeof(InputMappings));
+            }
         }
         else if (strcmp(command, "PLAYER") == 0)
         {
-            int player = atoi(getNextToken(NULL, " ", &saveptr));
-            inputMappings->player = player;
+            char *token = getNextToken(NULL, " ", &saveptr);
+            if (token)
+            {
+                int player = atoi(token);
+                inputMappings->player = player;
+            }
         }
         else if (command[0] == 'K' || command[0] == 'B' || command[0] == 'C')
         {
-            int code = evDevFromString(command);
-            ControllerInput input = controllerInputFromString(getNextToken(NULL, " ", &saveptr));
+            char *token = getNextToken(NULL, " ", &saveptr);
+            if (token)
+            {
+                int code = evDevFromString(command);
+                ControllerInput input = controllerInputFromString(token);
 
-            InputMapping mapping = {
-                .type = SWITCH,
-                .code = code,
-                .input = input};
+                InputMapping mapping = {
+                    .type = SWITCH,
+                    .code = code,
+                    .input = input};
 
-            inputMappings->mappings[inputMappings->length] = mapping;
-            inputMappings->length++;
+                inputMappings->mappings[inputMappings->length] = mapping;
+                inputMappings->length++;
+            }
         }
         else if (command[0] == 'A')
         {
             char *firstArgument = getNextToken(NULL, " ", &saveptr);
+            if (!firstArgument)
+                continue;
             InputMapping mapping;
 
             if (strlen(firstArgument) > 11 && firstArgument[11] == 'B')
             {
                 // This suggests we are doing it as a hat!
+                char *token = getNextToken(NULL, " ", &saveptr);
+                if (!token)
+                    continue;
                 InputMapping hatMapping = {
                     .type = HAT,
                     .code = evDevFromString(command),
                     .input = controllerInputFromString(firstArgument),
-                    .inputSecondary = controllerInputFromString(getNextToken(NULL, " ", &saveptr)),
+                    .inputSecondary = controllerInputFromString(token),
                 };
                 mapping = hatMapping;
             }
@@ -203,7 +263,9 @@ JVSConfigStatus parseInputMapping(char *path, InputMappings *inputMappings)
                     }
                     else if (strcmp(extra, "SENSITIVITY") == 0)
                     {
-                        analogueMapping.multiplier = atof(getNextToken(NULL, " ", &saveptr));
+                        char *token = getNextToken(NULL, " ", &saveptr);
+                        if (token)
+                            analogueMapping.multiplier = atof(token);
                     }
                     extra = getNextToken(NULL, " ", &saveptr);
                 }
@@ -217,6 +279,8 @@ JVSConfigStatus parseInputMapping(char *path, InputMappings *inputMappings)
         else if (command[0] == 'R')
         {
             char *firstArgument = getNextToken(NULL, " ", &saveptr);
+            if (!firstArgument)
+                continue;
             InputMapping mapping;
 
             // Normal Relative Mapping
@@ -238,7 +302,9 @@ JVSConfigStatus parseInputMapping(char *path, InputMappings *inputMappings)
                 }
                 else if (strcmp(extra, "SENSITIVITY") == 0)
                 {
-                    analogueMapping.multiplier = atof(getNextToken(NULL, " ", &saveptr));
+                    char *token = getNextToken(NULL, " ", &saveptr);
+                    if (token)
+                        analogueMapping.multiplier = atof(token);
                 }
                 extra = getNextToken(NULL, " ", &saveptr);
             }
@@ -250,16 +316,20 @@ JVSConfigStatus parseInputMapping(char *path, InputMappings *inputMappings)
         }
         else if (command[0] == 'M')
         {
-            int code = evDevFromString(command);
-            ControllerInput input = controllerInputFromString(getNextToken(NULL, " ", &saveptr));
+            char *token = getNextToken(NULL, " ", &saveptr);
+            if (token)
+            {
+                int code = evDevFromString(command);
+                ControllerInput input = controllerInputFromString(token);
 
-            InputMapping mapping = {
-                .type = CARD,
-                .code = code,
-                .input = input};
+                InputMapping mapping = {
+                    .type = CARD,
+                    .code = code,
+                    .input = input};
 
-            inputMappings->mappings[inputMappings->length] = mapping;
-            inputMappings->length++;
+                inputMappings->mappings[inputMappings->length] = mapping;
+                inputMappings->length++;
+            }
         }
         else
         {
@@ -294,6 +364,8 @@ JVSConfigStatus parseOutputMapping(char *path, OutputMappings *outputMappings, c
             continue;
 
         char *command = getNextToken(buffer, " ", &saveptr);
+        if (!command)
+            continue;
         int analogueToDigital = 0;
         if (strcmp(command, "DIGITAL") == 0)
         {
@@ -302,6 +374,8 @@ JVSConfigStatus parseOutputMapping(char *path, OutputMappings *outputMappings, c
             // axis name; if we found DIGITAL, we need to read the next
             // token for the actual axis.
             command = getNextToken(NULL, " ", &saveptr);
+            if (!command)
+                continue;
         }
 
         /* Move the next mapping onto the secondary IO */
@@ -310,33 +384,48 @@ JVSConfigStatus parseOutputMapping(char *path, OutputMappings *outputMappings, c
         {
             secondaryIO = 1;
             command = getNextToken(NULL, " ", &saveptr);
+            if (!command)
+                continue;
         }
 
         if (strcmp(command, "INCLUDE") == 0)
         {
-            OutputMappings tempOutputMappings;
-            JVSConfigStatus status = parseOutputMapping(getNextToken(NULL, " ", &saveptr), &tempOutputMappings, configPath, secondConfigPath);
-            if (status == JVS_CONFIG_STATUS_SUCCESS)
-                memcpy(outputMappings, &tempOutputMappings, sizeof(OutputMappings));
+            char *token = getNextToken(NULL, " ", &saveptr);
+            if (token)
+            {
+                OutputMappings tempOutputMappings;
+                JVSConfigStatus status = parseOutputMapping(token, &tempOutputMappings, configPath, secondConfigPath);
+                if (status == JVS_CONFIG_STATUS_SUCCESS)
+                    memcpy(outputMappings, &tempOutputMappings, sizeof(OutputMappings));
+            }
         }
         else if (strcmp(command, "EMULATE") == 0)
         {
-            strcpy(configPath, getNextToken(NULL, " ", &saveptr));
+            char *token = getNextToken(NULL, " ", &saveptr);
+            if (token)
+                strcpy(configPath, token);
         }
         else if (strcmp(command, "EMULATE_SECOND") == 0)
         {
-            strcpy(secondConfigPath, getNextToken(NULL, " ", &saveptr));
+            char *token = getNextToken(NULL, " ", &saveptr);
+            if (token)
+                strcpy(secondConfigPath, token);
         }
         else if (command[11] == 'B' || analogueToDigital)
         {
-            ControllerPlayer controllerPlayer = controllerPlayerFromString(getNextToken(NULL, " ", &saveptr));
+            char *token1 = getNextToken(NULL, " ", &saveptr);
+            char *token2 = getNextToken(NULL, " ", &saveptr);
+            char *token3 = getNextToken(NULL, " ", &saveptr);
+            if (!token1 || !token2 || !token3)
+                continue;
+            ControllerPlayer controllerPlayer = controllerPlayerFromString(token1);
             OutputMapping mapping = {
                 .type = SWITCH,
                 .input = controllerInputFromString(command),
                 .controllerPlayer = controllerPlayer,
-                .output = jvsInputFromString(getNextToken(NULL, " ", &saveptr)),
+                .output = jvsInputFromString(token2),
                 .outputSecondary = NONE,
-                .jvsPlayer = jvsPlayerFromString(getNextToken(NULL, " ", &saveptr)),
+                .jvsPlayer = jvsPlayerFromString(token3),
                 .secondaryIO = secondaryIO};
 
             /* Check to see if we have a secondary output */
@@ -351,11 +440,15 @@ JVSConfigStatus parseOutputMapping(char *path, OutputMappings *outputMappings, c
         }
         else if (command[11] == 'A')
         {
+            char *token1 = getNextToken(NULL, " ", &saveptr);
+            char *token2 = getNextToken(NULL, " ", &saveptr);
+            if (!token1 || !token2)
+                continue;
             OutputMapping mapping = {
                 .type = ANALOGUE,
                 .input = controllerInputFromString(command),
-                .controllerPlayer = controllerPlayerFromString(getNextToken(NULL, " ", &saveptr)),
-                .output = jvsInputFromString(getNextToken(NULL, " ", &saveptr)),
+                .controllerPlayer = controllerPlayerFromString(token1),
+                .output = jvsInputFromString(token2),
                 .secondaryIO = secondaryIO};
 
             /* Check to see if we should reverse */
@@ -370,11 +463,15 @@ JVSConfigStatus parseOutputMapping(char *path, OutputMappings *outputMappings, c
         }
         else if (command[11] == 'R')
         {
+            char *token1 = getNextToken(NULL, " ", &saveptr);
+            char *token2 = getNextToken(NULL, " ", &saveptr);
+            if (!token1 || !token2)
+                continue;
             OutputMapping mapping = {
                 .type = ROTARY,
                 .input = controllerInputFromString(command),
-                .controllerPlayer = controllerPlayerFromString(getNextToken(NULL, " ", &saveptr)),
-                .output = jvsInputFromString(getNextToken(NULL, " ", &saveptr)),
+                .controllerPlayer = controllerPlayerFromString(token1),
+                .output = jvsInputFromString(token2),
                 .secondaryIO = secondaryIO};
 
             /* Check to see if we should reverse */
@@ -466,81 +563,160 @@ JVSConfigStatus parseIO(char *path, JVSCapabilities *capabilities)
             continue;
 
         char *command = getNextToken(buffer, " ", &saveptr);
+        if (!command)
+            continue;
 
         if (strcmp(command, "DISPLAY_NAME") == 0)
-            strcpy(capabilities->displayName, getNextToken(NULL, "\n", &saveptr));
-
+        {
+            char *token = getNextToken(NULL, "\n", &saveptr);
+            if (token)
+                strcpy(capabilities->displayName, token);
+        }
         else if (strcmp(command, "NAME") == 0)
-            strcpy(capabilities->name, getNextToken(NULL, "\n", &saveptr));
-
+        {
+            char *token = getNextToken(NULL, "\n", &saveptr);
+            if (token)
+                strcpy(capabilities->name, token);
+        }
         else if (strcmp(command, "COMMAND_VERSION") == 0)
-            capabilities->commandVersion = atoi(getNextToken(NULL, " ", &saveptr));
-
+        {
+            char *token = getNextToken(NULL, " ", &saveptr);
+            if (token)
+                capabilities->commandVersion = atoi(token);
+        }
         else if (strcmp(command, "JVS_VERSION") == 0)
-            capabilities->jvsVersion = atoi(getNextToken(NULL, " ", &saveptr));
-
+        {
+            char *token = getNextToken(NULL, " ", &saveptr);
+            if (token)
+                capabilities->jvsVersion = atoi(token);
+        }
         else if (strcmp(command, "COMMS_VERSION") == 0)
-            capabilities->commsVersion = atoi(getNextToken(NULL, " ", &saveptr));
+        {
+            char *token = getNextToken(NULL, " ", &saveptr);
+            if (token)
+                capabilities->commsVersion = atoi(token);
+        }
 
         else if (strcmp(command, "PLAYERS") == 0)
-            capabilities->players = atoi(getNextToken(NULL, " ", &saveptr));
-
+        {
+            char *token = getNextToken(NULL, " ", &saveptr);
+            if (token)
+                capabilities->players = atoi(token);
+        }
         else if (strcmp(command, "SWITCHES") == 0)
-            capabilities->switches = atoi(getNextToken(NULL, " ", &saveptr));
-
+        {
+            char *token = getNextToken(NULL, " ", &saveptr);
+            if (token)
+                capabilities->switches = atoi(token);
+        }
         else if (strcmp(command, "COINS") == 0)
-            capabilities->coins = atoi(getNextToken(NULL, " ", &saveptr));
-
+        {
+            char *token = getNextToken(NULL, " ", &saveptr);
+            if (token)
+                capabilities->coins = atoi(token);
+        }
         else if (strcmp(command, "ANALOGUE_IN_CHANNELS") == 0)
-            capabilities->analogueInChannels = atoi(getNextToken(NULL, " ", &saveptr));
-
+        {
+            char *token = getNextToken(NULL, " ", &saveptr);
+            if (token)
+                capabilities->analogueInChannels = atoi(token);
+        }
         else if (strcmp(command, "ANALOGUE_IN_BITS") == 0)
-            capabilities->analogueInBits = atoi(getNextToken(NULL, " ", &saveptr));
-
+        {
+            char *token = getNextToken(NULL, " ", &saveptr);
+            if (token)
+                capabilities->analogueInBits = atoi(token);
+        }
         else if (strcmp(command, "ROTARY_CHANNELS") == 0)
-            capabilities->rotaryChannels = atoi(getNextToken(NULL, " ", &saveptr));
-
+        {
+            char *token = getNextToken(NULL, " ", &saveptr);
+            if (token)
+                capabilities->rotaryChannels = atoi(token);
+        }
         else if (strcmp(command, "KEYPAD") == 0)
-            capabilities->keypad = atoi(getNextToken(NULL, " ", &saveptr));
-
+        {
+            char *token = getNextToken(NULL, " ", &saveptr);
+            if (token)
+                capabilities->keypad = atoi(token);
+        }
         else if (strcmp(command, "GUN_CHANNELS") == 0)
-            capabilities->gunChannels = atoi(getNextToken(NULL, " ", &saveptr));
-
+        {
+            char *token = getNextToken(NULL, " ", &saveptr);
+            if (token)
+                capabilities->gunChannels = atoi(token);
+        }
         else if (strcmp(command, "GUN_X_BITS") == 0)
-            capabilities->gunXBits = atoi(getNextToken(NULL, " ", &saveptr));
-
+        {
+            char *token = getNextToken(NULL, " ", &saveptr);
+            if (token)
+                capabilities->gunXBits = atoi(token);
+        }
         else if (strcmp(command, "GUN_Y_BITS") == 0)
-            capabilities->gunYBits = atoi(getNextToken(NULL, " ", &saveptr));
-
+        {
+            char *token = getNextToken(NULL, " ", &saveptr);
+            if (token)
+                capabilities->gunYBits = atoi(token);
+        }
         else if (strcmp(command, "GENERAL_PURPOSE_INPUTS") == 0)
-            capabilities->generalPurposeInputs = atoi(getNextToken(NULL, " ", &saveptr));
-
+        {
+            char *token = getNextToken(NULL, " ", &saveptr);
+            if (token)
+                capabilities->generalPurposeInputs = atoi(token);
+        }
         else if (strcmp(command, "CARD") == 0)
-            capabilities->card = atoi(getNextToken(NULL, " ", &saveptr));
-
+        {
+            char *token = getNextToken(NULL, " ", &saveptr);
+            if (token)
+                capabilities->card = atoi(token);
+        }
         else if (strcmp(command, "HOPPER") == 0)
-            capabilities->hopper = atoi(getNextToken(NULL, " ", &saveptr));
-
+        {
+            char *token = getNextToken(NULL, " ", &saveptr);
+            if (token)
+                capabilities->hopper = atoi(token);
+        }
         else if (strcmp(command, "GENERAL_PURPOSE_OUTPUTS") == 0)
-            capabilities->generalPurposeOutputs = atoi(getNextToken(NULL, " ", &saveptr));
-
+        {
+            char *token = getNextToken(NULL, " ", &saveptr);
+            if (token)
+                capabilities->generalPurposeOutputs = atoi(token);
+        }
         else if (strcmp(command, "ANALOGUE_OUT_CHANNELS") == 0)
-            capabilities->analogueOutChannels = atoi(getNextToken(NULL, " ", &saveptr));
-
+        {
+            char *token = getNextToken(NULL, " ", &saveptr);
+            if (token)
+                capabilities->analogueOutChannels = atoi(token);
+        }
         else if (strcmp(command, "DISPLAY_OUT_ROWS") == 0)
-            capabilities->displayOutRows = atoi(getNextToken(NULL, " ", &saveptr));
-
+        {
+            char *token = getNextToken(NULL, " ", &saveptr);
+            if (token)
+                capabilities->displayOutRows = atoi(token);
+        }
         else if (strcmp(command, "DISPLAY_OUT_COLUMNS") == 0)
-            capabilities->displayOutColumns = atoi(getNextToken(NULL, " ", &saveptr));
-
+        {
+            char *token = getNextToken(NULL, " ", &saveptr);
+            if (token)
+                capabilities->displayOutColumns = atoi(token);
+        }
         else if (strcmp(command, "DISPLAY_OUT_ENCODINGS") == 0)
-            capabilities->displayOutEncodings = atoi(getNextToken(NULL, " ", &saveptr));
-
+        {
+            char *token = getNextToken(NULL, " ", &saveptr);
+            if (token)
+                capabilities->displayOutEncodings = atoi(token);
+        }
         else if (strcmp(command, "BACKUP") == 0)
-            capabilities->backup = atoi(getNextToken(NULL, " ", &saveptr));
-
+        {
+            char *token = getNextToken(NULL, " ", &saveptr);
+            if (token)
+                capabilities->backup = atoi(token);
+        }
         else if (strcmp(command, "RIGHT_ALIGN_BITS") == 0)
-            capabilities->rightAlignBits = atoi(getNextToken(NULL, " ", &saveptr));
+        {
+            char *token = getNextToken(NULL, " ", &saveptr);
+            if (token)
+                capabilities->rightAlignBits = atoi(token);
+        }
 
         else
             printf("Error: Unknown IO configuration command %s\n", command);

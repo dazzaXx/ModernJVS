@@ -566,7 +566,10 @@ int setupGPIO(int pin)
 
   bytesWritten = snprintf(buffer, 3, "%d", pin);
   if (write(fd, buffer, bytesWritten) != bytesWritten)
+  {
+    close(fd);
     return 0;
+  }
 
   close(fd);
   return 1;
@@ -585,7 +588,10 @@ int setGPIODirection(int pin, int dir)
 
   int length = IN == dir ? 2 : 3;
   if (write(fd, &s_directions_str[IN == dir ? 0 : 3], length) != length)
+  {
+    close(fd);
     return 0;
+  }
 
   close(fd);
   return 1;
@@ -603,7 +609,10 @@ int writeGPIO(int pin, int value)
     return 0;
 
   if (write(fd, &stringValues[LOW == value ? 0 : 1], 1) != 1)
+  {
+    close(fd);
     return 0;
+  }
 
   close(fd);
   return 1;
