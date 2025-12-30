@@ -702,7 +702,11 @@ JVSStatus readPacket(JVSPacket *packet)
 		debug(2, "\n=== INPUT PACKET #%lu ===\n", ++packetCounter);
 		debug(2, "  Destination: 0x%02X  Length: %d bytes\n", packet->destination, packet->length);
 		
-		/* Show potential commands in packet data */
+		/* Show potential commands in packet data 
+		 * Note: Only the first byte is typically a command, subsequent bytes are usually
+		 * parameters/arguments. This shows what each byte COULD mean if interpreted as
+		 * a command, which helps identify actual command bytes vs arguments (UNKNOWN).
+		 */
 		if (packet->length > 1)
 		{
 			debug(2, "  Data bytes: ");
