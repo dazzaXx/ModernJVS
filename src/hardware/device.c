@@ -4,8 +4,78 @@
 #ifdef USE_LIBGPIOD
 #include <gpiod.h>
 
-#define GPIO_CHIP_NUMBER 0
 #define GPIO_CONSUMER_NAME "openjvs"
+
+// Static variable to cache the detected GPIO chip number
+static int detected_gpio_chip_number = -1;
+
+// Function to detect the correct GPIO chip number
+static int detect_gpio_chip_number(void)
+{
+  // Return cached value if already detected
+  if (detected_gpio_chip_number != -1)
+    return detected_gpio_chip_number;
+
+  // Try to detect Raspberry Pi 5 via device-tree model
+  FILE *model_file = fopen("/proc/device-tree/model", "r");
+  if (model_file)
+  {
+    char model[128];
+    if (fgets(model, sizeof(model), model_file))
+    {
+      // Check if it's a Raspberry Pi 5
+      if (strstr(model, "Raspberry Pi 5"))
+      {
+        debug(1, "Detected Raspberry Pi 5, using gpiochip4\n");
+        fclose(model_file);
+        detected_gpio_chip_number = 4;
+        return 4;
+      }
+    }
+    fclose(model_file);
+  }
+
+  // Fallback: Try probing gpiochip0 first (Pi 1-4), then gpiochip4 (Pi 5)
+  // We verify by checking if we can open the chip
+  for (int chip_num = 0; chip_num <= 4; chip_num++)
+  {
+    char chip_path[32];
+    snprintf(chip_path, sizeof(chip_path), "/dev/gpiochip%d", chip_num);
+    
+#ifdef GPIOD_API_V2
+    struct gpiod_chip *chip = gpiod_chip_open(chip_path);
+#else
+    struct gpiod_chip *chip = gpiod_chip_open_by_number(chip_num);
+#endif
+    
+    if (chip)
+    {
+      // Verify this chip has GPIO pins we expect (e.g., pin 12 for sense line)
+#ifdef GPIOD_API_V2
+      struct gpiod_line_info *info = gpiod_chip_get_line_info(chip, 12);
+      int has_pin = (info != NULL);
+      if (info)
+        gpiod_line_info_free(info);
+#else
+      struct gpiod_line *line = gpiod_chip_get_line(chip, 12);
+      int has_pin = (line != NULL);
+#endif
+      gpiod_chip_close(chip);
+      
+      if (has_pin)
+      {
+        debug(1, "Auto-detected GPIO chip: gpiochip%d\n", chip_num);
+        detected_gpio_chip_number = chip_num;
+        return chip_num;
+      }
+    }
+  }
+
+  // Default to gpiochip0 if detection fails
+  debug(1, "Could not auto-detect GPIO chip, defaulting to gpiochip0\n");
+  detected_gpio_chip_number = 0;
+  return 0;
+}
 
 #ifdef GPIOD_API_V2
 // libgpiod v2 API - we need to keep track of line requests per pin
@@ -18,7 +88,8 @@ static int current_direction = -1;
 static struct gpiod_chip *open_gpio_chip(void)
 {
   char chip_path[32];
-  snprintf(chip_path, sizeof(chip_path), "/dev/gpiochip%d", GPIO_CHIP_NUMBER);
+  int chip_number = detect_gpio_chip_number();
+  snprintf(chip_path, sizeof(chip_path), "/dev/gpiochip%d", chip_number);
   return gpiod_chip_open(chip_path);
 }
 #endif
@@ -466,7 +537,8 @@ int setupGPIO(int pin)
   // With libgpiod, we don't need to export the GPIO pin
   // The character device interface handles this automatically
   // We just verify we can open the chip
-  struct gpiod_chip *chip = gpiod_chip_open_by_number(GPIO_CHIP_NUMBER);
+  int chip_number = detect_gpio_chip_number();
+  struct gpiod_chip *chip = gpiod_chip_open_by_number(chip_number);
   if (!chip)
     return 0;
   
@@ -480,7 +552,8 @@ int setupGPIO(int pin)
 
 int setGPIODirection(int pin, int dir)
 {
-  struct gpiod_chip *chip = gpiod_chip_open_by_number(GPIO_CHIP_NUMBER);
+  int chip_number = detect_gpio_chip_number();
+  struct gpiod_chip *chip = gpiod_chip_open_by_number(chip_number);
   if (!chip)
     return 0;
   
@@ -507,7 +580,8 @@ int setGPIODirection(int pin, int dir)
 
 int writeGPIO(int pin, int value)
 {
-  struct gpiod_chip *chip = gpiod_chip_open_by_number(GPIO_CHIP_NUMBER);
+  int chip_number = detect_gpio_chip_number();
+  struct gpiod_chip *chip = gpiod_chip_open_by_number(chip_number);
   if (!chip)
     return 0;
   
@@ -527,7 +601,8 @@ int writeGPIO(int pin, int value)
 
 int readGPIO(int pin)
 {
-  struct gpiod_chip *chip = gpiod_chip_open_by_number(GPIO_CHIP_NUMBER);
+  int chip_number = detect_gpio_chip_number();
+  struct gpiod_chip *chip = gpiod_chip_open_by_number(chip_number);
   if (!chip)
     return -1;
   
