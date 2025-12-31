@@ -23,6 +23,7 @@
 
 #define MAX_PATH_LENGTH 1024
 #define MAX_LINE_LENGTH 1024
+#define MAX_ROTARY_POSITIONS 16  /* Rotary encoder supports 16 positions (0-15) */
 
 typedef struct
 {

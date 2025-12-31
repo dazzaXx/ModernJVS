@@ -281,24 +281,22 @@ JVSStatus processPacket(JVSIO *jvsIO)
 		case CMD_REQUEST_ID:
 		{
 			debug(1, "CMD_REQUEST_ID - Returning ID: %s\n", jvsIO->capabilities.name);
-			size_t nameLen = strlen(jvsIO->capabilities.name) + 1;  // +1 for null terminator
-			size_t availableSpace = JVS_MAX_PACKET_SIZE - outputPacket.length - 1;  // -1 for REPORT_SUCCESS
+			size_t nameLen = strlen(jvsIO->capabilities.name);
+			/* Calculate available space: total buffer - current position - REPORT_SUCCESS byte - null terminator byte */
+			size_t availableSpace = JVS_MAX_PACKET_SIZE - outputPacket.length - 2;
 			
 			/* Check if the name fits in the packet buffer */
 			if (nameLen > availableSpace)
 			{
-				debug(0, "Warning: Name too long for packet buffer, truncating\n");
+				debug(0, "Warning: Name too long for packet buffer, truncating from %zu to %zu bytes\n", nameLen, availableSpace);
 				nameLen = availableSpace;
 			}
 			
 			outputPacket.data[outputPacket.length] = REPORT_SUCCESS;
 			memcpy(&outputPacket.data[outputPacket.length + 1], jvsIO->capabilities.name, nameLen);
-			/* Ensure null termination even if truncated */
-			if (nameLen > 0)
-			{
-				outputPacket.data[outputPacket.length + nameLen] = '\0';
-			}
-			outputPacket.length += nameLen + 1;
+			/* Always add null terminator within bounds */
+			outputPacket.data[outputPacket.length + 1 + nameLen] = '\0';
+			outputPacket.length += nameLen + 2;  // +1 for REPORT_SUCCESS, +1 for null terminator
 		}
 		break;
 

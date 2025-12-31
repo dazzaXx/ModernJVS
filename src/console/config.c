@@ -526,7 +526,7 @@ JVSConfigStatus parseRotary(char *path, int rotary, char *output)
     ssize_t read;
 
     /* Validate rotary value is in valid range */
-    if (rotary < 0 || rotary >= 16)
+    if (rotary < 0 || rotary >= MAX_ROTARY_POSITIONS)
     {
         debug(1, "Warning: Invalid rotary value %d, using 0\n", rotary);
         rotary = 0;
@@ -536,15 +536,15 @@ JVSConfigStatus parseRotary(char *path, int rotary, char *output)
         return JVS_CONFIG_STATUS_FILE_NOT_FOUND;
 
     int counter = 0;
-    char rotaryGames[16][MAX_LINE_LENGTH];
+    char rotaryGames[MAX_ROTARY_POSITIONS][MAX_LINE_LENGTH];
 
-    for (int i = 0; i < 16; i++)
+    for (int i = 0; i < MAX_ROTARY_POSITIONS; i++)
     {
         strncpy(rotaryGames[i], "generic", MAX_LINE_LENGTH - 1);
         rotaryGames[i][MAX_LINE_LENGTH - 1] = '\0';
     }
 
-    while ((read = getline(&line, &len, file)) != -1 && counter < 16)
+    while ((read = getline(&line, &len, file)) != -1 && counter < MAX_ROTARY_POSITIONS)
     {
         strncpy(rotaryGames[counter], line, MAX_LINE_LENGTH - 1);
         rotaryGames[counter][MAX_LINE_LENGTH - 1] = '\0';
