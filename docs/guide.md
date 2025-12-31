@@ -6,7 +6,7 @@ Questions can be asked in the discord channel: https://arcade.community. If it a
 
 ## Requirements
 
-ModernJVS requires a USB RS485 dongle to communicate, or an ModernJVS Hat and supports the following hardware:
+ModernJVS requires a USB RS485 dongle to communicate, or an OpenJVS Hat and supports the following hardware:
 
 ### Raspberry Pi Compatibility
 
@@ -141,13 +141,13 @@ Please select 'Emulate mouse'.
 
 I also suggest to enable cal on Off Screen RIGHT only. This way you won't accidently put the gun into calibration mode when playing. Any other settings are up to the user.
 
-## ModernJVS HAT
+## OpenJVS HAT
 
-To support the new ModernJVS Hat some new features have been added
+To support the new OpenJVS Hat some new features have been added
 
 ### Rotary
 
-If you'd like to use the rotary selector on the ModernJVS hat to select your game, simply edit `/etc/modernjvs/config` and set the following:
+If you'd like to use the rotary selector on the OpenJVS hat to select your game, simply edit `/etc/modernjvs/config` and set the following:
 
 ```
 DEFAULT_GAME rotary

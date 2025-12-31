@@ -1,6 +1,6 @@
 # ModernJVS-Updated-libgpiod
 
-ModernJVS is an emulator for I/O boards in arcade machines that use the JVS protocol. It requires a USB RS485 converter, or an official ModernJVS HAT.
+ModernJVS is an emulator for I/O boards in arcade machines that use the JVS protocol. It requires a USB RS485 converter, or an official OpenJVS HAT.
 
 
 
