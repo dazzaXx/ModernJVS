@@ -673,7 +673,7 @@ int setSenseLine(int state)
     {
       if (!writeGPIO(localSenseLinePin, 0))
       {
-        printf("Warning: Failed to set sense line to 1 %d\n", localSenseLinePin);
+        debug(1, "Warning: Failed to set sense line to 1 %d\n", localSenseLinePin);
         return 0;
       }
     }
@@ -681,7 +681,7 @@ int setSenseLine(int state)
     {
       if (!writeGPIO(localSenseLinePin, 1))
       {
-        printf("Warning: Failed to sink sense line %d\n", localSenseLinePin);
+        debug(1, "Warning: Failed to sink sense line %d\n", localSenseLinePin);
         return 0;
       }
     }
