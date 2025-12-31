@@ -11,6 +11,14 @@
 // so thread safety is not a concern in practice.
 static int detected_gpio_chip_number = -1;
 
+// Chip candidates in order of likelihood (Pi 1-4 first, then Pi 5, then others)
+static const int chip_candidates[] = {0, 4, 1, 2, 3};
+static const int num_candidates = sizeof(chip_candidates) / sizeof(chip_candidates[0]);
+
+// Standard GPIO pins to verify chip validity (commonly available on all Pi models)
+static const int test_pins[] = {12, 18, 27};
+static const int num_test_pins = sizeof(test_pins) / sizeof(test_pins[0]);
+
 // Function to detect the correct GPIO chip number
 static int detect_gpio_chip_number(void)
 {
@@ -26,9 +34,6 @@ static int detect_gpio_chip_number(void)
     // fgets ensures null-termination and reads at most sizeof(model)-1 chars
     if (fgets(model, sizeof(model), model_file))
     {
-      // Ensure null termination
-      model[sizeof(model) - 1] = '\0';
-      
       // Check if it's a Raspberry Pi 5
       if (strstr(model, "Raspberry Pi 5"))
       {
@@ -42,9 +47,6 @@ static int detect_gpio_chip_number(void)
   }
 
   // Fallback: Try probing chips in order of likelihood
-  // Check gpiochip0 first (Pi 1-4), then gpiochip4 (Pi 5), then others
-  int chip_candidates[] = {0, 4, 1, 2, 3};
-  int num_candidates = sizeof(chip_candidates) / sizeof(chip_candidates[0]);
   for (int i = 0; i < num_candidates; i++)
   {
     int chip_num = chip_candidates[i];
@@ -59,10 +61,7 @@ static int detect_gpio_chip_number(void)
     
     if (chip)
     {
-      // Verify this chip has standard GPIO pins (12, 18, or 27)
-      // These are commonly used pins on all Raspberry Pi models
-      int test_pins[] = {12, 18, 27};
-      int num_test_pins = sizeof(test_pins) / sizeof(test_pins[0]);
+      // Verify this chip has standard GPIO pins
       int valid = 0;
       
       for (int j = 0; j < num_test_pins; j++)
