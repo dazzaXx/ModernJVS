@@ -805,15 +805,22 @@ JVSInputStatus initInputs(char *outputMappingPath, char *configPath, char *secon
 
         // Put the device name into a temp variable so it can be changed
         char deviceName[MAX_PATH_LENGTH];
-        strcpy(deviceName, device->name);
+        strncpy(deviceName, device->name, MAX_PATH_LENGTH - 1);
+        deviceName[MAX_PATH_LENGTH - 1] = '\0';
 
         // Use the standard nintendo-wii-remote mapping file for the IR Version too
         if (strcmp(deviceName, WIIMOTE_DEVICE_NAME_IR) == 0)
-            strcpy(deviceName, WIIMOTE_DEVICE_NAME);
+        {
+            strncpy(deviceName, WIIMOTE_DEVICE_NAME, MAX_PATH_LENGTH - 1);
+            deviceName[MAX_PATH_LENGTH - 1] = '\0';
+        }
 
         // Use the standard ultimarc-aimtrak mapping file for both screen events
         if (strcmp(deviceName, AIMTRAK_DEVICE_NAME_REMAP_JOYSTICK) == 0 || strcmp(deviceName, AIMTRAK_DEVICE_NAME_REMAP_OUT_SCREEN) == 0 || strcmp(deviceName, AIMTRAK_DEVICE_NAME_REMAP_IN_SCREEN) == 0)
-            strcpy(deviceName, AIMTRAK_DEVICE_MAPPING_NAME);
+        {
+            strncpy(deviceName, AIMTRAK_DEVICE_MAPPING_NAME, MAX_PATH_LENGTH - 1);
+            deviceName[MAX_PATH_LENGTH - 1] = '\0';
+        }
 
         if (parseInputMapping(deviceName, &inputMappings) != JVS_CONFIG_STATUS_SUCCESS || inputMappings.length == 0)
         {
@@ -824,17 +831,20 @@ JVSInputStatus initInputs(char *outputMappingPath, char *configPath, char *secon
                 case DEVICE_TYPE_JOYSTICK:
                     if (parseInputMapping("generic-joystick", &inputMappings) != JVS_CONFIG_STATUS_SUCCESS || inputMappings.length == 0)
                         continue;
-                    strcpy(specialMap, " (Generic Joystick Map)");
+                    strncpy(specialMap, " (Generic Joystick Map)", sizeof(specialMap) - 1);
+                    specialMap[sizeof(specialMap) - 1] = '\0';
                     break;
                 case DEVICE_TYPE_KEYBOARD:
                     if (parseInputMapping("generic-keyboard", &inputMappings) != JVS_CONFIG_STATUS_SUCCESS || inputMappings.length == 0)
                         continue;
-                    strcpy(specialMap, " (Generic Keyboard Map)");
+                    strncpy(specialMap, " (Generic Keyboard Map)", sizeof(specialMap) - 1);
+                    specialMap[sizeof(specialMap) - 1] = '\0';
                     break;
                 case DEVICE_TYPE_MOUSE:
                     if (parseInputMapping("generic-mouse", &inputMappings) != JVS_CONFIG_STATUS_SUCCESS || inputMappings.length == 0)
                         continue;
-                    strcpy(specialMap, " (Generic Mouse Map)");
+                    strncpy(specialMap, " (Generic Mouse Map)", sizeof(specialMap) - 1);
+                    specialMap[sizeof(specialMap) - 1] = '\0';
                     break;
                 default:
                     continue;
