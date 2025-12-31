@@ -130,13 +130,13 @@ DEVICE_PATH /dev/ttyAMA1
 
 **Available UART overlays** (choose based on which GPIO pins you want to use):
 ```ini
-dtoverlay=uart2  # Creates /dev/ttyAMA1 on GPIO 0,1
-dtoverlay=uart3  # Creates /dev/ttyAMA2 on GPIO 4,5
-dtoverlay=uart4  # Creates /dev/ttyAMA3 on GPIO 8,9
-dtoverlay=uart5  # Creates /dev/ttyAMA4 on GPIO 12,13
+dtoverlay=uart2  # Creates /dev/ttyAMA1 on GPIO 0 (TX), GPIO 1 (RX)
+dtoverlay=uart3  # Creates /dev/ttyAMA2 on GPIO 4 (TX), GPIO 5 (RX)
+dtoverlay=uart4  # Creates /dev/ttyAMA3 on GPIO 8 (TX), GPIO 9 (RX)
+dtoverlay=uart5  # Creates /dev/ttyAMA4 on GPIO 12 (TX), GPIO 13 (RX)
 ```
 
-> **Warning**: Do not use `uart5` if you're using GPIO 12 for the sense line, as they conflict. Choose `uart2`, `uart3`, or `uart4` instead.
+> **Warning**: Do not use `uart5` if you're using GPIO 12 for the sense line, as `uart5` uses GPIO 12 for its TX pin. Choose `uart2`, `uart3`, or `uart4` instead, which use different GPIO pins.
 
 #### Option 2: Move Bluetooth to Mini UART
 
