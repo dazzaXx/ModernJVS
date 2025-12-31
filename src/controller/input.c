@@ -408,7 +408,8 @@ static void startThread(EVInputs *inputs, char *devicePath, int wiiMode, int pla
         return;
     }
     
-    strcpy(args->devicePath, devicePath);
+    strncpy(args->devicePath, devicePath, MAX_PATH_LENGTH - 1);
+    args->devicePath[MAX_PATH_LENGTH - 1] = '\0';
     memcpy(&args->inputs, inputs, sizeof(EVInputs));
     args->player = player;
     args->jvsIO = jvsIO;
@@ -646,9 +647,12 @@ JVSInputStatus getInputs(DeviceList *deviceList)
 
         // This is a valid device, so add it to our list
         Device *dev = &deviceList->devices[validDeviceIndex];
-        strcpy(dev->path, tempPath);
-        strcpy(dev->fullName, tempFullName);
-        strcpy(dev->name, "unknown");
+        strncpy(dev->path, tempPath, MAX_PATH - 1);
+        dev->path[MAX_PATH - 1] = '\0';
+        strncpy(dev->fullName, tempFullName, MAX_PATH - 1);
+        dev->fullName[MAX_PATH - 1] = '\0';
+        strncpy(dev->name, "unknown", MAX_PATH - 1);
+        dev->name[MAX_PATH - 1] = '\0';
         dev->type = DEVICE_TYPE_UNKNOWN;
 
         // Get product vendor and ID information
@@ -686,7 +690,8 @@ JVSInputStatus getInputs(DeviceList *deviceList)
         // Assign the correct names for the aimtracks
         if (strcmp(dev->name, AIMTRAK_DEVICE_NAME) == 0)
         {
-            strcpy(dev->name, aimtrakRemap[aimtrakCount++]);
+            strncpy(dev->name, aimtrakRemap[aimtrakCount++], MAX_PATH - 1);
+            dev->name[MAX_PATH - 1] = '\0';
             if (aimtrakCount == 3)
                 aimtrakCount = 0;
         }

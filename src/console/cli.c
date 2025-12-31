@@ -335,7 +335,8 @@ JVSCLIStatus parseArguments(int argc, char **argv, char *map)
     // If the first argument doesn't start with a dash it must be a map file.
     if (argv[1][0] != '-')
     {
-        strcpy(map, argv[1]);
+        strncpy(map, argv[1], MAX_PATH_LENGTH - 1);
+        map[MAX_PATH_LENGTH - 1] = '\0';
         return JVS_CLI_STATUS_SUCCESS_CONTINUE;
     }
 

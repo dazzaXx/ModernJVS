@@ -42,9 +42,12 @@ JVSConfigStatus getDefaultConfig(JVSConfig *config)
     config->analogDeadzonePlayer2 = DEFAULT_ANALOG_DEADZONE;
     config->analogDeadzonePlayer3 = DEFAULT_ANALOG_DEADZONE;
     config->analogDeadzonePlayer4 = DEFAULT_ANALOG_DEADZONE;
-    strcpy(config->defaultGamePath, DEFAULT_GAME);
-    strcpy(config->devicePath, DEFAULT_DEVICE_PATH);
-    strcpy(config->capabilitiesPath, DEFAULT_IO);
+    strncpy(config->defaultGamePath, DEFAULT_GAME, MAX_PATH_LENGTH - 1);
+    config->defaultGamePath[MAX_PATH_LENGTH - 1] = '\0';
+    strncpy(config->devicePath, DEFAULT_DEVICE_PATH, MAX_PATH_LENGTH - 1);
+    config->devicePath[MAX_PATH_LENGTH - 1] = '\0';
+    strncpy(config->capabilitiesPath, DEFAULT_IO, MAX_PATH_LENGTH - 1);
+    config->capabilitiesPath[MAX_PATH_LENGTH - 1] = '\0';
     config->secondCapabilitiesPath[0] = 0x00;
     return JVS_CONFIG_STATUS_SUCCESS;
 }
@@ -86,13 +89,19 @@ JVSConfigStatus parseConfig(char *path, JVSConfig *config)
         {
             char *token = getNextToken(NULL, " ", &saveptr);
             if (token)
-                strcpy(config->capabilitiesPath, token);
+            {
+                strncpy(config->capabilitiesPath, token, MAX_PATH_LENGTH - 1);
+                config->capabilitiesPath[MAX_PATH_LENGTH - 1] = '\0';
+            }
         }
         else if (strcmp(command, "EMULATE_SECOND") == 0)
         {
             char *token = getNextToken(NULL, " ", &saveptr);
             if (token)
-                strcpy(config->secondCapabilitiesPath, token);
+            {
+                strncpy(config->secondCapabilitiesPath, token, MAX_PATH_LENGTH - 1);
+                config->secondCapabilitiesPath[MAX_PATH_LENGTH - 1] = '\0';
+            }
         }
         else if (strcmp(command, "SENSE_LINE_PIN") == 0)
         {
@@ -104,7 +113,10 @@ JVSConfigStatus parseConfig(char *path, JVSConfig *config)
         {
             char *token = getNextToken(NULL, " ", &saveptr);
             if (token)
-                strcpy(config->defaultGamePath, token);
+            {
+                strncpy(config->defaultGamePath, token, MAX_PATH_LENGTH - 1);
+                config->defaultGamePath[MAX_PATH_LENGTH - 1] = '\0';
+            }
         }
         else if (strcmp(command, "DEBUG_MODE") == 0)
         {
@@ -116,7 +128,10 @@ JVSConfigStatus parseConfig(char *path, JVSConfig *config)
         {
             char *token = getNextToken(NULL, " ", &saveptr);
             if (token)
-                strcpy(config->devicePath, token);
+            {
+                strncpy(config->devicePath, token, MAX_PATH_LENGTH - 1);
+                config->devicePath[MAX_PATH_LENGTH - 1] = '\0';
+            }
         }
         else if (strcmp(command, "AUTO_CONTROLLER_DETECTION") == 0)
         {
@@ -403,13 +418,19 @@ JVSConfigStatus parseOutputMapping(char *path, OutputMappings *outputMappings, c
         {
             char *token = getNextToken(NULL, " ", &saveptr);
             if (token)
-                strcpy(configPath, token);
+            {
+                strncpy(configPath, token, MAX_PATH_LENGTH - 1);
+                configPath[MAX_PATH_LENGTH - 1] = '\0';
+            }
         }
         else if (strcmp(command, "EMULATE_SECOND") == 0)
         {
             char *token = getNextToken(NULL, " ", &saveptr);
             if (token)
-                strcpy(secondConfigPath, token);
+            {
+                strncpy(secondConfigPath, token, MAX_PATH_LENGTH - 1);
+                secondConfigPath[MAX_PATH_LENGTH - 1] = '\0';
+            }
         }
         else if (command[11] == 'B' || analogueToDigital)
         {
@@ -511,12 +532,14 @@ JVSConfigStatus parseRotary(char *path, int rotary, char *output)
 
     for (int i = 0; i < 16; i++)
     {
-        strcpy(rotaryGames[i], "generic");
+        strncpy(rotaryGames[i], "generic", MAX_LINE_LENGTH - 1);
+        rotaryGames[i][MAX_LINE_LENGTH - 1] = '\0';
     }
 
     while ((read = getline(&line, &len, file)) != -1 && counter < 16)
     {
-        strcpy(rotaryGames[counter], line);
+        strncpy(rotaryGames[counter], line, MAX_LINE_LENGTH - 1);
+        rotaryGames[counter][MAX_LINE_LENGTH - 1] = '\0';
         for (size_t i = 0; i < strlen(line); i++)
         {
             if (rotaryGames[counter][i] == '\n' || rotaryGames[counter][i] == '\r')
@@ -536,7 +559,8 @@ JVSConfigStatus parseRotary(char *path, int rotary, char *output)
 
     fclose(file);
 
-    strcpy(output, rotaryGames[rotary]);
+    strncpy(output, rotaryGames[rotary], MAX_PATH_LENGTH - 1);
+    output[MAX_PATH_LENGTH - 1] = '\0';
 
     return JVS_CONFIG_STATUS_SUCCESS;
 }
@@ -570,13 +594,19 @@ JVSConfigStatus parseIO(char *path, JVSCapabilities *capabilities)
         {
             char *token = getNextToken(NULL, "\n", &saveptr);
             if (token)
-                strcpy(capabilities->displayName, token);
+            {
+                strncpy(capabilities->displayName, token, MAX_JVS_NAME_SIZE - 1);
+                capabilities->displayName[MAX_JVS_NAME_SIZE - 1] = '\0';
+            }
         }
         else if (strcmp(command, "NAME") == 0)
         {
             char *token = getNextToken(NULL, "\n", &saveptr);
             if (token)
-                strcpy(capabilities->name, token);
+            {
+                strncpy(capabilities->name, token, MAX_JVS_NAME_SIZE - 1);
+                capabilities->name[MAX_JVS_NAME_SIZE - 1] = '\0';
+            }
         }
         else if (strcmp(command, "COMMAND_VERSION") == 0)
         {
