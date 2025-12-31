@@ -4,15 +4,15 @@
 #include "controller/input.h"
 
 /* Default config values */
-#define DEFAULT_CONFIG_PATH "/etc/openjvs/config"
+#define DEFAULT_CONFIG_PATH "/etc/modernjvs/config"
 #define DEFAULT_DEBUG_LEVEL 2
-#define DEFAULT_DEVICE_MAPPING_PATH "/etc/openjvs/devices/"
+#define DEFAULT_DEVICE_MAPPING_PATH "/etc/modernjvs/devices/"
 #define DEFAULT_DEVICE_PATH "/dev/ttyUSB0"
 #define DEFAULT_GAME "generic"
-#define DEFAULT_GAME_MAPPING_PATH "/etc/openjvs/games/"
+#define DEFAULT_GAME_MAPPING_PATH "/etc/modernjvs/games/"
 #define DEFAULT_IO "namco-FCA1"
-#define DEFAULT_IO_PATH "/etc/openjvs/ios/"
-#define DEFAULT_ROTARY_PATH "/etc/openjvs/rotary"
+#define DEFAULT_IO_PATH "/etc/modernjvs/ios/"
+#define DEFAULT_ROTARY_PATH "/etc/modernjvs/rotary"
 #define DEFAULT_SENSE_LINE_PIN 12
 #define DEFAULT_SENSE_LINE_TYPE 0
 #define DEFAULT_AUTO_CONTROLLER_DETECTION 1

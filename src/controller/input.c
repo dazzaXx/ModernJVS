@@ -1,5 +1,5 @@
 /**
- * OpenJVS Input Controller
+ * ModernJVS Input Controller
  * Authors: Bobby Dilley, Redone, Fred 
  */
 

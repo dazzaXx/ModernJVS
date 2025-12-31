@@ -1,4 +1,4 @@
-# OpenJVS Config
+# ModernJVS Config
 # Author: Bobby Dilley
 
 # Setup the default game to emulate
@@ -24,7 +24,7 @@ DEBUG_MODE 1
 DEVICE_PATH /dev/ttyUSB0
 
 # Automatic Controller Detection
-# If set to 0 OpenJVS will ignore all controllers
+# If set to 0 ModernJVS will ignore all controllers
 # that haven't already been mapped.
 AUTO_CONTROLLER_DETECTION 1
 

@@ -4,7 +4,7 @@
 #ifdef USE_LIBGPIOD
 #include <gpiod.h>
 
-#define GPIO_CONSUMER_NAME "openjvs"
+#define GPIO_CONSUMER_NAME "modernjvs"
 
 // Static variable to cache the detected GPIO chip number
 // Note: This is initialized during startup before any threads are created,

@@ -55,7 +55,7 @@ int main(int argc, char **argv)
         break;
     }
 
-    debug(0, "OpenJVS Version %s\n\n", PROJECT_VER);
+    debug(0, "ModernJVS Version %s\n\n", PROJECT_VER);
 
     /* Init the thread manager */
     ThreadStatus threadStatus = initThreadManager();
@@ -271,7 +271,7 @@ void handleSignal(int signal)
 {
     if (signal == SIGINT)
     {
-        debug(0, "\nOpenJVS is stopping...\n");
+        debug(0, "\nModernJVS is stopping...\n");
         running = -1;
     }
 }

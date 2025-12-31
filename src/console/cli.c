@@ -19,14 +19,14 @@ static JVSCLIStatus printListing(void);
 /**
  * Print usage information
  * 
- * Prints the usage information for the OpenJVS command
+ * Prints the usage information for the ModernJVS command
  * line interface
  * 
  * @returns The status of the action performed
  **/
 static JVSCLIStatus printUsage(void)
 {
-    debug(0, "Usage: openjvs ( options [controller] | [game] )\n\n");
+    debug(0, "Usage: modernjvs ( options [controller] | [game] )\n\n");
     debug(0, "Options:\n");
     debug(0, "  --list     Lists all controllers\n");
     debug(0, "  --edit     Opens a file for editing\n");
@@ -34,14 +34,14 @@ static JVSCLIStatus printUsage(void)
     debug(0, "  --disable  Disables a new/all controller(s)\n");
     debug(0, "  --help     Displays this text\n");
     debug(0, "  --debug    Runs in debug mode\n");
-    debug(0, "  --version  Displays the OpenJVS Version\n");
+    debug(0, "  --version  Displays the ModernJVS Version\n");
     return JVS_CLI_STATUS_SUCCESS_CLOSE;
 }
 
 /**
  * Print version information
  * 
- * Prints the version information for the OpenJVS command
+ * Prints the version information for the ModernJVS command
  * line interface
  * 
  * @returns The status of the action performed
@@ -139,7 +139,7 @@ static JVSCLIStatus enableDevice(char *deviceName)
             closedir(d);
         }
 
-        debug(0, "OpenJVS has enabled all controllers.\n");
+        debug(0, "ModernJVS has enabled all controllers.\n");
         return JVS_CLI_STATUS_SUCCESS_CLOSE;
     }
 
@@ -165,7 +165,7 @@ static JVSCLIStatus enableDevice(char *deviceName)
         return JVS_CLI_STATUS_ERROR;
     }
 
-    debug(0, "OpenJVS has enabled the controller '%s'.\n", deviceName);
+    debug(0, "ModernJVS has enabled the controller '%s'.\n", deviceName);
     return JVS_CLI_STATUS_SUCCESS_CLOSE;
 }
 
@@ -205,7 +205,7 @@ static JVSCLIStatus disableDevice(char *deviceName)
             closedir(d);
         }
 
-        debug(0, "OpenJVS has disabled all controllers.\n");
+        debug(0, "ModernJVS has disabled all controllers.\n");
         return JVS_CLI_STATUS_SUCCESS_CLOSE;
     }
 
@@ -230,7 +230,7 @@ static JVSCLIStatus disableDevice(char *deviceName)
         debug(0, "Failed to disable the controller, does it exist and is it already disabled?\n");
         return JVS_CLI_STATUS_ERROR;
     }
-    debug(0, "OpenJVS has disabled the controller '%s'.\n", deviceName);
+    debug(0, "ModernJVS has disabled the controller '%s'.\n", deviceName);
     return JVS_CLI_STATUS_SUCCESS_CLOSE;
 }
 
@@ -261,11 +261,11 @@ static JVSCLIStatus printListing(void)
 
     if (!getInputs(deviceList))
     {
-        debug(0, "OpenJVS failed to detect any controllers.\nMake sure you are running as root.\n");
+        debug(0, "ModernJVS failed to detect any controllers.\nMake sure you are running as root.\n");
         return JVS_CLI_STATUS_ERROR;
     }
 
-    debug(0, "OpenJVS can detect the following controllers:\n\n");
+    debug(0, "ModernJVS can detect the following controllers:\n\n");
     InputMappings inputMappings;
     inputMappings.length = 0;
     debug(0, "Enabled:\n");

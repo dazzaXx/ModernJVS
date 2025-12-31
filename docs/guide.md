@@ -1,16 +1,16 @@
-# OpenJVS
+# ModernJVS
 
-OpenJVS is an emulator for JVS Arcade IO boards which are used in many arcade systems to this day.
+ModernJVS is an emulator for JVS Arcade IO boards which are used in many arcade systems to this day.
 
 Questions can be asked in the discord channel: https://arcade.community. If it asks you to create an account, you can simply click anywhere away from the box (the dark area) and it'll let you in!
 
 ## Requirements
 
-OpenJVS requires a USB RS485 dongle to communicate, or an OpenJVS Hat and supports the following hardware:
+ModernJVS requires a USB RS485 dongle to communicate, or an OpenJVS Hat and supports the following hardware:
 
 ### Raspberry Pi Compatibility
 
-OpenJVS supports all Raspberry Pi models:
+ModernJVS supports all Raspberry Pi models:
 - Raspberry Pi 1, 2, 3, 4
 - Raspberry Pi 5
 
@@ -57,56 +57,56 @@ When buying a USB to RS485 dongle be sure to buy one with an FTDI chip inside. T
 
 ## Installation and Running
 
-To install OpenJVS follow the instructions below to install the required packages and make the program.
+To install ModernJVS follow the instructions below to install the required packages and make the program.
 
 ```
 sudo apt install git cmake
-git clone https://github.com/OpenJVS/OpenJVS
-cd OpenJVS
+git clone https://github.com/dazzaXx/OpenJVS-Updated-libgpiod
+cd OpenJVS-Updated-libgpiod
 make
 ```
 
 To run locally (from inside the root directory):
 
 ```
-sudo ./build/openjvs [optional outside mapping name]
+sudo ./build/modernjvs [optional outside mapping name]
 ```
 
 To install globally and run (from inside the root directory):
 
 ```
 make install
-sudo openjvs [optional outside mapping name]
+sudo modernjvs [optional outside mapping name]
 ```
 
-To make OpenJVS run at startup you can use:
+To make ModernJVS run at startup you can use:
 
 ```
-sudo systemctl enable openjvs
-sudo systemctl start openjvs
+sudo systemctl enable modernjvs
+sudo systemctl start modernjvs
 ```
 
-> Note: You must then stop OpenJVS running with `sudo systemctl stop openjvs` if you want to then run it locally for testing.
+> Note: You must then stop ModernJVS running with `sudo systemctl stop modernjvs` if you want to then run it locally for testing.
 
 All input devices are enabled by default and must be disabled explicitly, to see what devices are available type:
 
 ```
-sudo openjvs --list
+sudo modernjvs --list
 ```
 
 You can then enable and disable the devices by running:
 
 ```
 # To enable
-sudo openjvs --enable sony-playstation-r-3-controller
+sudo modernjvs --enable sony-playstation-r-3-controller
 
 # To disable
-sudo openjvs --disable sony-playstation-r-3-controller
+sudo modernjvs --disable sony-playstation-r-3-controller
 ```
 
-Devices are automatically used if there is no map for them. OpenJVS will attempt to detect if the device is a keyboard or joystick and map it according to the default mapping file for those device types.
+Devices are automatically used if there is no map for them. ModernJVS will attempt to detect if the device is a keyboard or joystick and map it according to the default mapping file for those device types.
 
-If you'd like to stop the automatic detection, you can do this in the config file. If you'd like to stop an individual device being detected, you can create a blank mapping file for it in /etc/openjvs/devices.
+If you'd like to stop the automatic detection, you can do this in the config file. If you'd like to stop an individual device being detected, you can create a blank mapping file for it in /etc/modernjvs/devices.
 
 Each new device is seen as a new player. For example if you plug 2 playstation controllers in, they will be mapped to PLAYER 1 and PLAYER 2. This means you should disable controllers you don't want to use, as they will take up player space.
 
@@ -147,15 +147,15 @@ To support the new OpenJVS Hat some new features have been added
 
 ### Rotary
 
-If you'd like to use the rotary selector on the OpenJVS hat to select your game, simply edit `/etc/openjvs/config` and set the following:
+If you'd like to use the rotary selector on the OpenJVS hat to select your game, simply edit `/etc/modernjvs/config` and set the following:
 
 ```
 DEFAULT_GAME rotary
 ```
 
-A file located at `/etc/openjvs/rotary` will allow you to list up to 16 games which can be selected using the rotary selector on the hat. The first game in the list coresponds to position 0, and the second to position 1 and so on.
+A file located at `/etc/modernjvs/rotary` will allow you to list up to 16 games which can be selected using the rotary selector on the hat. The first game in the list coresponds to position 0, and the second to position 1 and so on.
 
-Once you've made a change to the rotary position, you must restart OpenJVS for it to take effect.
+Once you've made a change to the rotary position, you must restart ModernJVS for it to take effect.
 
 ## Mapping
 
@@ -165,7 +165,7 @@ To create mapping you should become familiar with the program _evtest_ which can
 
 ### Real to Virtual Controller Mapping
 
-Files for mapping your own controller to this virtual controller live in `/etc/openjvs/devices/` and should be named as the same name the controller comes up in when you run `sudo evtest` with the spaces replaced with `-` symbols.
+Files for mapping your own controller to this virtual controller live in `/etc/modernjvs/devices/` and should be named as the same name the controller comes up in when you run `sudo evtest` with the spaces replaced with `-` symbols.
 
 The file consists of multiple lines with a FROM and TO mapping seperated with a space like below.
 
@@ -263,9 +263,9 @@ CONTROLLER_ANALOGUE_T,                  RS Y                          Analogue J
 
 ### Virtual Controller to Game Mapping
 
-Files for mapping your own controller to this virtual controller live in `/etc/openjvs/games/` and should be named either by their function such as `generic-driving` or by a specific game name `outrun`.
+Files for mapping your own controller to this virtual controller live in `/etc/modernjvs/games/` and should be named either by their function such as `generic-driving` or by a specific game name `outrun`.
 
-This file will be selected using the `DEFAULT_MAPPING` config keyword, or by a parameter passed to the program `sudo openjvs outrun2`.
+This file will be selected using the `DEFAULT_MAPPING` config keyword, or by a parameter passed to the program `sudo modernjvs outrun2`.
 
 The file consists of multiple lines with a `CONTROLLER_INPUT CONTROLLER_PLAYER ARCADE_INPUT ARCADE_PLAYER` mapping as shown below. Note `REVERSE` can be added to the end of a line to reverse the direction of the input.
 Note a secondary `BUTTON_*` can be added to the end of the line as a secondary output which will be enabled with the first. This allows the emulating of H shifters in games like Wangan Midnight Maximum Tune.
@@ -350,4 +350,4 @@ CONTROLLER_BUTTON_LEFT_BUMPER CONTROLLER_1 BUTTON_DOWN PLAYER_2
 
 ```
 
-As well as this the IO that should be emulated can be specified in the map file with the `EMULATE` keyword, these IOs are defined in the `/etc/openjvs/ios` directory.
+As well as this the IO that should be emulated can be specified in the map file with the `EMULATE` keyword, these IOs are defined in the `/etc/modernjvs/ios` directory.

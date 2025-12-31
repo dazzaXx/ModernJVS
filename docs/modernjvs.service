@@ -1,13 +1,12 @@
 [Unit]
-Description=OpenJVSService
+Description=ModernJVSService
 
 [Service]
 User=root
 Type=simple
 Restart=always
 RestartSec=10
-StartLimitIntervalSec=0
-ExecStart=/usr/bin/openjvs %I
+ExecStart=/usr/bin/modernjvs
 
 [Install]
 WantedBy=multi-user.target

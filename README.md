@@ -1,6 +1,6 @@
-# OpenJVS-Updated-libgpiod
+# ModernJVS-Updated-libgpiod
 
-OpenJVS is an emulator for I/O boards in arcade machines that use the JVS protocol. It requires a USB RS485 converter, or an official OpenJVS HAT.
+ModernJVS is an emulator for I/O boards in arcade machines that use the JVS protocol. It requires a USB RS485 converter, or an official OpenJVS HAT.
 
 
 
@@ -48,7 +48,7 @@ sudo make install
 
 ## Supported Hardware
 
-OpenJVS supports all Raspberry Pi models including:
+ModernJVS supports all Raspberry Pi models including:
 - Raspberry Pi 1, 2, 3, 4
 - Raspberry Pi 5 (with automatic GPIO chip detection)
 
@@ -77,11 +77,11 @@ I have tested CH340E USB RS485 converters personally and they work. ~dazzaXx
 
 ## Configuration
 
-OpenJVS can be configured using the following command:
+ModernJVS can be configured using the following command:
 ```
-sudo nano /etc/openjvs/config
+sudo nano /etc/modernjvs/config
 ```
-Check the /etc/openjvs/ios folder to see which I/O boards can be emulated and input the name of it on the EMULATE line.
+Check the /etc/modernjvs/ios folder to see which I/O boards can be emulated and input the name of it on the EMULATE line.
 
 By default it will emulate the Namco FCA1, as well as the debug level set to 1.
 

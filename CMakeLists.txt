@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.10)
 
-project(openjvs
+project(modernjvs
         VERSION "5.0.0"
         LANGUAGES "C"
         DESCRIPTION "An emulator for arcade JVS I/O boards"
@@ -19,7 +19,7 @@ configure_file(src/version.h.in version.h)
 
 # Source files - explicitly listed for better dependency tracking
 set(SOURCES
-    src/openjvs.c
+    src/modernjvs.c
     src/console/cli.c
     src/console/config.c
     src/console/debug.c
@@ -82,13 +82,13 @@ install(TARGETS ${PROJECT_NAME}
 )
 
 install(FILES
-    ${CMAKE_SOURCE_DIR}/docs/openjvs.service
-    ${CMAKE_SOURCE_DIR}/docs/openjvs@.service
+    ${CMAKE_SOURCE_DIR}/docs/modernjvs.service
+    ${CMAKE_SOURCE_DIR}/docs/modernjvs@.service
     COMPONENT ${PROJECT_NAME}
     DESTINATION "/etc/systemd/system/"
 )
 
-install(DIRECTORY ${CMAKE_SOURCE_DIR}/docs/openjvs
+install(DIRECTORY ${CMAKE_SOURCE_DIR}/docs/modernjvs
     COMPONENT ${PROJECT_NAME}
     DESTINATION "/etc/"
 )
