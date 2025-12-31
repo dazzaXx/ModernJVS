@@ -8,6 +8,16 @@ Questions can be asked in the discord channel: https://arcade.community. If it a
 
 OpenJVS requires a USB RS485 dongle to communicate, or an OpenJVS Hat and supports the following hardware:
 
+### Raspberry Pi Compatibility
+
+OpenJVS supports all Raspberry Pi models:
+- Raspberry Pi 1, 2, 3, 4
+- Raspberry Pi 5
+
+The software automatically detects the correct GPIO chip for your Raspberry Pi model (gpiochip0 for Pi 1-4, gpiochip4 for Pi 5).
+
+### Arcade Platform Support
+
 | Platform                        | Status      | Sense Line Required |
 |---------------------------------|-------------|---------------------|
 | Naomi 1                         | Working     | No                  |

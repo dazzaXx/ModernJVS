@@ -46,6 +46,14 @@ make
 sudo make install
 ```
 
+## Supported Hardware
+
+OpenJVS supports all Raspberry Pi models including:
+- Raspberry Pi 1, 2, 3, 4
+- Raspberry Pi 5 (with automatic GPIO chip detection)
+
+The software automatically detects the correct GPIO chip for your Raspberry Pi model.
+
 On games that require a sense line, the following has to be wired up:
 
 ```
