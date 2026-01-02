@@ -127,15 +127,15 @@ static JVSCLIStatus editFile(char *filePath)
     pid_t pid = fork();
     if (pid == -1)
     {
-        printf("Error: Failed to fork process\n");
+        perror("Error: Failed to fork process");
         return JVS_CLI_STATUS_ERROR;
     }
     else if (pid == 0)
     {
-        // Child process - execute editor
-        execlp("sudo", "sudo", "editor", mainName, (char *)NULL);
-        // If execlp returns, it failed
-        printf("Error: Failed to execute editor\n");
+        // Child process - execute editor with absolute path for security
+        execl("/usr/bin/sudo", "sudo", "editor", mainName, (char *)NULL);
+        // If execl returns, it failed
+        perror("Error: Failed to execute editor");
         _exit(1);
     }
     else
@@ -143,6 +143,20 @@ static JVSCLIStatus editFile(char *filePath)
         // Parent process - wait for child
         int status;
         waitpid(pid, &status, 0);
+        
+        // Check if editor exited normally
+        if (WIFEXITED(status))
+        {
+            int exit_status = WEXITSTATUS(status);
+            if (exit_status != 0)
+            {
+                printf("Warning: Editor exited with status %d\n", exit_status);
+            }
+        }
+        else if (WIFSIGNALED(status))
+        {
+            printf("Warning: Editor terminated by signal %d\n", WTERMSIG(status));
+        }
     }
     
     return JVS_CLI_STATUS_SUCCESS_CLOSE;
