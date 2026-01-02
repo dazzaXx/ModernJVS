@@ -237,8 +237,8 @@ static void *deviceThread(void *_args)
                 /* Warn if range is zero or inverted */
                 if (range <= 0)
                 {
-                    debug(1, "Warning: Analog axis %d has invalid range [%d, %d]\n", 
-                          axisIndex, (int)args->inputs.absMin[axisIndex], (int)args->inputs.absMax[axisIndex]);
+                    debug(1, "Warning: Analog axis %d has invalid range [%.0f, %.0f]\n", 
+                          axisIndex, args->inputs.absMin[axisIndex], args->inputs.absMax[axisIndex]);
                 }
                 
                 /* Warn if multiplier could cause values to exceed normal bounds */
@@ -248,9 +248,9 @@ static void *deviceThread(void *_args)
                           axisIndex, multiplier);
                 }
                 
-                debug(3, "Analog axis %d initialized: min=%d, max=%d, multiplier=%.2f\n",
-                      axisIndex, (int)args->inputs.absMin[axisIndex], 
-                      (int)args->inputs.absMax[axisIndex], multiplier);
+                debug(3, "Analog axis %d initialized: min=%.0f, max=%.0f, multiplier=%.2f\n",
+                      axisIndex, args->inputs.absMin[axisIndex], 
+                      args->inputs.absMax[axisIndex], multiplier);
             }
         }
     }
@@ -284,7 +284,7 @@ static void *deviceThread(void *_args)
             /* Warn if initial value requires clamping */
             if (scaled > 1.0 || scaled < 0.0)
             {
-                debug(2, "Warning: Initial analog axis %d value %.3f out of bounds - clamping (raw=%d)\n",
+                debug(2, "Warning: Analog axis %d value %.3f out of bounds [0,1] - clamping during init (raw=%d)\n",
                       axisIndex, scaled, currentValue);
             }
 
