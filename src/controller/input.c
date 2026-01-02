@@ -230,6 +230,60 @@ static void *deviceThread(void *_args)
         }
     }
 
+    /* Initialize analog axis values to their current hardware position */
+    for (int axisIndex = 0; axisIndex < ABS_MAX; ++axisIndex)
+    {
+        if (test_bit(axisIndex, absoluteBitmask) && args->inputs.absEnabled[axisIndex])
+        {
+            /* Skip HAT and SWITCH types - only initialize ANALOGUE type axes */
+            if (args->inputs.abs[axisIndex].type != ANALOGUE)
+                continue;
+
+            /* Read current axis value */
+            if (ioctl(fd, EVIOCGABS(axisIndex), &absoluteFeatures))
+                continue;
+
+            int currentValue = absoluteFeatures.value;
+
+            /* Apply the same scaling calculation as in the event loop */
+            double scaled = ((double)((double)currentValue * (double)args->inputs.absMultiplier[axisIndex]) - args->inputs.absMin[axisIndex]) / (args->inputs.absMax[axisIndex] - args->inputs.absMin[axisIndex]);
+
+            /* Clamp to [0, 1] range */
+            scaled = scaled > 1 ? 1 : scaled;
+            scaled = scaled < 0 ? 0 : scaled;
+
+            /* Apply deadzone logic (same as in event loop) */
+            if (args->analogDeadzone > 0 && args->analogDeadzone < MAX_ANALOG_DEADZONE &&
+                (args->player >= 1 && args->player <= 4) &&
+                (args->inputs.abs[axisIndex].input == CONTROLLER_ANALOGUE_X || 
+                 args->inputs.abs[axisIndex].input == CONTROLLER_ANALOGUE_Y))
+            {
+                /* Center the value around 0.5 */
+                double centered = scaled - ANALOG_CENTER_VALUE;
+                double magnitude = fabs(centered);
+                
+                /* Apply deadzone: if within deadzone, set to center */
+                if (magnitude < args->analogDeadzone)
+                {
+                    scaled = ANALOG_CENTER_VALUE;
+                }
+                else if (MAX_ANALOG_DEADZONE - args->analogDeadzone > MIN_DIVISION_THRESHOLD)
+                {
+                    /* Scale the remaining range outside the deadzone */
+                    double sign = (centered > 0) ? 1.0 : -1.0;
+                    scaled = ANALOG_CENTER_VALUE + sign * ((magnitude - args->analogDeadzone) / (MAX_ANALOG_DEADZONE - args->analogDeadzone)) * ANALOG_CENTER_VALUE;
+                }
+            }
+
+            /* Apply reverse logic if configured */
+            double finalValue = args->inputs.abs[axisIndex].reverse ? 1 - scaled : scaled;
+
+            /* Initialize the JVS state with the current hardware position */
+            setAnalogue(args->jvsIO, args->inputs.abs[axisIndex].output, finalValue);
+            setGun(args->jvsIO, args->inputs.abs[axisIndex].output, finalValue);
+        }
+    }
+
     fd_set file_descriptor;
     struct timeval tv;
 
