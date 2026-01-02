@@ -348,7 +348,7 @@ static void *deviceThread(void *_args)
         if (select(fd + 1, &file_descriptor, NULL, NULL, &tv) < 1)
             continue;
 
-        while (read(fd, &event, sizeof(event)) == sizeof(event))
+        if (read(fd, &event, sizeof(event)) == sizeof(event))
         {
             switch (event.type)
             {
