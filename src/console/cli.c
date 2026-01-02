@@ -1,6 +1,9 @@
 #include <dirent.h>
 #include <stdio.h>
 #include <string.h>
+#include <ctype.h>
+#include <unistd.h>
+#include <sys/wait.h>
 
 #include "console/cli.h"
 #include "console/config.h"
@@ -10,6 +13,7 @@
 /* Forward declarations for internal functions */
 static JVSCLIStatus printUsage(void);
 static JVSCLIStatus printVersion(void);
+static int validateFilename(const char *filename);
 static JVSCLIStatus editFile(char *filePath);
 static JVSCLIStatus enableDevice(char *deviceName);
 static JVSCLIStatus disableDevice(char *deviceName);
@@ -53,6 +57,35 @@ static JVSCLIStatus printVersion(void)
 }
 
 /**
+ * Validate filename for safety
+ * 
+ * Validates that a filename contains only safe characters
+ * to prevent command injection attacks.
+ *
+ * @param filename The filename to validate
+ * @returns 1 if valid, 0 if invalid
+ **/
+static int validateFilename(const char *filename)
+{
+    if (filename == NULL || *filename == '\0')
+        return 0;
+    
+    // Check for directory traversal attempts
+    if (strstr(filename, "..") != NULL)
+        return 0;
+    
+    // Only allow alphanumeric, dash, underscore, dot, and slash
+    for (const char *p = filename; *p != '\0'; p++)
+    {
+        if (!isalnum((unsigned char)*p) && *p != '-' && *p != '_' && 
+            *p != '.' && *p != '/')
+            return 0;
+    }
+    
+    return 1;
+}
+
+/**
  * Edit a file in vim
  * 
  * Edits a file in the vim editor
@@ -61,6 +94,13 @@ static JVSCLIStatus printVersion(void)
  **/
 static JVSCLIStatus editFile(char *filePath)
 {
+    // Validate filename to prevent command injection
+    if (!validateFilename(filePath))
+    {
+        printf("Error: Invalid filename. Only alphanumeric characters, dash, underscore, dot, and slash are allowed.\n");
+        return JVS_CLI_STATUS_ERROR;
+    }
+
     char mainName[1024];
     int ret = snprintf(mainName, sizeof(mainName), "%s%s", DEFAULT_DEVICE_MAPPING_PATH, filePath);
     if (ret < 0 || ret >= (int)sizeof(mainName))
@@ -83,14 +123,28 @@ static JVSCLIStatus editFile(char *filePath)
         }
     }
 
-    char command[1024];
-    ret = snprintf(command, sizeof(command), "sudo editor %s", mainName);
-    if (ret < 0 || ret >= (int)sizeof(command))
+    // Use fork and exec instead of system() to avoid shell injection
+    pid_t pid = fork();
+    if (pid == -1)
     {
-        printf("Error: Command too long\n");
+        printf("Error: Failed to fork process\n");
         return JVS_CLI_STATUS_ERROR;
     }
-    system(command);
+    else if (pid == 0)
+    {
+        // Child process - execute editor
+        execlp("sudo", "sudo", "editor", mainName, (char *)NULL);
+        // If execlp returns, it failed
+        printf("Error: Failed to execute editor\n");
+        _exit(1);
+    }
+    else
+    {
+        // Parent process - wait for child
+        int status;
+        waitpid(pid, &status, 0);
+    }
+    
     return JVS_CLI_STATUS_SUCCESS_CLOSE;
 }
 
