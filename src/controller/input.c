@@ -227,6 +227,31 @@ static void *deviceThread(void *_args)
 
             args->inputs.absMax[axisIndex] = (double)absoluteFeatures.maximum;
             args->inputs.absMin[axisIndex] = (double)absoluteFeatures.minimum;
+            
+            /* Validate analog axis bounds and warn about suspicious configurations */
+            if (args->inputs.absEnabled[axisIndex])
+            {
+                double range = args->inputs.absMax[axisIndex] - args->inputs.absMin[axisIndex];
+                double multiplier = args->inputs.absMultiplier[axisIndex];
+                
+                /* Warn if range is zero or inverted */
+                if (range <= 0)
+                {
+                    debug(1, "Warning: Analog axis %d has invalid range [%d, %d]\n", 
+                          axisIndex, (int)args->inputs.absMin[axisIndex], (int)args->inputs.absMax[axisIndex]);
+                }
+                
+                /* Warn if multiplier could cause values to exceed normal bounds */
+                if (multiplier > 1.0 || multiplier < 0.0)
+                {
+                    debug(2, "Warning: Analog axis %d has unusual multiplier %.2f (may cause clamping)\n", 
+                          axisIndex, multiplier);
+                }
+                
+                debug(3, "Analog axis %d initialized: min=%d, max=%d, multiplier=%.2f\n",
+                      axisIndex, (int)args->inputs.absMin[axisIndex], 
+                      (int)args->inputs.absMax[axisIndex], multiplier);
+            }
         }
     }
 
@@ -247,8 +272,21 @@ static void *deviceThread(void *_args)
 
             int currentValue = absoluteFeatures.value;
 
+            debug(3, "Initializing analog axis %d: raw_value=%d, min=%.0f, max=%.0f\n",
+                  axisIndex, currentValue, args->inputs.absMin[axisIndex], args->inputs.absMax[axisIndex]);
+
             /* Apply the same scaling calculation as in the event loop */
             double scaled = ((double)((double)currentValue * (double)args->inputs.absMultiplier[axisIndex]) - args->inputs.absMin[axisIndex]) / (args->inputs.absMax[axisIndex] - args->inputs.absMin[axisIndex]);
+
+            /* Log scaled value before clamping */
+            debug(3, "Analog axis %d init: scaled_before_clamp=%.3f\n", axisIndex, scaled);
+            
+            /* Warn if initial value requires clamping */
+            if (scaled > 1.0 || scaled < 0.0)
+            {
+                debug(2, "Warning: Initial analog axis %d value %.3f out of bounds - clamping (raw=%d)\n",
+                      axisIndex, scaled, currentValue);
+            }
 
             /* Clamp to [0, 1] range */
             scaled = scaled > 1 ? 1 : scaled;
@@ -261,6 +299,8 @@ static void *deviceThread(void *_args)
                 (args->inputs.abs[axisIndex].input == CONTROLLER_ANALOGUE_X || 
                  args->inputs.abs[axisIndex].input == CONTROLLER_ANALOGUE_Y))
             {
+                double scaled_before_deadzone = scaled;
+                
                 /* Center the value around 0.5 */
                 double centered = scaled - ANALOG_CENTER_VALUE;
                 double magnitude = fabs(centered);
@@ -276,10 +316,16 @@ static void *deviceThread(void *_args)
                     double sign = (centered > 0) ? 1.0 : -1.0;
                     scaled = ANALOG_CENTER_VALUE + sign * ((magnitude - args->analogDeadzone) / (MAX_ANALOG_DEADZONE - args->analogDeadzone)) * ANALOG_CENTER_VALUE;
                 }
+                
+                debug(3, "Analog axis %d init: applied deadzone %.2f (before=%.3f, after=%.3f)\n",
+                      axisIndex, args->analogDeadzone, scaled_before_deadzone, scaled);
             }
 
             /* Apply reverse logic if configured */
             double finalValue = args->inputs.abs[axisIndex].reverse ? 1 - scaled : scaled;
+            
+            debug(3, "Analog axis %d init: final_value=%.3f (reverse=%d)\n",
+                  axisIndex, finalValue, args->inputs.abs[axisIndex].reverse);
 
             /* Initialize the JVS state with the current hardware position */
             setAnalogue(args->jvsIO, args->inputs.abs[axisIndex].output, finalValue);
@@ -397,7 +443,22 @@ static void *deviceThread(void *_args)
                 /* Handle normally mapped analogue controls */
                 if (args->inputs.absEnabled[event.code])
                 {
+                    /* Log raw event data at debug level 3 for analog inputs */
+                    debug(3, "Analog event: axis=%d, raw_value=%d, min=%.0f, max=%.0f, multiplier=%.2f\n",
+                          event.code, event.value, args->inputs.absMin[event.code], 
+                          args->inputs.absMax[event.code], args->inputs.absMultiplier[event.code]);
+                    
                     double scaled = ((double)((double)event.value * (double)args->inputs.absMultiplier[event.code]) - args->inputs.absMin[event.code]) / (args->inputs.absMax[event.code] - args->inputs.absMin[event.code]);
+
+                    /* Log scaled value before clamping */
+                    debug(3, "Analog axis %d: scaled_before_clamp=%.3f\n", event.code, scaled);
+                    
+                    /* Check if clamping is needed and warn about it */
+                    if (scaled > 1.0 || scaled < 0.0)
+                    {
+                        debug(2, "Warning: Analog axis %d value %.3f out of bounds [0,1] - clamping (raw=%d)\n",
+                              event.code, scaled, event.value);
+                    }
 
                     /* Make sure it doesn't go over 1 or below 0 if its multiplied */
                     scaled = scaled > 1 ? 1 : scaled;
@@ -410,6 +471,8 @@ static void *deviceThread(void *_args)
                         (args->inputs.abs[event.code].input == CONTROLLER_ANALOGUE_X || 
                          args->inputs.abs[event.code].input == CONTROLLER_ANALOGUE_Y))
                     {
+                        double scaled_before_deadzone = scaled;
+                        
                         /* Center the value around 0.5 */
                         double centered = scaled - ANALOG_CENTER_VALUE;
                         double magnitude = fabs(centered);
@@ -425,10 +488,18 @@ static void *deviceThread(void *_args)
                             double sign = (centered > 0) ? 1.0 : -1.0;
                             scaled = ANALOG_CENTER_VALUE + sign * ((magnitude - args->analogDeadzone) / (MAX_ANALOG_DEADZONE - args->analogDeadzone)) * ANALOG_CENTER_VALUE;
                         }
+                        
+                        debug(3, "Analog axis %d: applied deadzone %.2f (before=%.3f, after=%.3f)\n",
+                              event.code, args->analogDeadzone, scaled_before_deadzone, scaled);
                     }
 
-                    setAnalogue(args->jvsIO, args->inputs.abs[event.code].output, args->inputs.abs[event.code].reverse ? 1 - scaled : scaled);
-                    setGun(args->jvsIO, args->inputs.abs[event.code].output, args->inputs.abs[event.code].reverse ? 1 - scaled : scaled);
+                    /* Apply reverse logic and log final value */
+                    double finalValue = args->inputs.abs[event.code].reverse ? 1 - scaled : scaled;
+                    debug(3, "Analog axis %d: final_value=%.3f (reverse=%d)\n", 
+                          event.code, finalValue, args->inputs.abs[event.code].reverse);
+
+                    setAnalogue(args->jvsIO, args->inputs.abs[event.code].output, finalValue);
+                    setGun(args->jvsIO, args->inputs.abs[event.code].output, finalValue);
                 }
             }
             break;
