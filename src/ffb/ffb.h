@@ -72,25 +72,11 @@ typedef struct
     
     // Command queue
     FFBCommandQueue commandQueue;
-    
-    // Emulation for non-FFB controllers
-    int emulationMode;           // 1 if emulating, 0 if real FFB
-    long lastCommandTime;        // Timestamp of last command (milliseconds)
-    int currentPosition;         // Emulated motor position (-100 to 100)
-    int targetPosition;          // Target position from last command
-    int motorStatus;             // Motor status flags
-    unsigned char lastCommand[16]; // Last FFB command received
-    int lastCommandLength;       // Length of last command
 } FFBState;
 
 FFBStatus initFFB(FFBState *state, FFBEmulationType type, char *serialPath);
 FFBStatus bindController(FFBState *state, int controller);
 FFBStatus closeFFB(FFBState *state);
 FFBStatus queueFFBCommand(FFBState *state, FFBCommand *command);
-
-// Emulation functions
-void updateEmulatedPosition(FFBState *state);
-int getEmulatedStatus(FFBState *state, unsigned char *response, int maxLen);
-void trackFFBCommand(FFBState *state, const unsigned char *data, int length);
 
 #endif // FFB_H_
