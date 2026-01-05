@@ -690,6 +690,7 @@ JVSStatus processPacket(JVSIO *jvsIO)
 			case 0x31:
 			{
 				// Parse direction from command data
+				// NAMCO 0x31 format: [0x70] [0x31] [direction_byte] [additional_params...]
 				unsigned char direction = inputPacket.data[index + 2];
 				
 				// Update target position based on direction
@@ -707,8 +708,8 @@ JVSStatus processPacket(JVSIO *jvsIO)
 				debug(2, "FFB: Control command - direction 0x%02X, target position %d\n", 
 					direction, ffbEmulation.targetPosition);
 				
-				// Additional bytes in the command
-				size += inputPacket.data[index + 2] == 0x00 ? 1 : 2;
+				// Command has 1 additional parameter byte (direction)
+				size += 1;
 				// Response already added (REPORT_SUCCESS)
 			}
 			break;
@@ -720,17 +721,18 @@ JVSStatus processPacket(JVSIO *jvsIO)
 				outputPacket.length--;
 				
 				// Convert position (-100 to 100) to 16-bit (center = 0x8000)
+				// Scaling factor: 327 ≈ 0x7FFF / 100 to map -100..100 to 0x0000..0xFFFF
 				int position16 = 0x8000 + (ffbEmulation.currentPosition * 327);
 				
 				// Build 5-byte response
 				outputPacket.data[outputPacket.length++] = 0x01; // REPORT_SUCCESS
-				outputPacket.data[outputPacket.length++] = 0x00; // Motor ready status
+				outputPacket.data[outputPacket.length++] = ffbEmulation.motorReady ? 0x00 : 0x01; // Motor status (0x00 = ready)
 				outputPacket.data[outputPacket.length++] = (position16 >> 8) & 0xFF; // Position MSB
 				outputPacket.data[outputPacket.length++] = position16 & 0xFF; // Position LSB
 				outputPacket.data[outputPacket.length++] = 0x40; // Torque level
 				
-				debug(2, "FFB: Status query - returning position %d (0x%04X)\n", 
-					ffbEmulation.currentPosition, position16);
+				debug(2, "FFB: Status query - returning position %d (0x%04X), motor %s\n", 
+					ffbEmulation.currentPosition, position16, ffbEmulation.motorReady ? "ready" : "not ready");
 			}
 			break;
 
