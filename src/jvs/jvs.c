@@ -13,6 +13,13 @@ unsigned char outputBuffer[JVS_MAX_PACKET_SIZE], inputBuffer[JVS_MAX_PACKET_SIZE
 /* Packet counter for debugging */
 static unsigned long packetCounter = 0;
 
+/* FFB Emulation Constants */
+#define FFB_POSITION_CENTER 0
+#define FFB_POSITION_LEFT -50
+#define FFB_POSITION_RIGHT 50
+#define FFB_POSITION_SCALE_FACTOR 327  // 0x7FFF / 100 ≈ 327.67, maps -100..100 to 16-bit range
+#define FFB_POSITION_16BIT_CENTER 0x8000
+
 /* FFB Emulation State */
 typedef struct {
     int emulationMode;      // 1 = emulate, 0 = real FFB
@@ -689,17 +696,23 @@ JVSStatus processPacket(JVSIO *jvsIO)
 			// FFB Control - Move motor to position
 			case 0x31:
 			{
+				// Verify packet has enough data to read direction byte
+				if (index + 2 >= inputPacket.length) {
+					debug(0, "FFB: Error - command 0x31 packet too short\n");
+					break;
+				}
+				
 				// Parse direction from command data
 				// NAMCO 0x31 format: [0x70] [0x31] [direction_byte] [additional_params...]
 				unsigned char direction = inputPacket.data[index + 2];
 				
 				// Update target position based on direction
 				if (direction == 0x00 || direction == 0x80) {
-					ffbEmulation.targetPosition = 0; // Center
+					ffbEmulation.targetPosition = FFB_POSITION_CENTER;
 				} else if (direction < 0x80) {
-					ffbEmulation.targetPosition = -50; // Left
+					ffbEmulation.targetPosition = FFB_POSITION_LEFT;
 				} else {
-					ffbEmulation.targetPosition = 50; // Right
+					ffbEmulation.targetPosition = FFB_POSITION_RIGHT;
 				}
 				
 				// Instantly update current position (no gradual movement needed)
@@ -721,8 +734,13 @@ JVSStatus processPacket(JVSIO *jvsIO)
 				outputPacket.length--;
 				
 				// Convert position (-100 to 100) to 16-bit (center = 0x8000)
-				// Scaling factor: 327 ≈ 0x7FFF / 100 to map -100..100 to 0x0000..0xFFFF
-				int position16 = 0x8000 + (ffbEmulation.currentPosition * 327);
+				// Clamp the calculation to prevent overflow
+				int scaledPosition = ffbEmulation.currentPosition * FFB_POSITION_SCALE_FACTOR;
+				int position16 = FFB_POSITION_16BIT_CENTER + scaledPosition;
+				
+				// Clamp to valid 16-bit range to prevent overflow
+				if (position16 < 0) position16 = 0;
+				if (position16 > 0xFFFF) position16 = 0xFFFF;
 				
 				// Build 5-byte response
 				outputPacket.data[outputPacket.length++] = 0x01; // REPORT_SUCCESS
