@@ -82,6 +82,11 @@ int main(int argc, char **argv)
 
     JVSInputStatus lastInputState = JVS_INPUT_STATUS_SUCCESS;
     int lastRotaryValue = -1;
+    
+    /* Init Force Feedback state (persistent across loop iterations) */
+    FFBState ffbState;
+    int ffbInitialized = 0;
+    
     while (running != -1)
     {
         /* Init the watchdog to check the rotary and inputs */
@@ -146,6 +151,29 @@ int main(int argc, char **argv)
         }
 
         debug(0, "  Output:\t\t%s\n", config.defaultGamePath);
+
+        /* Init Force Feedback for Player 1 (only once) */
+        if (!ffbInitialized)
+        {
+            debug(1, "Init FFB\n");
+            FFBStatus ffbStatus = initFFB(&ffbState, FFB_EMULATION_TYPE_SEGA, config.devicePath);
+            if (ffbStatus == FFB_STATUS_SUCCESS)
+            {
+                // Bind to Player 1's controller (controller fd is not directly accessible,
+                // so we use a placeholder. The actual binding happens in the FFB thread)
+                bindController(&ffbState, 0); // Player 1
+                
+                // Register FFB state with JVS layer for command processing
+                setFFBState(&ffbState);
+                
+                ffbInitialized = 1;
+                debug(1, "FFB: Initialized and bound to Player 1\n");
+            }
+            else
+            {
+                debug(1, "FFB: Initialization failed or not supported\n");
+            }
+        }
 
         debug(1, "Parse IO\n");
         JVSConfigStatus ioStatus = parseIO(config.capabilitiesPath, &io.capabilities);
@@ -246,6 +274,12 @@ int main(int argc, char **argv)
         lastInputState = inputStatus;
         lastRotaryValue = rotaryValue;
         cleanup();
+    }
+
+    /* Cleanup FFB */
+    if (ffbInitialized)
+    {
+        closeFFB(&ffbState);
     }
 
     /* Close the file pointer */

@@ -1,6 +1,7 @@
 #include "jvs/jvs.h"
 #include "hardware/device.h"
 #include "console/debug.h"
+#include "ffb/ffb.h"
 
 #include <time.h>
 
@@ -12,6 +13,82 @@ unsigned char outputBuffer[JVS_MAX_PACKET_SIZE], inputBuffer[JVS_MAX_PACKET_SIZE
 
 /* Packet counter for debugging */
 static unsigned long packetCounter = 0;
+
+/* Global FFB state pointer (set externally) */
+static FFBState *globalFFBState = NULL;
+
+void setFFBState(void *state)
+{
+	globalFFBState = state;
+}
+
+static void processFFBCommand(unsigned char *data, int length)
+{
+	if (!globalFFBState || !globalFFBState->hasFFB)
+		return;
+	
+	FFBCommand command;
+	memset(&command, 0, sizeof(command));
+	
+	// Parse FFB command based on length and data
+	if (length >= 3)
+	{
+		// Common format: [command] [strength] [duration_high] [duration_low]
+		command.strength = data[1];
+		if (length >= 4)
+		{
+			command.duration = (data[2] << 8) | data[3];
+		}
+		else
+		{
+			command.duration = 1000; // Default 1 second
+		}
+		
+		// Determine effect type based on strength patterns
+		// This is a simplified interpretation
+		if (command.strength == 0)
+		{
+			command.type = FFB_COMMAND_TYPE_STOP_ALL;
+		}
+		else if (command.strength < 128)
+		{
+			// Lower strength: use rumble for gamepads or damper for wheels
+			if (globalFFBState->hasRumble)
+			{
+				command.type = FFB_COMMAND_TYPE_RUMBLE;
+				command.leftMagnitude = command.strength;
+				command.rightMagnitude = command.strength;
+			}
+			else if (globalFFBState->hasDamper)
+			{
+				command.type = FFB_COMMAND_TYPE_DAMPER;
+			}
+			else if (globalFFBState->hasConstant)
+			{
+				command.type = FFB_COMMAND_TYPE_CONSTANT;
+			}
+		}
+		else
+		{
+			// Higher strength: use constant force for wheels or strong rumble for gamepads
+			if (globalFFBState->hasConstant)
+			{
+				command.type = FFB_COMMAND_TYPE_CONSTANT;
+				command.direction = 0; // Centered
+			}
+			else if (globalFFBState->hasRumble)
+			{
+				command.type = FFB_COMMAND_TYPE_RUMBLE;
+				command.leftMagnitude = command.strength;
+				command.rightMagnitude = command.strength;
+			}
+		}
+		
+		queueFFBCommand(globalFFBState, &command);
+		debug(2, "FFB: Queued command type %d, strength %d, duration %d\n", 
+		      command.type, command.strength, command.duration);
+	}
+}
 
 /**
  * Get the name of a JVS command
@@ -659,6 +736,25 @@ JVSStatus processPacket(JVSIO *jvsIO)
 				outputPacket.data[outputPacket.length++] = 0xFF;
 			}
 			break;
+			
+			// Force Feedback sub-commands for NAMCO
+			case 0x30: // FFB test/init
+			case 0x31: // FFB control
+			case 0x32: // FFB status
+			{
+				debug(2, "CMD_NAMCO_FFB - FFB sub-command 0x%02hhX\n", inputPacket.data[index + 1]);
+				
+				// Process FFB command
+				int ffbDataLen = inputPacket.length - index - 2;
+				if (ffbDataLen > 0)
+				{
+					processFFBCommand(&inputPacket.data[index + 1], ffbDataLen + 1);
+				}
+				
+				// Respond with success to indicate FFB support
+				outputPacket.data[outputPacket.length++] = 0x01; // FFB ready/OK
+			}
+			break;
 
 			default:
 			{
@@ -670,7 +766,28 @@ JVSStatus processPacket(JVSIO *jvsIO)
 
 		default:
 		{
-			debug(0, "CMD_UNSUPPORTED - Unsupported command: 0x%02hhX\n", inputPacket.data[index]);
+			// Check if it's a SEGA FFB command (0x60-0x6F range)
+			if (inputPacket.data[index] >= CMD_MANUFACTURER_START && 
+			    inputPacket.data[index] < CMD_NAMCO_SPECIFIC)
+			{
+				debug(2, "CMD_SEGA_FFB - Processing SEGA FFB command 0x%02hhX\n", inputPacket.data[index]);
+				
+				// SEGA FFB commands typically have the format:
+				// [cmd] [strength] [duration_high] [duration_low]
+				int ffbDataLen = (inputPacket.length - index > 4) ? 4 : (inputPacket.length - index);
+				if (ffbDataLen > 1)
+				{
+					processFFBCommand(&inputPacket.data[index], ffbDataLen);
+				}
+				
+				// Respond with success to indicate FFB support
+				outputPacket.data[outputPacket.length++] = REPORT_SUCCESS;
+				size = ffbDataLen;
+			}
+			else
+			{
+				debug(0, "CMD_UNSUPPORTED - Unsupported command: 0x%02hhX\n", inputPacket.data[index]);
+			}
 		}
 		}
 		index += size;
