@@ -93,6 +93,12 @@ install(DIRECTORY ${CMAKE_SOURCE_DIR}/docs/modernjvs
     DESTINATION "/etc/"
 )
 
+install(FILES
+    ${CMAKE_SOURCE_DIR}/docs/modules-load.d/wiimote.conf
+    COMPONENT ${PROJECT_NAME}
+    DESTINATION "/etc/modules-load.d/"
+)
+
 # CPack configuration for DEB package generation
 set(CPACK_GENERATOR "DEB")
 set(CPACK_DEBIAN_PACKAGE_MAINTAINER "bobby@dilley.uk")
