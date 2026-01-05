@@ -777,7 +777,7 @@ JVSStatus processPacket(JVSIO *jvsIO)
 						unsigned char statusResponse[16];
 						int statusLen = getEmulatedStatus(globalFFBState, statusResponse, sizeof(statusResponse));
 						
-						if (statusLen > 0 && (outputPacket.length + statusLen) < JVS_MAX_PACKET_SIZE)
+						if (statusLen > 0 && (outputPacket.length + statusLen) <= JVS_MAX_PACKET_SIZE)
 						{
 							for (int i = 0; i < statusLen; i++)
 							{

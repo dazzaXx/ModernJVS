@@ -679,9 +679,12 @@ int getEmulatedStatus(FFBState *state, unsigned char *response, int maxLen)
     }
     
     // Convert position (-100 to 100) to 16-bit value (0x0000 to 0xFFFF, center = 0x8000)
-    // Avoid overflow by doing division first: position16 = 0x8000 + (currentPosition * (0x7FFF / 100))
-    int scaledPosition = (state->currentPosition * 327); // 0x7FFF / 100 ≈ 327
+    // Scale by 327 (approximately 0x7FFF / 100) to map position range to 16-bit range
+    // currentPosition is clamped to [-100, 100], so max result is ±32700, which fits in int
+    int scaledPosition = (state->currentPosition * 327);
     int position16 = 0x8000 + scaledPosition;
+    
+    // Clamp to valid 16-bit range (should not happen with proper position clamping)
     if (position16 < 0)
         position16 = 0;
     if (position16 > 0xFFFF)
