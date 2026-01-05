@@ -696,16 +696,25 @@ JVSStatus processPacket(JVSIO *jvsIO)
 			// FFB Control - Move motor to position
 			case 0x31:
 			{
-				// Verify packet has enough data to read direction byte
-				// Need at least index + 3 bytes (cmd byte at index+1, direction at index+2)
+				// Parse direction from command data first to determine packet length
+				// NAMCO 0x31 format: [0x70] [0x31] [direction_byte] [additional_params...]
+				
+				// First verify we have at least the direction byte
 				if (index + 3 > inputPacket.length) {
-					debug(0, "FFB: Error - command 0x31 packet too short\n");
+					debug(0, "FFB: Error - command 0x31 packet too short for direction byte\n");
 					break;
 				}
 				
-				// Parse direction from command data
-				// NAMCO 0x31 format: [0x70] [0x31] [direction_byte] [additional_params...]
 				unsigned char direction = inputPacket.data[index + 2];
+				
+				// Determine expected parameter count based on direction
+				int paramCount = (direction == 0x00) ? 1 : 2;
+				
+				// Verify packet has enough data for all parameters
+				if (index + 2 + paramCount > inputPacket.length) {
+					debug(0, "FFB: Error - command 0x31 packet too short for %d parameters\n", paramCount);
+					break;
+				}
 				
 				// Update target position based on direction
 				if (direction == 0x00 || direction == 0x80) {
@@ -723,8 +732,7 @@ JVSStatus processPacket(JVSIO *jvsIO)
 					direction, ffbEmulation.targetPosition);
 				
 				// Command has variable length: direction byte + possible additional parameter
-				// When direction is 0x00 (center), only 1 param byte; otherwise 2 param bytes
-				size += (direction == 0x00) ? 1 : 2;
+				size += paramCount;
 				// Response already added (REPORT_SUCCESS)
 			}
 			break;
