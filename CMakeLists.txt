@@ -94,7 +94,7 @@ install(DIRECTORY ${CMAKE_SOURCE_DIR}/docs/modernjvs
 )
 
 install(FILES
-    ${CMAKE_SOURCE_DIR}/docs/modules-load.d/wiimote.conf
+    ${CMAKE_SOURCE_DIR}/docs/wiimote.conf
     COMPONENT ${PROJECT_NAME}
     DESTINATION "/etc/modules-load.d/"
 )
