@@ -118,6 +118,4 @@ JVSStatus processPacket(JVSIO *jvsIO);
 JVSStatus readPacket(JVSPacket *packet);
 JVSStatus writePacket(JVSPacket *packet);
 
-void setFFBState(void *state);
-
 #endif // JVS_H_
