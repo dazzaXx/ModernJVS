@@ -13,6 +13,21 @@ unsigned char outputBuffer[JVS_MAX_PACKET_SIZE], inputBuffer[JVS_MAX_PACKET_SIZE
 /* Packet counter for debugging */
 static unsigned long packetCounter = 0;
 
+/* FFB Emulation State */
+typedef struct {
+    int emulationMode;      // 1 = emulate, 0 = real FFB
+    int currentPosition;    // Simulated position (-100 to 100)
+    int targetPosition;     // Target from last command
+    int motorReady;         // Motor status flag
+} FFBEmulation;
+
+static FFBEmulation ffbEmulation = {
+    .emulationMode = 1,     // Always enable emulation for now
+    .currentPosition = 0,    // Start at center
+    .targetPosition = 0,
+    .motorReady = 0
+};
+
 /**
  * Get the name of a JVS command
  *
@@ -657,6 +672,65 @@ JVSStatus processPacket(JVSIO *jvsIO)
 			{
 				size += 4;
 				outputPacket.data[outputPacket.length++] = 0xFF;
+			}
+			break;
+
+			// FFB Init - Initialize force feedback motor
+			case 0x30:
+			{
+				debug(2, "FFB: Init command - emulation enabled\n");
+				ffbEmulation.motorReady = 1;
+				ffbEmulation.currentPosition = 0;
+				ffbEmulation.targetPosition = 0;
+				// Response already added (REPORT_SUCCESS)
+			}
+			break;
+
+			// FFB Control - Move motor to position
+			case 0x31:
+			{
+				// Parse direction from command data
+				unsigned char direction = inputPacket.data[index + 2];
+				
+				// Update target position based on direction
+				if (direction == 0x00 || direction == 0x80) {
+					ffbEmulation.targetPosition = 0; // Center
+				} else if (direction < 0x80) {
+					ffbEmulation.targetPosition = -50; // Left
+				} else {
+					ffbEmulation.targetPosition = 50; // Right
+				}
+				
+				// Instantly update current position (no gradual movement needed)
+				ffbEmulation.currentPosition = ffbEmulation.targetPosition;
+				
+				debug(2, "FFB: Control command - direction 0x%02X, target position %d\n", 
+					direction, ffbEmulation.targetPosition);
+				
+				// Additional bytes in the command
+				size += inputPacket.data[index + 2] == 0x00 ? 1 : 2;
+				// Response already added (REPORT_SUCCESS)
+			}
+			break;
+
+			// FFB Status Query - Return motor position and status
+			case 0x32:
+			{
+				// Remove the pre-added REPORT_SUCCESS since we need custom response
+				outputPacket.length--;
+				
+				// Convert position (-100 to 100) to 16-bit (center = 0x8000)
+				int position16 = 0x8000 + (ffbEmulation.currentPosition * 327);
+				
+				// Build 5-byte response
+				outputPacket.data[outputPacket.length++] = 0x01; // REPORT_SUCCESS
+				outputPacket.data[outputPacket.length++] = 0x00; // Motor ready status
+				outputPacket.data[outputPacket.length++] = (position16 >> 8) & 0xFF; // Position MSB
+				outputPacket.data[outputPacket.length++] = position16 & 0xFF; // Position LSB
+				outputPacket.data[outputPacket.length++] = 0x40; // Torque level
+				
+				debug(2, "FFB: Status query - returning position %d (0x%04X)\n", 
+					ffbEmulation.currentPosition, position16);
 			}
 			break;
 
