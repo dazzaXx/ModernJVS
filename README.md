@@ -18,6 +18,7 @@ The following arcade boards are supported:
 - Ringedge 1/2
 - Namco System 22/23
 - Namco System 2x6
+- Namco System 357 ([compatibility guide](docs/SYSTEM_357_COMPATIBILITY.md))
 - Taito Type X+
 - Taito Type X2
 - exA-Arcadia
@@ -80,7 +81,6 @@ sudo nano /etc/modernjvs/config
 Check the /etc/modernjvs/ios folder to see which I/O boards can be emulated and input the name of it on the EMULATE line.
 
 By default it will emulate the Namco FCA1, as well as the debug level set to 1.
-
 
 ## Controller Deadzone Support
 
