@@ -18,6 +18,7 @@ The following arcade boards are supported:
 - Ringedge 1/2
 - Namco System 22/23
 - Namco System 2x6
+- Namco System 357
 - Taito Type X+
 - Taito Type X2
 - exA-Arcadia
