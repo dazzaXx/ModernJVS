@@ -4,7 +4,7 @@ ModernJVS is fully compatible with Namco System 357 arcade systems.
 
 ## Overview
 
-The Namco System 357 is a PlayStation 3-based arcade platform used for games like Tekken 6. It connects to JVS I/O boards via a USB-to-JVS interface to handle arcade controls.
+The Namco System 357 is a PlayStation 3-based arcade platform used for games like Tekken 6, Time Crisis 4, Ace Combat 6, and other Namco arcade titles. It connects to JVS I/O boards via a USB-to-JVS interface to handle arcade controls.
 
 ## JVS Protocol Support
 
@@ -87,6 +87,9 @@ System 357 JVS    RS485 USB       Raspberry Pi
     B-    -------- B-    --------- (via USB)
     SENSE -------------------- GPIO 12 (optional, with 1kΩ resistor to GND)
 ```
+
+**Note about SENSE line:**  
+The SENSE line is used for JVS device detection. When the arcade system powers on, it checks this line to detect if a JVS I/O board is connected. ModernJVS controls this GPIO pin to signal its presence. Connection is optional - if not connected, the arcade system may still work but detection timing may vary. The 1kΩ resistor (or 4 signal diodes) creates the required voltage drop.
 
 ## Configuration
 
