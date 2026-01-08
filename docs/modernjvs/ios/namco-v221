@@ -1,0 +1,14 @@
+# Namco V221 MIU (Crisis Zone) - Single player CCD camera-based gun board for Crisis Zone, includes solenoid/recoil support
+DISPLAY_NAME Namco V221 MIU (Crisis Zone)
+NAME namco ltd.;MIU-I/O;Ver1.00;JPN,GUN-EXTENTION
+COMMAND_VERSION 17
+JVS_VERSION 48
+COMMS_VERSION 16
+PLAYERS 1
+SWITCHES 12
+COINS 1
+GENERAL_PURPOSE_OUTPUTS 16
+GUN_CHANNELS 1
+GUN_X_BITS 10
+GUN_Y_BITS 10
+RIGHT_ALIGN_BITS 1
