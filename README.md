@@ -82,23 +82,6 @@ Check the /etc/modernjvs/ios folder to see which I/O boards can be emulated and 
 
 By default it will emulate the Namco FCA1, as well as the debug level set to 1.
 
-
-## Light Gun Support
-
-ModernJVS supports various light gun devices for gun games such as Time Crisis and Crisis Zone:
-
-- **Wiimote** - Using Mayflash adapter or similar, maps to analog position input
-- **Gun4IR** - DIY IR light gun solution with analog tracking
-- **Other USB Light Guns** - Any device that provides analog X/Y position data
-
-The Namco RAYS I/O board emulation provides 16-bit gun input resolution for high-precision aiming. When using light gun devices:
-
-1. Configure your device mapping in `/etc/modernjvs/devices/` to map gun position to `CONTROLLER_ANALOGUE_X` and `CONTROLLER_ANALOGUE_Y`
-2. Select a game mapping that uses a gun-capable I/O board (e.g., `namco-rays`, `namco-v185`, `namco-jyu`)
-3. The analog input will automatically be sent to both analog and gun channels
-
-See example game mappings like `time-crisis-3-rays` and `crisis-zone` for reference.
-
 ## Controller Deadzone Support
 
 With version 4.6.2, configurable deadzone can now be changed in the config for each players controller. Only affects controllers with analog sticks as it's main use is to eliminate stick drift.
