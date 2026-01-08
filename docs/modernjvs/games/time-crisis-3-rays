@@ -1,5 +1,5 @@
 # Time Crisis 3 Deluxe Mapping File for Namco RAYS PCB
-# Author: GitHub Copilot
+# Author: dazzaXx, GitHub Copilot
 # 
 # This mapping is for use with the Namco RAYS PCB which uses camera-based
 # IR tracking for gun input. The RAYS board is compatible with wiimotes,
@@ -19,7 +19,9 @@ EMULATE namco-rays
 CONTROLLER_BUTTON_START CONTROLLER_1 BUTTON_3 PLAYER_1
 CONTROLLER_BUTTON_START CONTROLLER_2 BUTTON_3 PLAYER_1
 
-# Trigger - Screen trigger doesn't do anything but needs binding
+# Trigger - Mapped to unused BUTTON_10 because in Time Crisis 3, the screen
+# trigger button doesn't actually fire. Firing happens when you're in cover (pedal released)
+# and point at the screen. Mapping to unused button prevents accidental triggers.
 CONTROLLER_BUTTON_B CONTROLLER_1 BUTTON_10 PLAYER_1
 CONTROLLER_BUTTON_B CONTROLLER_2 BUTTON_10 PLAYER_1
 

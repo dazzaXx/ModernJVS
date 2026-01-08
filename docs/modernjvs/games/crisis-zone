@@ -1,5 +1,5 @@
 # Crisis Zone Mapping File for Namco RAYS PCB
-# Author: GitHub Copilot
+# Author: dazzaXx, GitHub Copilot
 #
 # Crisis Zone uses the Namco RAYS PCB for camera-based IR gun tracking.
 # Compatible with wiimotes, Gun4IR, and other light gun devices.
@@ -12,7 +12,9 @@ EMULATE namco-rays
 # Pedal Button (Reload)
 CONTROLLER_BUTTON_START CONTROLLER_1 BUTTON_3 PLAYER_1
 
-# Trigger
+# Trigger - In Crisis Zone, the gun trigger fires directly
+# Both CONTROLLER_BUTTON_B and CONTROLLER_TRIGGER are mapped for compatibility
+# with different light gun devices (some use button B, some use trigger button)
 CONTROLLER_BUTTON_B CONTROLLER_1 BUTTON_1 PLAYER_1
 CONTROLLER_TRIGGER CONTROLLER_1 BUTTON_1 PLAYER_1
 
