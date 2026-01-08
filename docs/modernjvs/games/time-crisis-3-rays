@@ -1,0 +1,37 @@
+# Time Crisis 3 Deluxe Mapping File for Namco RAYS PCB
+# Author: GitHub Copilot
+# 
+# This mapping is for use with the Namco RAYS PCB which uses camera-based
+# IR tracking for gun input. The RAYS board is compatible with wiimotes,
+# Gun4IR, and other light gun devices that provide analog position data.
+#
+# To use with a wiimote or other light gun:
+# 1. Configure your device mapping to map gun position to CONTROLLER_ANALOGUE_X/Y
+# 2. Use this game mapping which emulates the RAYS PCB
+# 3. The analog input will automatically be sent to the gun channels
+
+INCLUDE generic-shooting
+
+# Emulate the Namco RAYS PCB used in Time Crisis 3 deluxe cabinets
+EMULATE namco-rays
+
+# Pedal Button (Cover/Hide)
+CONTROLLER_BUTTON_START CONTROLLER_1 BUTTON_3 PLAYER_1
+CONTROLLER_BUTTON_START CONTROLLER_2 BUTTON_3 PLAYER_1
+
+# Trigger - Screen trigger doesn't do anything but needs binding
+CONTROLLER_BUTTON_B CONTROLLER_1 BUTTON_10 PLAYER_1
+CONTROLLER_BUTTON_B CONTROLLER_2 BUTTON_10 PLAYER_1
+
+# Menu Navigation
+CONTROLLER_BUTTON_UP CONTROLLER_1 BUTTON_UP PLAYER_1
+CONTROLLER_BUTTON_DOWN CONTROLLER_1 BUTTON_DOWN PLAYER_1
+
+# Enter/Select Buttons
+CONTROLLER_BUTTON_A CONTROLLER_1 BUTTON_2 PLAYER_1
+CONTROLLER_BUTTON_RIGHT CONTROLLER_1 BUTTON_1 PLAYER_1
+
+# Gun Analogue Controls - These map to gun channels automatically
+# The system will call both setAnalogue() and setGun() for analog inputs
+CONTROLLER_ANALOGUE_X CONTROLLER_1 ANALOGUE_1
+CONTROLLER_ANALOGUE_Y CONTROLLER_1 ANALOGUE_2 REVERSE
