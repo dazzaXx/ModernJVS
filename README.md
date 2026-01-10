@@ -173,7 +173,7 @@ Valid range: 0.0 to 0.5 (0.0 = no deadzone, 0.1 = 10% deadzone, etc.)
    - Plug USB RS485 converter into Raspberry Pi
    - Connect RS485 converter to arcade board (GND, A+, B-)
    - Connect sense line if required (GPIO 12 + resistor/diodes to GND)
-   - Connect USB controllers to Raspberry Pi
+   - Connect USB/Bluetooth controllers to Raspberry Pi
 3. **Configure:**
    ```
    sudo nano /etc/modernjvs/config
