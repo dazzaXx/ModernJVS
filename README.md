@@ -156,7 +156,7 @@ Set the `DEFAULT_GAME` line to match your game. Available profiles are in `/etc/
 
 ## Controller Deadzone Support
 
-With version 4.6.2, deadzone is now configurable in the config for each player's controller. Only affects controllers with analog sticks as it's primarily used to eliminate stick drift.
+With version 4.6.2, deadzone is now configurable in the config for each player's controller. Only affects controllers with analog sticks as it's primarily used to eliminate stick drift (unwanted movement from worn analog sticks).
 
 **Configuration:**
 ```
@@ -224,9 +224,10 @@ Valid range: 0.0 to 0.5 (0.0 = no deadzone, 0.1 = 10% deadzone, etc.)
 - Test with different controllers to rule out hardware issues
 
 ### Service won't start
-- Check for configuration errors: `sudo modernjvs --test-config`
+- Check logs for detailed error messages: `sudo journalctl -u modernjvs -xe`
+- Verify config file exists: `ls -la /etc/modernjvs/config`
 - Verify permissions: `sudo chmod 644 /etc/modernjvs/config`
-- Check logs: `sudo journalctl -u modernjvs -xe`
+- Try running in debug mode: `sudo modernjvs --debug`
 
 ## FAQ
 
