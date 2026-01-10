@@ -1,4 +1,4 @@
-![ModernJVS](https://socialify.git.ci/dazzaXx/ModernJVS/image?description=1&font=Source+Code+Pro&language=1&owner=1&pattern=Plus&theme=Dark)
+![ModernJVS](docs/modernjvs2.png)
 
 # ModernJVS
 
