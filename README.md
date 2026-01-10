@@ -33,7 +33,7 @@ ModernJVS supports a wide range of arcade hardware platforms:
 
 **Namco Systems:**
 - System 22/23
-- System 2x6 (256, 246, etc.)
+- System 256/246 and related platforms
 - System 357 (Should also theoretically work with 369's too.)
 
 **Other Platforms:**
@@ -156,7 +156,7 @@ Set the `DEFAULT_GAME` line to match your game. Available profiles are in `/etc/
 
 ## Controller Deadzone Support
 
-With version 4.6.2, deadzone is now configurable in the config for each player's controller. Only affects controllers with analog sticks as it's primarily used to eliminate stick drift (unwanted movement from worn analog sticks).
+Configurable deadzone can be set in the config for each player's controller. Only affects controllers with analog sticks as it's primarily used to eliminate stick drift (unwanted movement from worn analog sticks).
 
 **Configuration:**
 ```
