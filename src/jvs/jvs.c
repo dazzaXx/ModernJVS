@@ -80,8 +80,8 @@ int initJVS(JVSIO *jvsIO)
 		jvsIO->gunYRestBits = 16 - jvsIO->capabilities.gunYBits;
 	}
 
-	/* Float the sense line ready for connection */
-	setSenseLine(0);
+	/* Assert sense line to indicate device is present and ready for addressing */
+	setSenseLine(1);
 
 	return 1;
 }
@@ -251,7 +251,8 @@ JVSStatus processPacket(JVSIO *jvsIO)
 				jvsIO = jvsIO->chainedIO;
 				jvsIO->deviceID = -1;
 			}
-			setSenseLine(0);
+			/* Assert sense line after reset to indicate device is ready for addressing */
+			setSenseLine(1);
 		}
 		break;
 
