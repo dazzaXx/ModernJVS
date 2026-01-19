@@ -270,10 +270,21 @@ JVSStatus processPacket(JVSIO *jvsIO)
 			debug(1, "CMD_ASSIGN_ADDR - Assigning address 0x%02X\n", ioToAssign->deviceID);
 			outputPacket.data[outputPacket.length++] = REPORT_SUCCESS;
 
-			if (jvsIO->deviceID != -1)
+			// Check if there are any more unassigned boards in the chain
+			int hasUnassignedBoards = 0;
+			JVSIO *checkIO = jvsIO;
+			while (checkIO != NULL)
 			{
-				setSenseLine(1);
+				if (checkIO->deviceID == -1)
+				{
+					hasUnassignedBoards = 1;
+					break;
+				}
+				checkIO = checkIO->chainedIO;
 			}
+
+			// Set sense line based on whether there are unassigned boards
+			setSenseLine(hasUnassignedBoards);
 		}
 		break;
 
