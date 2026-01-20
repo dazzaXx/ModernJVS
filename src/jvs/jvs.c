@@ -261,9 +261,9 @@ JVSStatus processPacket(JVSIO *jvsIO)
 			size = 2;
 
 			JVSIO *ioToAssign = jvsIO;
-			while (ioToAssign->chainedIO != NULL && ioToAssign->chainedIO->deviceID == -1)
+			while (ioToAssign->deviceID != -1 && ioToAssign->chainedIO != NULL)
 			{
-				ioToAssign = jvsIO->chainedIO;
+				ioToAssign = ioToAssign->chainedIO;
 			}
 
 			ioToAssign->deviceID = inputPacket.data[index + 1];
