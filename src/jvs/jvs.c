@@ -219,7 +219,7 @@ JVSStatus processPacket(JVSIO *jvsIO)
 		{
 			/* Special case: unassigned devices should respond to CMD_ASSIGN_ADDR
 			 * even when sent to a specific address instead of BROADCAST */
-			if (jvsIO->deviceID == -1 && inputPacket.length > 0 && inputPacket.data[0] == CMD_ASSIGN_ADDR)
+			if (jvsIO->deviceID == -1 && inputPacket.length >= 2 && inputPacket.data[0] == CMD_ASSIGN_ADDR)
 			{
 				debug(1, "Unassigned device responding to CMD_ASSIGN_ADDR sent to specific address 0x%02X\n", inputPacket.destination);
 			}
