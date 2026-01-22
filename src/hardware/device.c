@@ -763,6 +763,13 @@ int setSenseLine(int state)
     }
     else
     {
+      // Explicitly set direction to OUTPUT before writing LOW
+      // This ensures proper state transition from INPUT (float) to OUTPUT (sink) on Pi 5
+      if (!setGPIODirection(localSenseLinePin, OUT))
+      {
+        debug(1, "Warning: Failed to set sense line direction to OUTPUT %d\n", localSenseLinePin);
+        return 0;
+      }
       if (!writeGPIO(localSenseLinePin, LOW))
       {
         debug(1, "Warning: Failed to sink sense line %d\n", localSenseLinePin);
