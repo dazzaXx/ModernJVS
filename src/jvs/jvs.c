@@ -270,7 +270,7 @@ JVSStatus processPacket(JVSIO *jvsIO)
 			debug(1, "CMD_ASSIGN_ADDR - Assigning address 0x%02X\n", ioToAssign->deviceID);
 			outputPacket.data[outputPacket.length++] = REPORT_SUCCESS;
 
-			if (jvsIO->deviceID != -1)
+			if (ioToAssign->deviceID != -1)
 			{
 				setSenseLine(1);
 			}
