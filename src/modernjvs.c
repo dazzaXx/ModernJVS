@@ -120,7 +120,7 @@ int main(int argc, char **argv)
                 debug(0, "Error: Failed to malloc\n");
                 break;
             case JVS_INPUT_STATUS_DEVICE_OPEN_ERROR:
-                debug(0, "Error: Failed to open devices\n");
+                debug(0, "Warning: No controllers detected, waiting for input devices...\n");
                 break;
             case JVS_INPUT_STATUS_OUTPUT_MAPPING_ERROR:
                 debug(0, "Error: Cannot find an output mapping\n");
@@ -128,14 +128,10 @@ int main(int argc, char **argv)
             default:
                 break;
             }
-
-            if (inputStatus != JVS_INPUT_STATUS_SUCCESS)
-            {
-                debug(0, "Critical: Could not initialise any inputs, check they're plugged in and you are root!\n");
-            }
         }
 
-        if (inputStatus != JVS_INPUT_STATUS_SUCCESS)
+        // Critical errors that prevent JVS operation (not including missing controllers)
+        if (inputStatus == JVS_INPUT_STATUS_MALLOC_ERROR || inputStatus == JVS_INPUT_STATUS_OUTPUT_MAPPING_ERROR)
         {
             // Cleanup then wait before reconnecting
             lastInputState = inputStatus;
@@ -150,6 +146,16 @@ int main(int argc, char **argv)
         }
 
         debug(0, "  Output:\t\t%s\n", config.defaultGamePath);
+
+        // Report controller status
+        if (inputStatus == JVS_INPUT_STATUS_SUCCESS)
+        {
+            debug(0, "  Controllers:\t\tConnected\n");
+        }
+        else if (inputStatus == JVS_INPUT_STATUS_DEVICE_OPEN_ERROR)
+        {
+            debug(0, "  Controllers:\t\tNone (waiting for devices)\n");
+        }
 
         // Only initialize IO and JVS once at startup, not on every controller change
         if (!jvsInitialized)
