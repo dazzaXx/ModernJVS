@@ -228,6 +228,10 @@ int main(int argc, char **argv)
 
             jvsInitialized = 1;
         }
+        else
+        {
+            debug(0, "Controller configuration changed, reloading inputs while maintaining JVS connection...\n");
+        }
 
         /* Process packets forever */
         JVSStatus processingStatus;
