@@ -80,6 +80,14 @@ int main(int argc, char **argv)
         rotaryStatus = initRotary();
     }
 
+    // Create the JVSIO structure outside the loop so it persists across controller changes
+    JVSIO io = {0};
+    io.deviceID = -1;
+    io.chainedIO = NULL;
+    JVSIO secondIO = {0};
+    secondIO.deviceID = -1;
+    int jvsInitialized = 0;
+
     JVSInputStatus lastInputState = JVS_INPUT_STATUS_SUCCESS;
     int lastRotaryValue = -1;
     while (running != -1)
@@ -95,11 +103,6 @@ int main(int argc, char **argv)
             rotaryValue = getRotaryValue();
             parseRotary(DEFAULT_ROTARY_PATH, rotaryValue, config.defaultGamePath);
         }
-
-        // Create the JVSIO
-        JVSIO io = {0};
-        io.deviceID = -1;
-        io.chainedIO = NULL;
 
         debug(1, "Init inputs\n");
         JVSInputStatus inputStatus = initInputs(config.defaultGamePath, config.capabilitiesPath, config.secondCapabilitiesPath, &io, config.autoControllerDetection, config.analogDeadzonePlayer1, config.analogDeadzonePlayer2, config.analogDeadzonePlayer3, config.analogDeadzonePlayer4);
@@ -147,80 +150,84 @@ int main(int argc, char **argv)
 
         debug(0, "  Output:\t\t%s\n", config.defaultGamePath);
 
-        debug(1, "Parse IO\n");
-        JVSConfigStatus ioStatus = parseIO(config.capabilitiesPath, &io.capabilities);
-        if (ioStatus != JVS_CONFIG_STATUS_SUCCESS)
+        // Only initialize IO and JVS once at startup, not on every controller change
+        if (!jvsInitialized)
         {
-            switch (ioStatus)
-            {
-            case JVS_CONFIG_STATUS_FILE_NOT_FOUND:
-                debug(0, "Critical: Could not find IO definition named %s\n", config.capabilitiesPath);
-                break;
-            default:
-                debug(0, "Critical: Failed to parse an IO file.\n");
-            }
-            return EXIT_FAILURE;
-        }
-
-        debug(1, "ABOUT TO PARSE Second IO\n");
-
-        if (config.secondCapabilitiesPath[0] != 0x00)
-        {
-            debug(1, "Parse Second IO\n");
-            JVSIO secondIO = {0};
-            secondIO.deviceID = -1;
-            ioStatus = parseIO(config.secondCapabilitiesPath, &secondIO.capabilities);
+            debug(1, "Parse IO\n");
+            JVSConfigStatus ioStatus = parseIO(config.capabilitiesPath, &io.capabilities);
             if (ioStatus != JVS_CONFIG_STATUS_SUCCESS)
             {
                 switch (ioStatus)
                 {
                 case JVS_CONFIG_STATUS_FILE_NOT_FOUND:
-                    debug(0, "Critical: Could not find IO definition named %s\n", config.secondCapabilitiesPath);
+                    debug(0, "Critical: Could not find IO definition named %s\n", config.capabilitiesPath);
                     break;
                 default:
                     debug(0, "Critical: Failed to parse an IO file.\n");
                 }
                 return EXIT_FAILURE;
             }
-            else
+
+            debug(1, "ABOUT TO PARSE Second IO\n");
+
+            if (config.secondCapabilitiesPath[0] != 0x00)
             {
-                io.chainedIO = &secondIO;
+                debug(1, "Parse Second IO\n");
+                ioStatus = parseIO(config.secondCapabilitiesPath, &secondIO.capabilities);
+                if (ioStatus != JVS_CONFIG_STATUS_SUCCESS)
+                {
+                    switch (ioStatus)
+                    {
+                    case JVS_CONFIG_STATUS_FILE_NOT_FOUND:
+                        debug(0, "Critical: Could not find IO definition named %s\n", config.secondCapabilitiesPath);
+                        break;
+                    default:
+                        debug(0, "Critical: Failed to parse an IO file.\n");
+                    }
+                    return EXIT_FAILURE;
+                }
+                else
+                {
+                    io.chainedIO = &secondIO;
+                }
             }
-        }
 
-        /* Init the Virtual IO */
-        debug(1, "Init IO\n");
-        if (!initIO(&io))
-        {
-            debug(0, "Critical: Failed to init IO\n");
-            return EXIT_FAILURE;
-        }
-
-        if (io.chainedIO != NULL)
-        {
-            debug(1, "Init Second IO\n");
-            if (!initIO(io.chainedIO))
+            /* Init the Virtual IO */
+            debug(1, "Init IO\n");
+            if (!initIO(&io))
             {
-                debug(0, "Critical: Failed to init second IO\n");
+                debug(0, "Critical: Failed to init IO\n");
                 return EXIT_FAILURE;
             }
-        }
 
-        /* Setup the JVS Emulator with the RS485 path and capabilities */
-        debug(1, "Init JVS\n");
-        if (!initJVS(&io))
-        {
-            debug(0, "Critical: Could not initialise JVS\n");
-            return EXIT_FAILURE;
-        }
+            if (io.chainedIO != NULL)
+            {
+                debug(1, "Init Second IO\n");
+                if (!initIO(io.chainedIO))
+                {
+                    debug(0, "Critical: Failed to init second IO\n");
+                    return EXIT_FAILURE;
+                }
+            }
 
-        /* Print out what is being emulated */
-        debug(0, "\nYou are currently emulating a \033[0;31m%s\033[0m ", io.capabilities.displayName);
-        if (io.chainedIO != NULL)
-        {
-            debug(0, "chained to a \033[0;31m%s\033[0m ", io.chainedIO->capabilities.displayName);
+            /* Setup the JVS Emulator with the RS485 path and capabilities */
+            debug(1, "Init JVS\n");
+            if (!initJVS(&io))
+            {
+                debug(0, "Critical: Could not initialise JVS\n");
+                return EXIT_FAILURE;
+            }
+
+            /* Print out what is being emulated */
+            debug(0, "\nYou are currently emulating a \033[0;31m%s\033[0m ", io.capabilities.displayName);
+            if (io.chainedIO != NULL)
+            {
+                debug(0, "chained to a \033[0;31m%s\033[0m ", io.chainedIO->capabilities.displayName);
+            }
+            printf("on %s.\n\n", config.devicePath);
+
+            jvsInitialized = 1;
         }
-        printf("on %s.\n\n", config.devicePath);
 
         /* Process packets forever */
         JVSStatus processingStatus;
