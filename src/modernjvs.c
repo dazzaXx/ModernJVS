@@ -80,7 +80,11 @@ int main(int argc, char **argv)
         rotaryStatus = initRotary();
     }
 
-    // Create the JVSIO structure outside the loop so it persists across controller changes
+    // Create the JVSIO structure outside the loop so it persists across controller changes.
+    // This allows controllers to be hot-plugged without resetting the JVS connection,
+    // which would cause the arcade machine to lose communication and require a system reset.
+    // Only input threads are reinitialized when controllers change; the JVS protocol
+    // state (device address, capabilities, etc.) remains intact.
     JVSIO io = {0};
     io.deviceID = -1;
     io.chainedIO = NULL;
