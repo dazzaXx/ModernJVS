@@ -86,7 +86,10 @@ int main(int argc, char **argv)
     // Only input threads are reinitialized when controllers change; the JVS protocol
     // state (device address, capabilities, etc.) remains intact.
     JVSIO io = {0};
+    io.deviceID = -1;          // -1 indicates no device ID assigned yet
+    io.chainedIO = NULL;       // No chained device initially
     JVSIO secondIO = {0};
+    secondIO.deviceID = -1;    // -1 indicates no device ID assigned yet
     int jvsInitialized = 0;
 
     JVSInputStatus lastInputState = JVS_INPUT_STATUS_SUCCESS;
