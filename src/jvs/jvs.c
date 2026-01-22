@@ -80,8 +80,8 @@ int initJVS(JVSIO *jvsIO)
 		jvsIO->gunYRestBits = 16 - jvsIO->capabilities.gunYBits;
 	}
 
-	/* Assert sense line to indicate device is present and ready for addressing */
-	setSenseLine(1);
+	/* Float the sense line ready for connection */
+	setSenseLine(0);
 
 	return 1;
 }
@@ -251,8 +251,7 @@ JVSStatus processPacket(JVSIO *jvsIO)
 				jvsIO = jvsIO->chainedIO;
 				jvsIO->deviceID = -1;
 			}
-			/* Assert sense line after reset to indicate device is ready for addressing */
-			setSenseLine(1);
+			setSenseLine(0);
 		}
 		break;
 
@@ -262,30 +261,19 @@ JVSStatus processPacket(JVSIO *jvsIO)
 			size = 2;
 
 			JVSIO *ioToAssign = jvsIO;
-			while (ioToAssign->deviceID != -1 && ioToAssign->chainedIO != NULL)
+			while (ioToAssign->chainedIO != NULL && ioToAssign->chainedIO->deviceID == -1)
 			{
-				ioToAssign = ioToAssign->chainedIO;
+				ioToAssign = jvsIO->chainedIO;
 			}
 
 			ioToAssign->deviceID = inputPacket.data[index + 1];
 			debug(1, "CMD_ASSIGN_ADDR - Assigning address 0x%02X\n", ioToAssign->deviceID);
 			outputPacket.data[outputPacket.length++] = REPORT_SUCCESS;
 
-			// Check if there are any more unassigned boards in the chain
-			int hasUnassignedBoards = 0;
-			JVSIO *checkIO = jvsIO;
-			while (checkIO != NULL)
+			if (jvsIO->deviceID != -1)
 			{
-				if (checkIO->deviceID == -1)
-				{
-					hasUnassignedBoards = 1;
-					break;
-				}
-				checkIO = checkIO->chainedIO;
+				setSenseLine(1);
 			}
-
-			// Set sense line based on whether there are unassigned boards
-			setSenseLine(hasUnassignedBoards);
 		}
 		break;
 
