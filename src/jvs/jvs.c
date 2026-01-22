@@ -270,7 +270,9 @@ JVSStatus processPacket(JVSIO *jvsIO)
 			debug(1, "CMD_ASSIGN_ADDR - Assigning address 0x%02X\n", ioToAssign->deviceID);
 			outputPacket.data[outputPacket.length++] = REPORT_SUCCESS;
 
-			if (ioToAssign->deviceID != -1)
+			// Pull sense line low after first device is assigned
+			// This signals to the arcade board that the IO is ready
+			if (jvsIO->deviceID != -1)
 			{
 				setSenseLine(1);
 			}
