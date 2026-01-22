@@ -1,0 +1,69 @@
+# Taiko no Tatsujin (Taiko Drum Master) - Namco System 256
+# Author: ModernJVS Contributors
+#
+# This configuration supports both analog drum hardware and standard controllers
+# Each drum has 4 zones: Left Don (center), Right Don (center), Left Ka (rim), Right Ka (rim)
+#
+# ANALOG DRUM MAPPING (For authentic arcade drum hardware):
+# Player 1: Analog 0 = Left Don, Analog 1 = Right Don, Analog 2 = Left Ka, Analog 3 = Right Ka  
+# Player 2: Analog 4 = Left Don, Analog 5 = Right Don, Analog 6 = Left Ka, Analog 7 = Right Ka
+# Requires 8 analog input channels with ADC hardware (e.g., MCP3008 or Taiko-256 board)
+#
+# STANDARD CONTROLLER MAPPING (For gamepads, arcade sticks, or keyboard):
+# Don (center hits) = Face buttons (A, B) or Left/Right on D-pad
+# Ka (rim hits) = Shoulder buttons or Up/Down on D-pad
+# Fully playable with any standard USB controller - great for home setups!
+
+# System Buttons
+CONTROLLER_BUTTON_TEST CONTROLLER_1 BUTTON_TEST SYSTEM
+CONTROLLER_BUTTON_TILT CONTROLLER_1 BUTTON_TILT_1 SYSTEM
+
+# Player One - Analog Drum Inputs (Primary Method)
+# Left Don (center drum, left side)
+CONTROLLER_ANALOGUE_X CONTROLLER_1 ANALOGUE_1
+# Right Don (center drum, right side)
+CONTROLLER_ANALOGUE_Y CONTROLLER_1 ANALOGUE_2
+# Left Ka (rim, left side)
+CONTROLLER_ANALOGUE_Z CONTROLLER_1 ANALOGUE_3
+# Right Ka (rim, right side)
+CONTROLLER_ANALOGUE_R CONTROLLER_1 ANALOGUE_4
+
+# Player One - Digital Button Mapping (For standard controllers)
+CONTROLLER_BUTTON_START CONTROLLER_1 BUTTON_START PLAYER_1
+CONTROLLER_BUTTON_SERVICE CONTROLLER_1 BUTTON_SERVICE PLAYER_1
+CONTROLLER_BUTTON_COIN CONTROLLER_1 COIN PLAYER_1
+# Don hits mapped to face buttons and left/right
+CONTROLLER_BUTTON_A CONTROLLER_1 BUTTON_1 PLAYER_1
+CONTROLLER_BUTTON_B CONTROLLER_1 BUTTON_2 PLAYER_1
+CONTROLLER_BUTTON_LEFT CONTROLLER_1 BUTTON_1 PLAYER_1
+CONTROLLER_BUTTON_RIGHT CONTROLLER_1 BUTTON_2 PLAYER_1
+# Ka hits mapped to shoulder buttons and up/down
+CONTROLLER_BUTTON_LEFT_BUMPER CONTROLLER_1 BUTTON_3 PLAYER_1
+CONTROLLER_BUTTON_RIGHT_BUMPER CONTROLLER_1 BUTTON_4 PLAYER_1
+CONTROLLER_BUTTON_UP CONTROLLER_1 BUTTON_3 PLAYER_1
+CONTROLLER_BUTTON_DOWN CONTROLLER_1 BUTTON_4 PLAYER_1
+
+# Player Two - Analog Drum Inputs (Primary Method)
+# Left Don (center drum, left side)
+CONTROLLER_ANALOGUE_X CONTROLLER_2 ANALOGUE_5
+# Right Don (center drum, right side)
+CONTROLLER_ANALOGUE_Y CONTROLLER_2 ANALOGUE_6
+# Left Ka (rim, left side)
+CONTROLLER_ANALOGUE_Z CONTROLLER_2 ANALOGUE_7
+# Right Ka (rim, right side)
+CONTROLLER_ANALOGUE_R CONTROLLER_2 ANALOGUE_8
+
+# Player Two - Digital Button Mapping (For standard controllers)
+CONTROLLER_BUTTON_START CONTROLLER_2 BUTTON_START PLAYER_2
+CONTROLLER_BUTTON_SERVICE CONTROLLER_2 BUTTON_SERVICE PLAYER_2
+CONTROLLER_BUTTON_COIN CONTROLLER_2 COIN PLAYER_2
+# Don hits mapped to face buttons and left/right
+CONTROLLER_BUTTON_A CONTROLLER_2 BUTTON_1 PLAYER_2
+CONTROLLER_BUTTON_B CONTROLLER_2 BUTTON_2 PLAYER_2
+CONTROLLER_BUTTON_LEFT CONTROLLER_2 BUTTON_1 PLAYER_2
+CONTROLLER_BUTTON_RIGHT CONTROLLER_2 BUTTON_2 PLAYER_2
+# Ka hits mapped to shoulder buttons and up/down
+CONTROLLER_BUTTON_LEFT_BUMPER CONTROLLER_2 BUTTON_3 PLAYER_2
+CONTROLLER_BUTTON_RIGHT_BUMPER CONTROLLER_2 BUTTON_4 PLAYER_2
+CONTROLLER_BUTTON_UP CONTROLLER_2 BUTTON_3 PLAYER_2
+CONTROLLER_BUTTON_DOWN CONTROLLER_2 BUTTON_4 PLAYER_2

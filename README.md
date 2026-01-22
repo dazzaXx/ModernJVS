@@ -47,6 +47,7 @@ Some examples of games that work with ModernJVS:
 - **Racing**: Initial D, Wangan Midnight Maximum Tune, Mario Kart Arcade GP, Daytona USA, OutRun
 - **Shooting**: Time Crisis series, House of the Dead series, Virtua Cop 3, Ghost Squad
 - **Fighting**: Tekken series, Virtua Fighter
+- **Rhythm**: Taiko no Tatsujin (Taiko Drum Master) on Namco System 256
 - **Other**: Crazy Taxi, F-Zero AX, and many more
 
 Check the `/etc/modernjvs/games` folder after installation for game-specific controller mappings.
@@ -248,6 +249,60 @@ A: Try similar I/O boards (e.g., sega-type-1, sega-type-2, namco-FCA1) or open a
 
 **Q: How do I add custom button mappings?**
 A: Copy an existing profile from `/etc/modernjvs/games/` and modify it. See existing files for syntax examples.
+
+## Taiko no Tatsujin (Taiko Drum Master) Support
+
+ModernJVS **is capable** of emulating the I/O requirements for Taiko no Tatsujin games on Namco System 256. Here's what you need to know:
+
+### Hardware Requirements
+
+Taiko drums require **8 analog input channels** (4 per player):
+- Each player's drum has 4 zones: Left Don (center), Right Don (center), Left Ka (rim), Right Ka (rim)
+- Player 1 uses analog channels 0-3
+- Player 2 uses analog channels 4-7
+
+### Compatible I/O Boards
+
+Use one of these I/O board configurations:
+- **namco-taiko** - Dedicated Taiko configuration (recommended)
+- **namco-na-jv** - Alternative, supports 8 analog channels at 16-bit resolution
+
+### Setup Instructions
+
+1. Set your I/O board emulation in `/etc/modernjvs/config`:
+   ```
+   EMULATE namco-taiko
+   ```
+
+2. Set the game profile:
+   ```
+   DEFAULT_GAME taiko-no-tatsujin
+   ```
+
+3. **Choose your input method:**
+
+   **Option A: Authentic arcade drum hardware**
+   - Connect drum sensor outputs to analog channels 0-7 via appropriate ADC interface
+   - Each drum zone's piezo sensor should output to its corresponding analog channel
+   - Provides analog hit strength detection for the most accurate arcade experience
+
+   **Option B: Standard controllers (gamepads, arcade sticks, keyboard)**
+   - Works with any USB controller out of the box
+   - Don (center): Face buttons (A/B) or D-pad Left/Right
+   - Ka (rim): Shoulder buttons or D-pad Up/Down
+   - Perfect for home play and accessible to everyone
+
+### Technical Details
+
+- **Analog resolution**: 16-bit (0-65535 range) for accurate hit strength detection
+- **Input type**: Analog voltage from piezo/vibration sensors
+- **Players supported**: 2 players (8 total analog channels)
+- **Additional buttons**: Start, Service, Coin per player
+
+### Notes
+
+- **Arcade drum hardware**: Original arcade drums use piezo sensors that output analog voltage, allowing the game to detect hit strength and distinguish between Don (center) and Ka (rim) hits. For DIY builds, consider using projects like Taiko-256 or DonCon2040 that provide proper analog signal conditioning.
+- **Standard controller support**: The game is fully playable with standard gamepads, arcade sticks, or keyboards using the digital button mappings. This provides an accessible way to play without specialized drum hardware.
 
 ## Additional Resources
 

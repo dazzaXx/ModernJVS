@@ -1,0 +1,15 @@
+# Namco Taiko I/O Board for Taiko no Tatsujin on System 256
+# Based on NA-JV with 8 analog channels for drum sensors
+# Each player has 4 drum zones: Left Don, Right Don, Left Ka, Right Ka
+DISPLAY_NAME Namco Taiko (System 256)
+NAME namco ltd.;NA-JV;Ver1.00;JPN,Taiko Drum
+PLAYERS 2
+SWITCHES 12
+COMMAND_VERSION 19
+JVS_VERSION 48
+COMMS_VERSION 16
+COINS 2
+ANALOGUE_IN_BITS 16
+ANALOGUE_IN_CHANNELS 8
+GENERAL_PURPOSE_OUTPUTS 6
+RIGHT_ALIGN_BITS 1
