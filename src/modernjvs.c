@@ -86,10 +86,7 @@ int main(int argc, char **argv)
     // Only input threads are reinitialized when controllers change; the JVS protocol
     // state (device address, capabilities, etc.) remains intact.
     JVSIO io = {0};
-    io.deviceID = -1;
-    io.chainedIO = NULL;
     JVSIO secondIO = {0};
-    secondIO.deviceID = -1;
     int jvsInitialized = 0;
 
     JVSInputStatus lastInputState = JVS_INPUT_STATUS_SUCCESS;
@@ -234,7 +231,7 @@ int main(int argc, char **argv)
         }
         else
         {
-            debug(0, "Controller configuration changed, reloading inputs while maintaining JVS connection...\n");
+            debug(1, "Reinitializing inputs while maintaining JVS connection...\n");
         }
 
         /* Process packets forever */
