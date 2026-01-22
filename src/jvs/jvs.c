@@ -263,7 +263,7 @@ JVSStatus processPacket(JVSIO *jvsIO)
 			JVSIO *ioToAssign = jvsIO;
 			while (ioToAssign->chainedIO != NULL && ioToAssign->chainedIO->deviceID == -1)
 			{
-				ioToAssign = jvsIO->chainedIO;
+				ioToAssign = ioToAssign->chainedIO;
 			}
 
 			ioToAssign->deviceID = inputPacket.data[index + 1];
