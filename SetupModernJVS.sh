@@ -20,6 +20,9 @@ readonly PACKAGES=(
 	"pkg-config"
 )
 
+# Service name
+readonly SERVICE_NAME="modernjvs.service"
+
 # Print colored messages
 print_error() {
 	echo -e "${RED}ERROR: $1${NC}" >&2
@@ -113,6 +116,115 @@ setup_modernjvs() {
 	print_success "ModernJVS installed successfully!"
 }
 
+# Check service status
+check_service_status() {
+	local is_enabled=false
+	local is_active=false
+	
+	if systemctl is-enabled "$SERVICE_NAME" &>/dev/null; then
+		is_enabled=true
+	fi
+	
+	if systemctl is-active "$SERVICE_NAME" &>/dev/null; then
+		is_active=true
+	fi
+	
+	echo "$is_enabled:$is_active"
+}
+
+# Enable and start the service
+enable_and_start_service() {
+	print_info "Enabling and starting ModernJVS service..."
+	
+	if ! sudo systemctl enable "$SERVICE_NAME"; then
+		print_error "Failed to enable ModernJVS service"
+		return 1
+	fi
+	
+	if ! sudo systemctl start "$SERVICE_NAME"; then
+		print_error "Failed to start ModernJVS service"
+		return 1
+	fi
+	
+	print_success "ModernJVS service enabled and started successfully!"
+	print_info "The service will now start automatically on boot."
+	return 0
+}
+
+# Disable and stop the service
+disable_and_stop_service() {
+	print_info "Disabling and stopping ModernJVS service..."
+	
+	# Stop the service if it's running
+	if systemctl is-active "$SERVICE_NAME" &>/dev/null; then
+		if ! sudo systemctl stop "$SERVICE_NAME"; then
+			print_error "Failed to stop ModernJVS service"
+			return 1
+		fi
+	fi
+	
+	# Disable the service if it's enabled
+	if systemctl is-enabled "$SERVICE_NAME" &>/dev/null; then
+		if ! sudo systemctl disable "$SERVICE_NAME"; then
+			print_error "Failed to disable ModernJVS service"
+			return 1
+		fi
+	fi
+	
+	print_success "ModernJVS service disabled and stopped successfully!"
+	print_info "The service will no longer start automatically on boot."
+	return 0
+}
+
+# Manage service (interactive menu)
+manage_service() {
+	local status
+	status=$(check_service_status)
+	local is_enabled="${status%%:*}"
+	local is_active="${status##*:}"
+	
+	echo ""
+	print_info "=== ModernJVS Service Management ==="
+	echo ""
+	
+	# Display current status
+	if [ "$is_enabled" = "true" ]; then
+		print_success "Service is currently ENABLED (will start on boot)"
+	else
+		print_info "Service is currently DISABLED (will not start on boot)"
+	fi
+	
+	if [ "$is_active" = "true" ]; then
+		print_success "Service is currently ACTIVE (running)"
+	else
+		print_info "Service is currently INACTIVE (not running)"
+	fi
+	
+	echo ""
+	echo "What would you like to do?"
+	echo "1) Enable and start the service (auto-start on boot)"
+	echo "2) Disable and stop the service"
+	echo "3) Skip service management"
+	echo ""
+	
+	read -r -p "Enter your choice (1-3): " choice
+	
+	case $choice in
+		1)
+			enable_and_start_service
+			;;
+		2)
+			disable_and_stop_service
+			;;
+		3)
+			print_info "Skipping service management."
+			;;
+		*)
+			print_error "Invalid choice. Skipping service management."
+			;;
+	esac
+}
+
 # Main function
 main() {
 	print_info "=== ModernJVS Setup Script ==="
@@ -121,6 +233,7 @@ main() {
 	update_package_lists
 	install_dependencies
 	setup_modernjvs
+	manage_service
 	
 	print_success "=== Setup completed successfully! ==="
 	print_info "You can now run ModernJVS. Check the README for usage instructions."
