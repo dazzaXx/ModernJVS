@@ -92,15 +92,15 @@ install_dependencies() {
 # Clone and build ModernJVS
 setup_modernjvs() {
 	local repo_dir="ModernJVS"
-	local build_dir="."
+	local build_dir=""
 	
 	# Check if we're already in the ModernJVS git repository
 	if git rev-parse --is-inside-work-tree &>/dev/null; then
 		local remote_url
 		remote_url=$(git remote get-url origin 2>/dev/null || echo "")
 		
-		# Check if this is the ModernJVS repository
-		if [[ "$remote_url" == *"ModernJVS"* ]] || [[ "$remote_url" == *"ModernJVS.git"* ]]; then
+		# Check if this is the ModernJVS repository (match exact repo)
+		if [[ "$remote_url" == *"github.com"*"/ModernJVS"* ]] || [[ "$remote_url" == *"github.com"*"/ModernJVS.git"* ]]; then
 			print_info "Already in ModernJVS repository, skipping clone..."
 			build_dir="."
 		else
