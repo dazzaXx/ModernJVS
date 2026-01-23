@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.10)
 
 project(modernjvs
-        VERSION "5.3.2"
+        VERSION "5.3.4"
         LANGUAGES "C"
         DESCRIPTION "An emulator for arcade JVS I/O boards"
         HOMEPAGE_URL "https://github.com/dazzaXx/ModernJVS"
