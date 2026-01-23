@@ -99,26 +99,16 @@ setup_modernjvs() {
 		local remote_url
 		remote_url=$(git remote get-url origin 2>/dev/null || echo "")
 		
-		# Check if this is the ModernJVS repository (match exact repo)
-		if [[ "$remote_url" == *"github.com"*"/ModernJVS"* ]] || [[ "$remote_url" == *"github.com"*"/ModernJVS.git"* ]]; then
+		# Check if this is the ModernJVS repository (match exact repo name at end of URL)
+		if [[ "$remote_url" == *"/ModernJVS" ]] || [[ "$remote_url" == *"/ModernJVS.git" ]]; then
 			print_info "Already in ModernJVS repository, skipping clone..."
 			build_dir="."
-		else
-			# We're in a different git repo, proceed with clone
-			if [ -d "$repo_dir" ]; then
-				print_error "Directory '$repo_dir' already exists. Please remove it or run this script from a different location."
-				exit 1
-			fi
-			
-			print_info "Cloning ModernJVS repository..."
-			if ! git clone https://github.com/dazzaXx/ModernJVS.git; then
-				print_error "Failed to clone repository"
-				exit 1
-			fi
-			build_dir="$repo_dir"
 		fi
-	else
-		# Not in a git repo, proceed with clone
+	fi
+	
+	# If not in ModernJVS repo, clone it
+	if [ -z "$build_dir" ]; then
+		# Check if directory already exists
 		if [ -d "$repo_dir" ]; then
 			print_error "Directory '$repo_dir' already exists. Please remove it or run this script from a different location."
 			exit 1
