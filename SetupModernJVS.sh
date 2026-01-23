@@ -92,23 +92,50 @@ install_dependencies() {
 # Clone and build ModernJVS
 setup_modernjvs() {
 	local repo_dir="ModernJVS"
+	local build_dir="."
 	
-	# Check if directory already exists
-	if [ -d "$repo_dir" ]; then
-		print_error "Directory '$repo_dir' already exists. Please remove it or run this script from a different location."
-		exit 1
-	fi
-	
-	print_info "Cloning ModernJVS repository..."
-	if ! git clone https://github.com/dazzaXx/ModernJVS.git; then
-		print_error "Failed to clone repository"
-		exit 1
+	# Check if we're already in the ModernJVS git repository
+	if git rev-parse --is-inside-work-tree &>/dev/null; then
+		local remote_url
+		remote_url=$(git remote get-url origin 2>/dev/null || echo "")
+		
+		# Check if this is the ModernJVS repository
+		if [[ "$remote_url" == *"ModernJVS"* ]] || [[ "$remote_url" == *"ModernJVS.git"* ]]; then
+			print_info "Already in ModernJVS repository, skipping clone..."
+			build_dir="."
+		else
+			# We're in a different git repo, proceed with clone
+			if [ -d "$repo_dir" ]; then
+				print_error "Directory '$repo_dir' already exists. Please remove it or run this script from a different location."
+				exit 1
+			fi
+			
+			print_info "Cloning ModernJVS repository..."
+			if ! git clone https://github.com/dazzaXx/ModernJVS.git; then
+				print_error "Failed to clone repository"
+				exit 1
+			fi
+			build_dir="$repo_dir"
+		fi
+	else
+		# Not in a git repo, proceed with clone
+		if [ -d "$repo_dir" ]; then
+			print_error "Directory '$repo_dir' already exists. Please remove it or run this script from a different location."
+			exit 1
+		fi
+		
+		print_info "Cloning ModernJVS repository..."
+		if ! git clone https://github.com/dazzaXx/ModernJVS.git; then
+			print_error "Failed to clone repository"
+			exit 1
+		fi
+		build_dir="$repo_dir"
 	fi
 	
 	print_info "Building ModernJVS..."
 	
 	# Use subshell to avoid changing directory in parent script
-	if ! (cd "$repo_dir" && make && sudo make install); then
+	if ! (cd "$build_dir" && make && sudo make install); then
 		print_error "Build or installation failed"
 		exit 1
 	fi
