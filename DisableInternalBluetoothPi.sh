@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-# DisableBluetooth Script for Raspberry Pi 3
+# Disable Bluetooth Script for Raspberry Pi
 # This script disables internal Bluetooth and installs external USB Bluetooth packages
 
 # Color codes for output
