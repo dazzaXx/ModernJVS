@@ -163,9 +163,12 @@ disable_and_stop_service() {
 		fi
 	fi
 	
-	if ! sudo systemctl disable "$SERVICE_NAME"; then
-		print_error "Failed to disable ModernJVS service"
-		return 1
+	# Disable the service if it's enabled
+	if systemctl is-enabled "$SERVICE_NAME" &>/dev/null; then
+		if ! sudo systemctl disable "$SERVICE_NAME"; then
+			print_error "Failed to disable ModernJVS service"
+			return 1
+		fi
 	fi
 	
 	print_success "ModernJVS service disabled and stopped successfully!"
