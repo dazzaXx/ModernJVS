@@ -144,7 +144,7 @@ main() {
 	if [ $reboot_needed -eq 1 ]; then
 		print_success "Configuration completed successfully!"
 		print_info "A reboot is required for the changes to take effect."
-		read -t 30 -p "Do you want to reboot now? (y/n): " -n 1 -r 2>/dev/null || REPLY='n'
+		read -t 30 -p "Do you want to reboot now? (y/n): " -n 1 -r || REPLY='n'
 		echo
 		if [[ $REPLY =~ ^[Yy]$ ]]; then
 			print_info "Rebooting..."
