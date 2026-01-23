@@ -103,16 +103,10 @@ setup_modernjvs() {
 	fi
 	
 	print_info "Building ModernJVS..."
-	cd "$repo_dir" || exit 1
 	
-	if ! make; then
-		print_error "Build failed"
-		exit 1
-	fi
-	
-	print_info "Installing ModernJVS..."
-	if ! sudo make install; then
-		print_error "Installation failed"
+	# Use subshell to avoid changing directory in parent script
+	if ! (cd "$repo_dir" && make && sudo make install); then
+		print_error "Build or installation failed"
 		exit 1
 	fi
 	

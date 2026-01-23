@@ -87,7 +87,7 @@ disable_internal_bluetooth() {
 		return 0
 	else
 		print_info "Disabling internal Bluetooth module..."
-		if ! echo -e "\n# Disable internal Bluetooth to use USB Bluetooth adapter\ndtoverlay=disable-bt" >> "$bootconfig"; then
+		if ! printf '\n# Disable internal Bluetooth to use USB Bluetooth adapter\ndtoverlay=disable-bt\n' >> "$bootconfig"; then
 			print_error "Failed to modify boot config"
 			exit 1
 		fi
@@ -142,7 +142,7 @@ main() {
 	if [ $reboot_needed -eq 1 ]; then
 		print_success "Configuration completed successfully!"
 		print_info "A reboot is required for the changes to take effect."
-		read -p "Do you want to reboot now? (y/n): " -n 1 -r
+		read -t 30 -p "Do you want to reboot now? (y/n): " -n 1 -r 2>/dev/null || REPLY='n'
 		echo
 		if [[ $REPLY =~ ^[Yy]$ ]]; then
 			print_info "Rebooting..."
