@@ -20,6 +20,9 @@ readonly PACKAGES=(
 	"pkg-config"
 )
 
+# Service name
+readonly SERVICE_NAME="modernjvs.service"
+
 # Print colored messages
 print_error() {
 	echo -e "${RED}ERROR: $1${NC}" >&2
@@ -118,11 +121,11 @@ check_service_status() {
 	local is_enabled=false
 	local is_active=false
 	
-	if systemctl is-enabled modernjvs.service &>/dev/null; then
+	if systemctl is-enabled "$SERVICE_NAME" &>/dev/null; then
 		is_enabled=true
 	fi
 	
-	if systemctl is-active modernjvs.service &>/dev/null; then
+	if systemctl is-active "$SERVICE_NAME" &>/dev/null; then
 		is_active=true
 	fi
 	
@@ -133,12 +136,12 @@ check_service_status() {
 enable_and_start_service() {
 	print_info "Enabling and starting ModernJVS service..."
 	
-	if ! sudo systemctl enable modernjvs.service; then
+	if ! sudo systemctl enable "$SERVICE_NAME"; then
 		print_error "Failed to enable ModernJVS service"
 		return 1
 	fi
 	
-	if ! sudo systemctl start modernjvs.service; then
+	if ! sudo systemctl start "$SERVICE_NAME"; then
 		print_error "Failed to start ModernJVS service"
 		return 1
 	fi
@@ -152,12 +155,15 @@ enable_and_start_service() {
 disable_and_stop_service() {
 	print_info "Disabling and stopping ModernJVS service..."
 	
-	if ! sudo systemctl stop modernjvs.service; then
-		print_error "Failed to stop ModernJVS service"
-		return 1
+	# Stop the service if it's running
+	if systemctl is-active "$SERVICE_NAME" &>/dev/null; then
+		if ! sudo systemctl stop "$SERVICE_NAME"; then
+			print_error "Failed to stop ModernJVS service"
+			return 1
+		fi
 	fi
 	
-	if ! sudo systemctl disable modernjvs.service; then
+	if ! sudo systemctl disable "$SERVICE_NAME"; then
 		print_error "Failed to disable ModernJVS service"
 		return 1
 	fi
@@ -198,7 +204,7 @@ manage_service() {
 	echo "3) Skip service management"
 	echo ""
 	
-	read -p "Enter your choice (1-3): " choice
+	read -r -p "Enter your choice (1-3): " choice
 	
 	case $choice in
 		1)
