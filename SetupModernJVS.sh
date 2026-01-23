@@ -97,6 +97,7 @@ setup_modernjvs() {
 	# Check if we're already in the ModernJVS git repository
 	if git rev-parse --is-inside-work-tree &>/dev/null; then
 		local remote_url
+		# Suppress error if no remote exists (stderr redirect is for error handling, not user prompts)
 		remote_url=$(git remote get-url origin 2>/dev/null || echo "")
 		
 		# Check if this is the ModernJVS repository (match exact repo name at end of URL)
