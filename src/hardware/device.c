@@ -11,7 +11,8 @@
 // so thread safety is not a concern in practice.
 static int detected_gpio_chip_number = -1;
 
-// Chip candidates in order of likelihood (Pi 1-4 first, then Pi 5, then others)
+// Chip candidates in order of likelihood (gpiochip0 for most Pi models including Pi 5 with kernel 6.6.47+)
+// Note: gpiochip4 is still checked for Pi 5 systems with older kernels (pre-6.6.47)
 static const int chip_candidates[] = {0, 4, 1, 2, 3};
 static const int num_candidates = sizeof(chip_candidates) / sizeof(chip_candidates[0]);
 
@@ -26,27 +27,7 @@ static int detect_gpio_chip_number(void)
   if (detected_gpio_chip_number != -1)
     return detected_gpio_chip_number;
 
-  // Try to detect Raspberry Pi 5 via device-tree model
-  FILE *model_file = fopen("/proc/device-tree/model", "r");
-  if (model_file)
-  {
-    char model[128];
-    // fgets ensures null-termination and reads at most sizeof(model)-1 chars
-    if (fgets(model, sizeof(model), model_file))
-    {
-      // Check if it's a Raspberry Pi 5
-      if (strstr(model, "Raspberry Pi 5"))
-      {
-        debug(1, "Detected Raspberry Pi 5, using gpiochip4\n");
-        fclose(model_file);
-        detected_gpio_chip_number = 4;
-        return 4;
-      }
-    }
-    fclose(model_file);
-  }
-
-  // Fallback: Try probing chips in order of likelihood
+  // Try probing chips in order of likelihood
   for (int i = 0; i < num_candidates; i++)
   {
     int chip_num = chip_candidates[i];
