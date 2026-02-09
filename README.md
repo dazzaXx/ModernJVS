@@ -107,10 +107,11 @@ Check the `/etc/modernjvs/devices` folder after installation to see device-speci
 
 For games that require a sense line, use the following wiring configuration:
 
+**Raspberry Pi 1-4:**
 ```
 
 |          GND   (BLACK) |-------------| GND           |                 |                        |
-| ARCADE   A+    (GREEN) |-------------| A+  RS485 USB |-----------------| USB  RASPBERRY PI > 1  |
+| ARCADE   A+    (GREEN) |-------------| A+  RS485 USB |-----------------| USB  RASPBERRY PI 1-4  |
 |          B-    (WHITE) |-------------| B-            |                 |                        |
 |                        |                                               |                        |
 |          SENSE (RED)   |----------+------------------------------------| GPIO 12                |
@@ -118,9 +119,23 @@ For games that require a sense line, use the following wiring configuration:
                                     +---- (1kOhm Resistor or 4 Signal Diodes) ---- GND
 ```
 
+**Raspberry Pi 5:**
+```
+
+|          GND   (BLACK) |-------------| GND           |                 |                        |
+| ARCADE   A+    (GREEN) |-------------| A+  RS485 USB |-----------------| USB  RASPBERRY PI 5    |
+|          B-    (WHITE) |-------------| B-            |                 |                        |
+|                        |                                               |                        |
+|          SENSE (RED)   |----------+------------------------------------| GPIO 26                |
+                                    |
+                                    +---- (1kOhm Resistor or 4 Signal Diodes) ---- GND
+```
+
 A 1KOhm resistor or 4 signal diodes are known to work properly, the purpose of these is to create a 2.5 volt drop.
 
 > **Warning:** A 1KOhm resistor will not work with the Triforce system, please use the 4 signal diodes for this purpose.
+
+> **Note for Raspberry Pi 5 users:** GPIO 26 is used by default instead of GPIO 12 to avoid PWM hardware conflicts. GPIO 12, 13, 18, and 19 share PWM resources on the Pi 5's RP1 chip, which can cause unreliable sense line behavior. If you need to use GPIO 12, you can override this by setting `SENSE_LINE_PIN 12` in your config file, though GPIO 26 is strongly recommended.
 
 **What is the sense line?** The sense line is used by some arcade systems to detect when the cabinet is powered on. It helps synchronize communication between the arcade board and the I/O system.
 
@@ -176,7 +191,7 @@ Valid range: 0.0 to 0.5 (0.0 = no deadzone, 0.1 = 10% deadzone, etc.)
 2. **Connect hardware:**
    - Plug USB RS485 converter into Raspberry Pi
    - Connect RS485 converter to arcade board (GND, A+, B-)
-   - Connect sense line if required (GPIO 12 + resistor/diodes to GND)
+   - Connect sense line if required (GPIO 12 for Pi 1-4, GPIO 26 for Pi 5 + resistor/diodes to GND)
    - Connect USB/Bluetooth controllers to Raspberry Pi
 3. **Configure:**
    ```

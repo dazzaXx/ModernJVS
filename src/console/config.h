@@ -14,6 +14,7 @@
 #define DEFAULT_IO_PATH "/etc/modernjvs/ios/"
 #define DEFAULT_ROTARY_PATH "/etc/modernjvs/rotary"
 #define DEFAULT_SENSE_LINE_PIN 12
+#define DEFAULT_SENSE_LINE_PIN_PI5 26  /* GPIO 26 for Raspberry Pi 5 to avoid PWM conflicts on GPIO 12 */
 #define DEFAULT_SENSE_LINE_TYPE 0
 #define DEFAULT_AUTO_CONTROLLER_DETECTION 1
 #define DEFAULT_PLAYER -1

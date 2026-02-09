@@ -13,7 +13,14 @@ EMULATE namco-FCA1
 # SENSE_LINE_TYPE 1 - USB to RS485 with sense line
 # SENSE_LINE_TYPE 2 - Raspberry Pi OpenJVS Hat
 SENSE_LINE_TYPE 1
-SENSE_LINE_PIN 12
+
+# SENSE_LINE_PIN: GPIO pin for sense line
+# Default: GPIO 12 (Pi 1-4), GPIO 26 (Pi 5 - auto-detected)
+# Note: On Raspberry Pi 5, GPIO 26 is used by default to avoid PWM conflicts.
+#       GPIO 12, 13, 18, and 19 share PWM hardware on Pi 5's RP1 chip.
+#       You can override by uncommenting and setting this value, but GPIO 26
+#       is strongly recommended for Pi 5.
+# SENSE_LINE_PIN 12
 
 # Setup the debug mode for outputting debug information
 # DEBUG_MODE 1 - This will show the JVS outputs

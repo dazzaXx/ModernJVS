@@ -35,10 +35,41 @@ static double clampDeadzone(double deadzone)
     return deadzone;
 }
 
+static int isRaspberryPi5(void)
+{
+    /* Detect Raspberry Pi 5 by reading device-tree model */
+    FILE *model_file = fopen("/proc/device-tree/model", "r");
+    if (model_file)
+    {
+        char model[128];
+        if (fgets(model, sizeof(model), model_file))
+        {
+            fclose(model_file);
+            /* Check if it's a Raspberry Pi 5 */
+            return strstr(model, "Raspberry Pi 5") != NULL;
+        }
+        fclose(model_file);
+    }
+    return 0;
+}
+
 JVSConfigStatus getDefaultConfig(JVSConfig *config)
 {
     config->senseLineType = DEFAULT_SENSE_LINE_TYPE;
-    config->senseLinePin = DEFAULT_SENSE_LINE_PIN;
+    
+    /* On Raspberry Pi 5, GPIO 12 has PWM hardware conflicts that can cause 
+     * sense line issues. GPIO 12, 13, 18, and 19 share PWM resources on the 
+     * RP1 chip, leading to unreliable digital I/O behavior. GPIO 26 has no 
+     * such conflicts and is a safer default for Pi 5. */
+    if (isRaspberryPi5())
+    {
+        config->senseLinePin = DEFAULT_SENSE_LINE_PIN_PI5;
+    }
+    else
+    {
+        config->senseLinePin = DEFAULT_SENSE_LINE_PIN;
+    }
+    
     config->debugLevel = DEFAULT_DEBUG_LEVEL;
     config->autoControllerDetection = DEFAULT_AUTO_CONTROLLER_DETECTION;
     config->analogDeadzonePlayer1 = DEFAULT_ANALOG_DEADZONE;
