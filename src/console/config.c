@@ -44,9 +44,10 @@ static int isRaspberryPi5(void)
         char model[128];
         if (fgets(model, sizeof(model), model_file))
         {
-            fclose(model_file);
             /* Check if it's a Raspberry Pi 5 */
-            return strstr(model, "Raspberry Pi 5") != NULL;
+            int is_pi5 = strstr(model, "Raspberry Pi 5") != NULL;
+            fclose(model_file);
+            return is_pi5;
         }
         fclose(model_file);
     }
