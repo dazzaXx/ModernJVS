@@ -111,7 +111,7 @@ For games that require a sense line, use the following wiring configuration:
 | ARCADE   A+    (GREEN) |-------------| A+  RS485 USB |-----------------| USB  RASPBERRY PI > 1  |
 |          B-    (WHITE) |-------------| B-            |                 |                        |
 |                        |                                               |                        |
-|          SENSE (RED)   |----------+------------------------------------| GPIO 12                |
+|          SENSE (RED)   |----------+------------------------------------| GPIO 26                |
                                     |
                                     +---- (1kOhm Resistor or 4 Signal Diodes) ---- GND
 ```
@@ -160,6 +160,8 @@ Set the `DEFAULT_GAME` line to match your game. Available profiles are in `/etc/
 
 Configurable deadzone can be set in the config for each player's controller. Only affects controllers with analog sticks as it's primarily used to eliminate stick drift (unwanted movement from worn analog sticks).
 
+By default it is set to 0.2 to eliminate the analog sticks from being too sensitive to input.
+
 **Configuration:**
 ```
 ANALOG_DEADZONE_PLAYER_1 0.2  # 20% deadzone for player 1
@@ -174,7 +176,7 @@ Valid range: 0.0 to 0.5 (0.0 = no deadzone, 0.1 = 10% deadzone, etc.)
 2. **Connect hardware:**
    - Plug USB RS485 converter into Raspberry Pi
    - Connect RS485 converter to arcade board (GND, A+, B-)
-   - Connect sense line if required (GPIO 12 + resistor/diodes to GND)
+   - Connect sense line if required (GPIO 26 + resistor/diodes to GND)
    - Connect USB/Bluetooth controllers to Raspberry Pi
 3. **Configure:**
    ```
