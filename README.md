@@ -62,7 +62,6 @@ Installation is done from the git repository as follows, using RaspiOS Lite:
 ```
 sudo apt install -y build-essential cmake git file libgpiod-dev
 git clone https://github.com/dazzaXx/ModernJVS
-make
 sudo make install
 ```
 
@@ -71,7 +70,6 @@ If using DietPi:
 ```
 sudo apt install -y build-essential cmake git file libgpiod-dev pkg-config
 git clone https://github.com/dazzaXx/ModernJVS
-make
 sudo make install
 ```
 
