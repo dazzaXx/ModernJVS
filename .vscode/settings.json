@@ -1,8 +1,0 @@
-{
-    "files.associations": {
-        "string_view": "c"
-    },
-    "editor.formatOnPaste": true,
-    "editor.formatOnSave": true,
-    "editor.formatOnType": true
-}
