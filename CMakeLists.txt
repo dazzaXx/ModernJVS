@@ -101,6 +101,6 @@ install(FILES
 
 # CPack configuration for DEB package generation
 set(CPACK_GENERATOR "DEB")
-set(CPACK_DEBIAN_PACKAGE_MAINTAINER "bobby@dilley.uk")
+set(CPACK_DEBIAN_PACKAGE_MAINTAINER "dazzaXx")
 set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
 include(CPack)
