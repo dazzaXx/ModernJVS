@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Disable Bluetooth Script for Raspberry Pi (not needed for Pi 5)
-# This script disables internal Bluetooth and installs external USB Bluetooth packages
+# This script disables internal Bluetooth and installs Bluetooth packages for use with USB Bluetooth devices as the internal bluetooth adapter causes conflicts on models before Pi 5.
 # Note: This is required for Pi models 1-4 to use USB Bluetooth adapters, but not for Pi 5
 
 # Color codes for output
