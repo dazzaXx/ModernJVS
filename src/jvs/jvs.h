@@ -34,8 +34,8 @@
 
 /* Reporting for each individual command */
 #define REPORT_SUCCESS 0x01          // all went well
-#define REPORT_PARAMETER_ERROR1 0x02 // TODO: work out difference between this one and the next
-#define REPORT_PARAMETER_ERROR2 0x03
+#define REPORT_PARAMETER_ERROR1 0x02 // parameter value is out of valid range (e.g., requesting invalid player number)
+#define REPORT_PARAMETER_ERROR2 0x03 // parameter format/structure error (e.g., wrong length, incorrect structure)
 #define REPORT_BUSY 0x04 // some attached hardware was busy, causing the request to fail
 
 /* All of the commands */

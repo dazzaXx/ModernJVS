@@ -100,7 +100,7 @@ static void *wiiDeviceThread(void *_args)
         FD_SET(fd, &file_descriptor);
 
         tv.tv_sec = 0;
-        tv.tv_usec = 2 * 1000;
+        tv.tv_usec = 2 * 1000L;
 
         if (select(fd + 1, &file_descriptor, NULL, NULL, &tv) < 1)
             continue;
@@ -297,7 +297,7 @@ static void *deviceThread(void *_args)
         FD_SET(fd, &file_descriptor);
 
         tv.tv_sec = 0;
-        tv.tv_usec = 2 * 1000;
+        tv.tv_usec = 2 * 1000L;
 
         if (select(fd + 1, &file_descriptor, NULL, NULL, &tv) < 1)
             continue;
