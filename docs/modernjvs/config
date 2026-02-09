@@ -13,7 +13,7 @@ EMULATE namco-FCA1
 # SENSE_LINE_TYPE 1 - USB to RS485 with sense line
 # SENSE_LINE_TYPE 2 - Raspberry Pi OpenJVS Hat
 SENSE_LINE_TYPE 1
-SENSE_LINE_PIN 12
+SENSE_LINE_PIN 26
 
 # Setup the debug mode for outputting debug information
 # DEBUG_MODE 1 - This will show the JVS outputs
