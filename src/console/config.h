@@ -13,7 +13,7 @@
 #define DEFAULT_IO "namco-FCA1"
 #define DEFAULT_IO_PATH "/etc/modernjvs/ios/"
 #define DEFAULT_ROTARY_PATH "/etc/modernjvs/rotary"
-#define DEFAULT_SENSE_LINE_PIN 12
+#define DEFAULT_SENSE_LINE_PIN 26
 #define DEFAULT_SENSE_LINE_TYPE 0
 #define DEFAULT_AUTO_CONTROLLER_DETECTION 1
 #define DEFAULT_PLAYER -1
