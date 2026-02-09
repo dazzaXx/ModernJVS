@@ -5,7 +5,7 @@
 
 /* Default config values */
 #define DEFAULT_CONFIG_PATH "/etc/modernjvs/config"
-#define DEFAULT_DEBUG_LEVEL 2
+#define DEFAULT_DEBUG_LEVEL 1
 #define DEFAULT_DEVICE_MAPPING_PATH "/etc/modernjvs/devices/"
 #define DEFAULT_DEVICE_PATH "/dev/ttyUSB0"
 #define DEFAULT_GAME "generic"
@@ -14,10 +14,10 @@
 #define DEFAULT_IO_PATH "/etc/modernjvs/ios/"
 #define DEFAULT_ROTARY_PATH "/etc/modernjvs/rotary"
 #define DEFAULT_SENSE_LINE_PIN 26
-#define DEFAULT_SENSE_LINE_TYPE 0
+#define DEFAULT_SENSE_LINE_TYPE 1
 #define DEFAULT_AUTO_CONTROLLER_DETECTION 1
 #define DEFAULT_PLAYER -1
-#define DEFAULT_ANALOG_DEADZONE 0.0
+#define DEFAULT_ANALOG_DEADZONE 0.2
 #define MAX_ANALOG_DEADZONE 0.5
 #define DEADZONE_CLAMP_OFFSET 0.01
 
