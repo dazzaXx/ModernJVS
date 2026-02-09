@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.10)
 project(modernjvs
         VERSION "5.3.6"
         LANGUAGES "C"
-        DESCRIPTION "An emulator for arcade JVS I/O boards"
+        DESCRIPTION "JVS I/O Emulator"
         HOMEPAGE_URL "https://github.com/dazzaXx/ModernJVS"
 )
 
@@ -101,6 +101,6 @@ install(FILES
 
 # CPack configuration for DEB package generation
 set(CPACK_GENERATOR "DEB")
-set(CPACK_DEBIAN_PACKAGE_MAINTAINER "bobby@dilley.uk")
+set(CPACK_DEBIAN_PACKAGE_MAINTAINER "dazzaXx")
 set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
 include(CPack)
