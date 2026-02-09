@@ -35,6 +35,18 @@ static double clampDeadzone(double deadzone)
     return deadzone;
 }
 
+/* Helper function to check if adding a new mapping would exceed the maximum limit */
+static int checkMappingLimit(int currentLength, FILE *file, const char *mappingType)
+{
+    if (currentLength >= MAX_MAPPING)
+    {
+        debug(0, "Error: Maximum number of %s mappings (%d) exceeded\n", mappingType, MAX_MAPPING);
+        fclose(file);
+        return 0; /* Failed - limit exceeded */
+    }
+    return 1; /* Success - can add mapping */
+}
+
 JVSConfigStatus getDefaultConfig(JVSConfig *config)
 {
     config->senseLineType = DEFAULT_SENSE_LINE_TYPE;
@@ -227,12 +239,9 @@ JVSConfigStatus parseInputMapping(char *path, InputMappings *inputMappings)
             char *token = getNextToken(NULL, " ", &saveptr);
             if (token)
             {
-                if (inputMappings->length >= MAX_MAPPING)
-                {
-                    debug(0, "Error: Maximum number of input mappings (%d) exceeded\n", MAX_MAPPING);
-                    fclose(file);
+                if (!checkMappingLimit(inputMappings->length, file, "input"))
                     return JVS_CONFIG_STATUS_ERROR;
-                }
+                
                 int code = evDevFromString(command);
                 ControllerInput input = controllerInputFromString(token);
 
@@ -297,12 +306,9 @@ JVSConfigStatus parseInputMapping(char *path, InputMappings *inputMappings)
                 mapping = analogueMapping;
             }
 
-            if (inputMappings->length >= MAX_MAPPING)
-            {
-                debug(0, "Error: Maximum number of input mappings (%d) exceeded\n", MAX_MAPPING);
-                fclose(file);
+            if (!checkMappingLimit(inputMappings->length, file, "input"))
                 return JVS_CONFIG_STATUS_ERROR;
-            }
+            
             inputMappings->mappings[inputMappings->length] = mapping;
             inputMappings->length++;
         }
@@ -341,12 +347,9 @@ JVSConfigStatus parseInputMapping(char *path, InputMappings *inputMappings)
 
             mapping = analogueMapping;
 
-            if (inputMappings->length >= MAX_MAPPING)
-            {
-                debug(0, "Error: Maximum number of input mappings (%d) exceeded\n", MAX_MAPPING);
-                fclose(file);
+            if (!checkMappingLimit(inputMappings->length, file, "input"))
                 return JVS_CONFIG_STATUS_ERROR;
-            }
+            
             inputMappings->mappings[inputMappings->length] = mapping;
             inputMappings->length++;
         }
@@ -355,12 +358,9 @@ JVSConfigStatus parseInputMapping(char *path, InputMappings *inputMappings)
             char *token = getNextToken(NULL, " ", &saveptr);
             if (token)
             {
-                if (inputMappings->length >= MAX_MAPPING)
-                {
-                    debug(0, "Error: Maximum number of input mappings (%d) exceeded\n", MAX_MAPPING);
-                    fclose(file);
+                if (!checkMappingLimit(inputMappings->length, file, "input"))
                     return JVS_CONFIG_STATUS_ERROR;
-                }
+                
                 int code = evDevFromString(command);
                 ControllerInput input = controllerInputFromString(token);
 
@@ -483,12 +483,9 @@ JVSConfigStatus parseOutputMapping(char *path, OutputMappings *outputMappings, c
                 mapping.outputSecondary = jvsInputFromString(secondaryOutput);
             }
 
-            if (outputMappings->length >= MAX_MAPPING)
-            {
-                debug(0, "Error: Maximum number of output mappings (%d) exceeded\n", MAX_MAPPING);
-                fclose(file);
+            if (!checkMappingLimit(outputMappings->length, file, "output"))
                 return JVS_CONFIG_STATUS_ERROR;
-            }
+            
             outputMappings->mappings[outputMappings->length] = mapping;
             outputMappings->length++;
         }
@@ -512,12 +509,9 @@ JVSConfigStatus parseOutputMapping(char *path, OutputMappings *outputMappings, c
                 mapping.reverse = 1;
             }
 
-            if (outputMappings->length >= MAX_MAPPING)
-            {
-                debug(0, "Error: Maximum number of output mappings (%d) exceeded\n", MAX_MAPPING);
-                fclose(file);
+            if (!checkMappingLimit(outputMappings->length, file, "output"))
                 return JVS_CONFIG_STATUS_ERROR;
-            }
+            
             outputMappings->mappings[outputMappings->length] = mapping;
             outputMappings->length++;
         }
@@ -541,12 +535,9 @@ JVSConfigStatus parseOutputMapping(char *path, OutputMappings *outputMappings, c
                 mapping.reverse = 1;
             }
 
-            if (outputMappings->length >= MAX_MAPPING)
-            {
-                debug(0, "Error: Maximum number of output mappings (%d) exceeded\n", MAX_MAPPING);
-                fclose(file);
+            if (!checkMappingLimit(outputMappings->length, file, "output"))
                 return JVS_CONFIG_STATUS_ERROR;
-            }
+            
             outputMappings->mappings[outputMappings->length] = mapping;
             outputMappings->length++;
         }
