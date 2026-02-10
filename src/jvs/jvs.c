@@ -577,14 +577,14 @@ JVSStatus processPacket(JVSIO *jvsIO)
 			size = 1;
 			outputPacket.data[outputPacket.length++] = REPORT_SUCCESS;
 			char idData[100];
-			idData[0] = '\0'; // Initialize to empty string
-			for (int i = 1; i < 100; i++)
+			for (int i = 0; i < 99; i++)
 			{
-				idData[i] = (char)inputPacket.data[index + i];
+				idData[i] = (char)inputPacket.data[index + 1 + i];
 				size++;
-				if (!inputPacket.data[index + i])
+				if (!inputPacket.data[index + 1 + i])
 					break;
 			}
+			idData[99] = '\0'; // Ensure null termination
 			debug(0, "CMD_CONVEY_ID - Main board ID: %s\n", idData);
 		}
 		break;
