@@ -576,20 +576,19 @@ JVSStatus processPacket(JVSIO *jvsIO)
 			debug(1, "CMD_CONVEY_ID - Receiving main board ID\n");
 			size = 1;
 			outputPacket.data[outputPacket.length++] = REPORT_SUCCESS;
-			#define ID_DATA_MAX_SIZE 100
-			char idData[ID_DATA_MAX_SIZE];
+			char idData[100];
 			int i;
-			for (i = 0; i < ID_DATA_MAX_SIZE - 1; i++)
+			for (i = 0; i < 99; i++)
 			{
 				idData[i] = (char)inputPacket.data[index + 1 + i];
+				size++;
 				if (!inputPacket.data[index + 1 + i])
 					break;
-				size++;
 			}
-			if (i == ID_DATA_MAX_SIZE - 1)
-				idData[ID_DATA_MAX_SIZE - 1] = '\0'; // Ensure null termination if loop completed without finding one
+			// Ensure null termination if we exhausted the buffer
+			if (i == 99)
+				idData[99] = '\0';
 			debug(0, "CMD_CONVEY_ID - Main board ID: %s\n", idData);
-			#undef ID_DATA_MAX_SIZE
 		}
 		break;
 
