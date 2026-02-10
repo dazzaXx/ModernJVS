@@ -585,9 +585,8 @@ JVSStatus processPacket(JVSIO *jvsIO)
 				if (!inputPacket.data[index + 1 + i])
 					break;
 			}
-			// Ensure null termination if we exhausted the buffer
-			if (i == 99)
-				idData[99] = '\0';
+			// Ensure null termination (either already copied or set at end of buffer)
+			idData[i < 99 ? i : 99] = '\0';
 			debug(0, "CMD_CONVEY_ID - Main board ID: %s\n", idData);
 		}
 		break;
