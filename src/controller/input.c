@@ -844,6 +844,7 @@ JVSInputStatus initInputs(char *outputMappingPath, char *configPath, char *secon
     }
 
     int playerNumber = 1;
+    int controllersStarted = 0;
 
     for (int i = 0; i < deviceList->length; i++)
     {
@@ -925,6 +926,7 @@ JVSInputStatus initInputs(char *outputMappingPath, char *configPath, char *secon
             double playerDeadzone = getPlayerDeadzone(inputMappings.player, analogDeadzoneP1, analogDeadzoneP2, analogDeadzoneP3, analogDeadzoneP4);
             startThread(&evInputs, device->path, strcmp(device->name, WIIMOTE_DEVICE_NAME_IR) == 0, inputMappings.player, jvsIO, playerDeadzone);
             debug(0, "  Player %d (Fixed via config):\t\t%s%s\n", inputMappings.player, deviceList->devices[i].name, specialMap);
+            controllersStarted++;
         }
         else
         {
@@ -935,11 +937,16 @@ JVSInputStatus initInputs(char *outputMappingPath, char *configPath, char *secon
                 debug(0, "  Player %d:\t\t%s%s\n", playerNumber, deviceName, specialMap);
                 playerNumber++;
             }
+            controllersStarted++;
         }
     }
 
     free(deviceList);
     deviceList = NULL;
+
+    // If no controllers were successfully initialized, return error
+    if (controllersStarted == 0)
+        return JVS_INPUT_STATUS_DEVICE_OPEN_ERROR;
 
     return JVS_INPUT_STATUS_SUCCESS;
 }
