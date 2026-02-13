@@ -792,6 +792,10 @@ JVSInputStatus getInputs(DeviceList *deviceList)
 
     deviceList->length = validDeviceIndex;
 
+    // Check if any valid devices remain after filtering
+    if (validDeviceIndex == 0)
+        return JVS_INPUT_STATUS_DEVICE_OPEN_ERROR;
+
     /* Use qsort instead of bubble sort for O(n log n) performance */
     if (deviceList->length > 1)
     {
