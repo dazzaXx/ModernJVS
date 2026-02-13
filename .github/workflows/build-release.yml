@@ -43,23 +43,13 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Version: $VERSION"
       
-      - name: Create Release
-        id: create_release
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Create Release and Upload DEB package
+        uses: softprops/action-gh-release@v1
         with:
           tag_name: v${{ steps.get_version.outputs.version }}
-          release_name: Release v${{ steps.get_version.outputs.version }}
+          name: Release v${{ steps.get_version.outputs.version }}
           draft: false
           prerelease: false
-      
-      - name: Upload DEB package to release
-        uses: actions/upload-release-asset@v1
+          files: build/modernjvs-${{ steps.get_version.outputs.version }}-Linux.deb
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: build/modernjvs-${{ steps.get_version.outputs.version }}-Linux.deb
-          asset_name: modernjvs-${{ steps.get_version.outputs.version }}-Linux.deb
-          asset_content_type: application/vnd.debian.binary-package
