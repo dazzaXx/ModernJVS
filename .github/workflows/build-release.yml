@@ -36,6 +36,10 @@ jobs:
         id: get_version
         run: |
           VERSION=$(grep -oP 'VERSION "\K[^"]+' CMakeLists.txt)
+          if [ -z "$VERSION" ]; then
+            echo "Error: Could not extract version from CMakeLists.txt"
+            exit 1
+          fi
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Version: $VERSION"
       
