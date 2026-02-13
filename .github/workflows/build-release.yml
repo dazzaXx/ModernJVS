@@ -35,7 +35,7 @@ jobs:
       - name: Get version from CMakeLists.txt
         id: get_version
         run: |
-          VERSION=$(grep -oP 'VERSION "\K[^"]+' CMakeLists.txt)
+          VERSION=$(awk -F'"' '/^[[:space:]]*VERSION/ {print $2; exit}' CMakeLists.txt)
           if [ -z "$VERSION" ]; then
             echo "Error: Could not extract version from CMakeLists.txt"
             exit 1
