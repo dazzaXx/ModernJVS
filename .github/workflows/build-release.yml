@@ -35,7 +35,7 @@ jobs:
       - name: Get version from CMakeLists.txt
         id: get_version
         run: |
-          VERSION=$(awk '/project\(/,/^\)/ {if (/VERSION/) {match($0, /"[^"]*"/); print substr($0, RSTART+1, RLENGTH-2); exit}}' CMakeLists.txt)
+          VERSION=$(awk '/project\(/,/^[[:space:]]*\)/ {if (/VERSION/) {match($0, /"[^"]*"/); print substr($0, RSTART+1, RLENGTH-2); exit}}' CMakeLists.txt)
           if [ -z "$VERSION" ]; then
             echo "Error: Could not extract version from CMakeLists.txt"
             exit 1
