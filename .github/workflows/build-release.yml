@@ -35,7 +35,7 @@ jobs:
       - name: Get version from CMakeLists.txt
         id: get_version
         run: |
-          VERSION=$(awk -F'"' '/^[[:space:]]*VERSION/ {print $2; exit}' CMakeLists.txt)
+          VERSION=$(awk -F'"' '/^[[:space:]]*project/,/\)/ {if (/VERSION/) {print $2; exit}}' CMakeLists.txt)
           if [ -z "$VERSION" ]; then
             echo "Error: Could not extract version from CMakeLists.txt"
             exit 1
@@ -50,6 +50,7 @@ jobs:
           name: Release v${{ steps.get_version.outputs.version }}
           draft: false
           prerelease: false
-          files: build/modernjvs-${{ steps.get_version.outputs.version }}-Linux.deb
+          files: build/*.deb
+          fail_on_unmatched_files: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
