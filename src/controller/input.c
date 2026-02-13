@@ -456,13 +456,13 @@ static void *deviceThread(void *_args)
 
     return 0;
 }
-static void startThread(EVInputs *inputs, char *devicePath, int wiiMode, int player, JVSIO *jvsIO, double analogDeadzone)
+static ThreadStatus startThread(EVInputs *inputs, char *devicePath, int wiiMode, int player, JVSIO *jvsIO, double analogDeadzone)
 {
     MappingThreadArguments *args = malloc(sizeof(MappingThreadArguments));
     if (args == NULL)
     {
         debug(0, "Error: Failed to malloc mapping thread arguments\n");
-        return;
+        return THREAD_STATUS_ERROR;
     }
     
     strncpy(args->devicePath, devicePath, MAX_PATH_LENGTH - 1);
@@ -472,20 +472,25 @@ static void startThread(EVInputs *inputs, char *devicePath, int wiiMode, int pla
     args->jvsIO = jvsIO;
     args->analogDeadzone = analogDeadzone;
 
+    ThreadStatus status;
     if (wiiMode)
     {
-        if (createThread(wiiDeviceThread, args) != THREAD_STATUS_SUCCESS)
+        status = createThread(wiiDeviceThread, args);
+        if (status != THREAD_STATUS_SUCCESS)
         {
             free(args);
         }
     }
     else
     {
-        if (createThread(deviceThread, args) != THREAD_STATUS_SUCCESS)
+        status = createThread(deviceThread, args);
+        if (status != THREAD_STATUS_SUCCESS)
         {
             free(args);
         }
     }
+    
+    return status;
 }
 
 int evDevFromString(char *evDevString)
@@ -924,20 +929,24 @@ JVSInputStatus initInputs(char *outputMappingPath, char *configPath, char *secon
         if (inputMappings.player != -1)
         {
             double playerDeadzone = getPlayerDeadzone(inputMappings.player, analogDeadzoneP1, analogDeadzoneP2, analogDeadzoneP3, analogDeadzoneP4);
-            startThread(&evInputs, device->path, strcmp(device->name, WIIMOTE_DEVICE_NAME_IR) == 0, inputMappings.player, jvsIO, playerDeadzone);
-            debug(0, "  Player %d (Fixed via config):\t\t%s%s\n", inputMappings.player, deviceList->devices[i].name, specialMap);
-            controllersStarted++;
+            if (startThread(&evInputs, device->path, strcmp(device->name, WIIMOTE_DEVICE_NAME_IR) == 0, inputMappings.player, jvsIO, playerDeadzone) == THREAD_STATUS_SUCCESS)
+            {
+                debug(0, "  Player %d (Fixed via config):\t\t%s%s\n", inputMappings.player, deviceList->devices[i].name, specialMap);
+                controllersStarted++;
+            }
         }
         else
         {
             double playerDeadzone = getPlayerDeadzone(playerNumber, analogDeadzoneP1, analogDeadzoneP2, analogDeadzoneP3, analogDeadzoneP4);
-            startThread(&evInputs, device->path, strcmp(device->name, WIIMOTE_DEVICE_NAME_IR) == 0, playerNumber, jvsIO, playerDeadzone);
-            if (strcmp(deviceList->devices[i].name, AIMTRAK_DEVICE_NAME_REMAP_OUT_SCREEN) != 0 && strcmp(deviceList->devices[i].name, AIMTRAK_DEVICE_NAME_REMAP_JOYSTICK) != 0 && strcmp(deviceList->devices[i].name, WIIMOTE_DEVICE_NAME_IR) != 0)
+            if (startThread(&evInputs, device->path, strcmp(device->name, WIIMOTE_DEVICE_NAME_IR) == 0, playerNumber, jvsIO, playerDeadzone) == THREAD_STATUS_SUCCESS)
             {
-                debug(0, "  Player %d:\t\t%s%s\n", playerNumber, deviceName, specialMap);
-                playerNumber++;
+                if (strcmp(deviceList->devices[i].name, AIMTRAK_DEVICE_NAME_REMAP_OUT_SCREEN) != 0 && strcmp(deviceList->devices[i].name, AIMTRAK_DEVICE_NAME_REMAP_JOYSTICK) != 0 && strcmp(deviceList->devices[i].name, WIIMOTE_DEVICE_NAME_IR) != 0)
+                {
+                    debug(0, "  Player %d:\t\t%s%s\n", playerNumber, deviceName, specialMap);
+                    playerNumber++;
+                }
+                controllersStarted++;
             }
-            controllersStarted++;
         }
     }
 
