@@ -40,8 +40,22 @@ jobs:
             echo "Error: Could not extract version from CMakeLists.txt"
             exit 1
           fi
+          # Validate version format (basic semver check)
+          if ! echo "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+'; then
+            echo "Error: Version '$VERSION' does not match expected format (X.Y.Z)"
+            exit 1
+          fi
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Version: $VERSION"
+      
+      - name: Verify DEB package exists
+        run: |
+          if ! ls build/*.deb 1> /dev/null 2>&1; then
+            echo "Error: No .deb package found in build directory"
+            exit 1
+          fi
+          echo "Found .deb package(s):"
+          ls -lh build/*.deb
       
       - name: Create Release and Upload DEB package
         uses: softprops/action-gh-release@v1
