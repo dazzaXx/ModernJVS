@@ -931,7 +931,7 @@ JVSInputStatus initInputs(char *outputMappingPath, char *configPath, char *secon
             double playerDeadzone = getPlayerDeadzone(inputMappings.player, analogDeadzoneP1, analogDeadzoneP2, analogDeadzoneP3, analogDeadzoneP4);
             if (startThread(&evInputs, device->path, strcmp(device->name, WIIMOTE_DEVICE_NAME_IR) == 0, inputMappings.player, jvsIO, playerDeadzone) == THREAD_STATUS_SUCCESS)
             {
-                debug(0, "  Player %d (Fixed via config):\t\t%s%s\n", inputMappings.player, deviceList->devices[i].name, specialMap);
+                debug(0, "  Player %d (Fixed via config):  %s%s\n", inputMappings.player, deviceList->devices[i].name, specialMap);
                 controllersStarted++;
             }
         }
@@ -942,7 +942,7 @@ JVSInputStatus initInputs(char *outputMappingPath, char *configPath, char *secon
             {
                 if (strcmp(deviceList->devices[i].name, AIMTRAK_DEVICE_NAME_REMAP_OUT_SCREEN) != 0 && strcmp(deviceList->devices[i].name, AIMTRAK_DEVICE_NAME_REMAP_JOYSTICK) != 0 && strcmp(deviceList->devices[i].name, WIIMOTE_DEVICE_NAME_IR) != 0)
                 {
-                    debug(0, "  Player %d:\t\t%s%s\n", playerNumber, deviceName, specialMap);
+                    debug(0, "  Player %d:                  %s%s\n", playerNumber, deviceName, specialMap);
                     playerNumber++;
                 }
                 controllersStarted++;
