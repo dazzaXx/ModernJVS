@@ -1,7 +1,5 @@
 #include "hardware/device.h"
 #include "console/debug.h"
-
-#ifdef USE_LIBGPIOD
 #include <gpiod.h>
 
 #define GPIO_CONSUMER_NAME "modernjvs"
@@ -116,8 +114,10 @@ static struct gpiod_chip *open_gpio_chip(void)
   snprintf(chip_path, sizeof(chip_path), "/dev/gpiochip%d", chip_number);
   return gpiod_chip_open(chip_path);
 }
-#endif
-
+#else
+// libgpiod v1 API - cache the GPIO chip handle to avoid repeated open/close operations
+static struct gpiod_chip *cached_chip_v1 = NULL;
+static int cached_chip_number_v1 = -1;
 #endif
 
 #define TIMEOUT_SELECT 200
@@ -176,7 +176,6 @@ int closeDevice(void)
 {
   tcflush(serialIO, TCIOFLUSH);
   
-#ifdef USE_LIBGPIOD
 #ifdef GPIOD_API_V2
   // Clean up libgpiod v2 resources
   if (line_request)
@@ -194,7 +193,6 @@ int closeDevice(void)
     cached_chip_v1 = NULL;
     cached_chip_number_v1 = -1;
   }
-#endif
 #endif
   
   return close(serialIO) == 0;
@@ -287,8 +285,6 @@ int setSerialAttributes(int fd, int myBaud)
 
   return 0;
 }
-
-#ifdef USE_LIBGPIOD
 
 #ifdef GPIOD_API_V2
 // libgpiod v2 API implementation
@@ -564,10 +560,6 @@ int readGPIO(int pin)
 #else
 // libgpiod v1 API implementation
 
-// Cache the GPIO chip handle to avoid repeated open/close operations
-static struct gpiod_chip *cached_chip_v1 = NULL;
-static int cached_chip_number_v1 = -1;
-
 // Helper function to get or open the cached chip
 static struct gpiod_chip *get_cached_chip_v1(void)
 {
@@ -594,7 +586,6 @@ static struct gpiod_chip *get_cached_chip_v1(void)
 
 int setupGPIO(int pin)
 {
-  // With libgpiod, we don't need to export the GPIO pin
   // The character device interface handles this automatically
   // We just verify we can open the chip
   struct gpiod_chip *chip = get_cached_chip_v1();
@@ -665,90 +656,6 @@ int readGPIO(int pin)
 }
 
 #endif  // GPIOD_API_V2
-
-#else  // USE_LIBGPIOD
-
-int setupGPIO(int pin)
-{
-  char buffer[3];
-  ssize_t bytesWritten;
-  int fd;
-
-  if ((fd = open("/sys/class/gpio/export", O_WRONLY)) == -1)
-    return 0;
-
-  bytesWritten = snprintf(buffer, 3, "%d", pin);
-  if (write(fd, buffer, bytesWritten) != bytesWritten)
-  {
-    close(fd);
-    return 0;
-  }
-
-  close(fd);
-  return 1;
-}
-
-int setGPIODirection(int pin, int dir)
-{
-  static const char s_directions_str[] = "in\0out";
-
-  char path[35];
-  int fd;
-
-  snprintf(path, 35, "/sys/class/gpio/gpio%d/direction", pin);
-  if ((fd = open(path, O_WRONLY)) == -1)
-    return 0;
-
-  int length = IN == dir ? 2 : 3;
-  if (write(fd, &s_directions_str[IN == dir ? 0 : 3], length) != length)
-  {
-    close(fd);
-    return 0;
-  }
-
-  close(fd);
-  return 1;
-}
-
-int writeGPIO(int pin, int value)
-{
-  static const char stringValues[] = "01";
-
-  char path[100];
-  int fd;
-
-  snprintf(path, 100, "/sys/class/gpio/gpio%d/value", pin);
-  if ((fd = open(path, O_WRONLY)) == -1)
-    return 0;
-
-  if (write(fd, &stringValues[LOW == value ? 0 : 1], 1) != 1)
-  {
-    close(fd);
-    return 0;
-  }
-
-  close(fd);
-  return 1;
-}
-
-int readGPIO(int pin)
-{
-  char path[100];
-  char value_str[3];
-  int fd;
-
-  snprintf(path, 100, "/sys/class/gpio/gpio%d/value", pin);
-  if ((fd = open(path, O_RDONLY)) == -1)
-    return -1;
-
-  if (read(fd, value_str, 3) == -1)
-    return -1;
-
-  close(fd);
-  return (atoi(value_str));
-}
-
-#endif  // USE_LIBGPIOD
 
 int setSenseLine(int state)
 {

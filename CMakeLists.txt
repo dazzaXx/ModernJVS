@@ -9,11 +9,9 @@ project(modernjvs
 
 find_package(Threads REQUIRED)
 
-# Optionally find libgpiod for modern GPIO character-device API
-find_package(PkgConfig QUIET)
-if(PKG_CONFIG_FOUND)
-    pkg_check_modules(LIBGPIOD QUIET libgpiod)
-endif()
+# libgpiod is required for GPIO character-device API
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(LIBGPIOD REQUIRED libgpiod)
 
 configure_file(src/version.h.in version.h)
 
@@ -43,12 +41,8 @@ set_target_properties(${PROJECT_NAME} PROPERTIES
 target_include_directories(${PROJECT_NAME} PRIVATE
     ${PROJECT_SOURCE_DIR}/src
     ${PROJECT_BINARY_DIR}
+    ${LIBGPIOD_INCLUDE_DIRS}
 )
-
-# Add libgpiod includes if found
-if(LIBGPIOD_FOUND)
-    target_include_directories(${PROJECT_NAME} PRIVATE ${LIBGPIOD_INCLUDE_DIRS})
-endif()
 
 target_compile_options(${PROJECT_NAME} PRIVATE -Wall -Wextra -Wpedantic)
 
@@ -56,22 +50,17 @@ target_compile_options(${PROJECT_NAME} PRIVATE -Wall -Wextra -Wpedantic)
 target_link_libraries(${PROJECT_NAME} PRIVATE
     Threads::Threads
     m
+    ${LIBGPIOD_LIBRARIES}
 )
 
-# Enable libgpiod support if found
-if(LIBGPIOD_FOUND)
-    target_compile_definitions(${PROJECT_NAME} PRIVATE USE_LIBGPIOD)
-    target_link_libraries(${PROJECT_NAME} PRIVATE ${LIBGPIOD_LIBRARIES})
-    
-    # Detect libgpiod major version to handle API differences
-    string(REGEX MATCH "^([0-9]+)" LIBGPIOD_VERSION_MAJOR "${LIBGPIOD_VERSION}")
-    message(STATUS "Found libgpiod version: ${LIBGPIOD_VERSION} (major: ${LIBGPIOD_VERSION_MAJOR})")
-    if(LIBGPIOD_VERSION_MAJOR GREATER_EQUAL 2)
-        target_compile_definitions(${PROJECT_NAME} PRIVATE GPIOD_API_V2)
-        message(STATUS "Using libgpiod v2 API")
-    else()
-        message(STATUS "Using libgpiod v1 API")
-    endif()
+# Detect libgpiod major version to handle API differences
+string(REGEX MATCH "^([0-9]+)" LIBGPIOD_VERSION_MAJOR "${LIBGPIOD_VERSION}")
+message(STATUS "Found libgpiod version: ${LIBGPIOD_VERSION} (major: ${LIBGPIOD_VERSION_MAJOR})")
+if(LIBGPIOD_VERSION_MAJOR GREATER_EQUAL 2)
+    target_compile_definitions(${PROJECT_NAME} PRIVATE GPIOD_API_V2)
+    message(STATUS "Using libgpiod v2 API")
+else()
+    message(STATUS "Using libgpiod v1 API")
 endif()
 
 # Installation rules
