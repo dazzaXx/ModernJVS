@@ -145,19 +145,19 @@ int main(int argc, char **argv)
 
         if (rotaryStatus == JVS_ROTARY_STATUS_SUCCESS && rotaryValue != lastRotaryValue)
         {
-            debug(0, "  Rotary Position:\t%d\n", rotaryValue);
+            debug(0, "  Rotary Position: %d\n", rotaryValue);
         }
 
-        debug(0, "  Output:\t\t%s\n", config.defaultGamePath);
+        debug(0, "  Output:          %s\n", config.defaultGamePath);
 
         // Report controller status
         if (inputStatus == JVS_INPUT_STATUS_SUCCESS)
         {
-            debug(0, "  Controllers:\t\tConnected\n");
+            debug(0, "  Controllers:     Connected\n");
         }
         else if (inputStatus == JVS_INPUT_STATUS_DEVICE_OPEN_ERROR)
         {
-            debug(0, "  Controllers:\t\tNone (waiting for devices)\n");
+            debug(0, "  Controllers:     None (waiting for devices)\n");
         }
 
         // Only initialize IO and JVS once at startup, not on every controller change

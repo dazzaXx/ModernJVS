@@ -456,13 +456,13 @@ static void *deviceThread(void *_args)
 
     return 0;
 }
-static void startThread(EVInputs *inputs, char *devicePath, int wiiMode, int player, JVSIO *jvsIO, double analogDeadzone)
+static ThreadStatus startThread(EVInputs *inputs, char *devicePath, int wiiMode, int player, JVSIO *jvsIO, double analogDeadzone)
 {
     MappingThreadArguments *args = malloc(sizeof(MappingThreadArguments));
     if (args == NULL)
     {
         debug(0, "Error: Failed to malloc mapping thread arguments\n");
-        return;
+        return THREAD_STATUS_ERROR;
     }
     
     strncpy(args->devicePath, devicePath, MAX_PATH_LENGTH - 1);
@@ -472,20 +472,25 @@ static void startThread(EVInputs *inputs, char *devicePath, int wiiMode, int pla
     args->jvsIO = jvsIO;
     args->analogDeadzone = analogDeadzone;
 
+    ThreadStatus status;
     if (wiiMode)
     {
-        if (createThread(wiiDeviceThread, args) != THREAD_STATUS_SUCCESS)
+        status = createThread(wiiDeviceThread, args);
+        if (status != THREAD_STATUS_SUCCESS)
         {
             free(args);
         }
     }
     else
     {
-        if (createThread(deviceThread, args) != THREAD_STATUS_SUCCESS)
+        status = createThread(deviceThread, args);
+        if (status != THREAD_STATUS_SUCCESS)
         {
             free(args);
         }
     }
+    
+    return status;
 }
 
 int evDevFromString(char *evDevString)
@@ -792,6 +797,10 @@ JVSInputStatus getInputs(DeviceList *deviceList)
 
     deviceList->length = validDeviceIndex;
 
+    // Check if any valid devices remain after filtering
+    if (validDeviceIndex == 0)
+        return JVS_INPUT_STATUS_DEVICE_OPEN_ERROR;
+
     /* Use qsort instead of bubble sort for O(n log n) performance */
     if (deviceList->length > 1)
     {
@@ -840,6 +849,7 @@ JVSInputStatus initInputs(char *outputMappingPath, char *configPath, char *secon
     }
 
     int playerNumber = 1;
+    int controllersStarted = 0;
 
     for (int i = 0; i < deviceList->length; i++)
     {
@@ -919,23 +929,33 @@ JVSInputStatus initInputs(char *outputMappingPath, char *configPath, char *secon
         if (inputMappings.player != -1)
         {
             double playerDeadzone = getPlayerDeadzone(inputMappings.player, analogDeadzoneP1, analogDeadzoneP2, analogDeadzoneP3, analogDeadzoneP4);
-            startThread(&evInputs, device->path, strcmp(device->name, WIIMOTE_DEVICE_NAME_IR) == 0, inputMappings.player, jvsIO, playerDeadzone);
-            debug(0, "  Player %d (Fixed via config):\t\t%s%s\n", inputMappings.player, deviceList->devices[i].name, specialMap);
+            if (startThread(&evInputs, device->path, strcmp(device->name, WIIMOTE_DEVICE_NAME_IR) == 0, inputMappings.player, jvsIO, playerDeadzone) == THREAD_STATUS_SUCCESS)
+            {
+                debug(0, "  Player %d (Fixed via config):  %s%s\n", inputMappings.player, deviceList->devices[i].name, specialMap);
+                controllersStarted++;
+            }
         }
         else
         {
             double playerDeadzone = getPlayerDeadzone(playerNumber, analogDeadzoneP1, analogDeadzoneP2, analogDeadzoneP3, analogDeadzoneP4);
-            startThread(&evInputs, device->path, strcmp(device->name, WIIMOTE_DEVICE_NAME_IR) == 0, playerNumber, jvsIO, playerDeadzone);
-            if (strcmp(deviceList->devices[i].name, AIMTRAK_DEVICE_NAME_REMAP_OUT_SCREEN) != 0 && strcmp(deviceList->devices[i].name, AIMTRAK_DEVICE_NAME_REMAP_JOYSTICK) != 0 && strcmp(deviceList->devices[i].name, WIIMOTE_DEVICE_NAME_IR) != 0)
+            if (startThread(&evInputs, device->path, strcmp(device->name, WIIMOTE_DEVICE_NAME_IR) == 0, playerNumber, jvsIO, playerDeadzone) == THREAD_STATUS_SUCCESS)
             {
-                debug(0, "  Player %d:\t\t%s%s\n", playerNumber, deviceName, specialMap);
-                playerNumber++;
+                if (strcmp(deviceList->devices[i].name, AIMTRAK_DEVICE_NAME_REMAP_OUT_SCREEN) != 0 && strcmp(deviceList->devices[i].name, AIMTRAK_DEVICE_NAME_REMAP_JOYSTICK) != 0 && strcmp(deviceList->devices[i].name, WIIMOTE_DEVICE_NAME_IR) != 0)
+                {
+                    debug(0, "  Player %d:                  %s%s\n", playerNumber, deviceName, specialMap);
+                    playerNumber++;
+                }
+                controllersStarted++;
             }
         }
     }
 
     free(deviceList);
     deviceList = NULL;
+
+    // If no controllers were successfully initialized, return error
+    if (controllersStarted == 0)
+        return JVS_INPUT_STATUS_DEVICE_OPEN_ERROR;
 
     return JVS_INPUT_STATUS_SUCCESS;
 }
