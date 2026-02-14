@@ -586,12 +586,11 @@ static struct gpiod_chip *get_cached_chip_v1(void)
 
 int setupGPIO(int pin)
 {
-  // Verify we can open the chip and that the GPIO line exists
   struct gpiod_chip *chip = get_cached_chip_v1();
   if (!chip)
     return 0;
   
-  // Verify the line exists
+  // Verify the GPIO line exists
   struct gpiod_line *line = gpiod_chip_get_line(chip, pin);
   return (line != NULL) ? 1 : 0;
 }
