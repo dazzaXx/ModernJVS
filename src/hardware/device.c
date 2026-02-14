@@ -586,8 +586,7 @@ static struct gpiod_chip *get_cached_chip_v1(void)
 
 int setupGPIO(int pin)
 {
-  // The character device interface handles this automatically
-  // We just verify we can open the chip
+  // Verify we can open the chip and that the GPIO line exists
   struct gpiod_chip *chip = get_cached_chip_v1();
   if (!chip)
     return 0;
