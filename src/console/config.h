@@ -5,7 +5,7 @@
 
 /* Default config values */
 #define DEFAULT_CONFIG_PATH "/etc/modernjvs/config"
-#define DEFAULT_DEBUG_LEVEL 1
+#define DEFAULT_DEBUG_LEVEL 0
 #define DEFAULT_DEVICE_MAPPING_PATH "/etc/modernjvs/devices/"
 #define DEFAULT_DEVICE_PATH "/dev/ttyUSB0"
 #define DEFAULT_GAME "generic"

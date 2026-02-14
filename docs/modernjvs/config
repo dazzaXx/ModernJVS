@@ -18,7 +18,7 @@ SENSE_LINE_PIN 26
 # Setup the debug mode for outputting debug information
 # DEBUG_MODE 1 - This will show the JVS outputs
 # DEBUG_MODE 2 - This will show the raw packet outputs
-DEBUG_MODE 1
+DEBUG_MODE 0
 
 # Setup the device path
 DEVICE_PATH /dev/ttyUSB0
