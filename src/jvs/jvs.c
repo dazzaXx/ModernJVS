@@ -80,8 +80,12 @@ int initJVS(JVSIO *jvsIO)
 		jvsIO->gunYRestBits = 16 - jvsIO->capabilities.gunYBits;
 	}
 
-	/* Float the sense line ready for connection */
-	setSenseLine(0);
+	/* Pulse the sense line to signal state change and trigger re-enumeration */
+	/* This is critical when the program restarts - it ensures the arcade */
+	/* detects a state transition even if the sense line was already floating */
+	setSenseLine(1);  /* Pull low briefly */
+	usleep(50 * 1000);  /* Wait 50ms */
+	setSenseLine(0);  /* Float the sense line ready for connection */
 
 	return 1;
 }
