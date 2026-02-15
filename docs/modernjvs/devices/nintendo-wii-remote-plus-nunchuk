@@ -17,8 +17,8 @@ BTN_2 CONTROLLER_BUTTON_SERVICE
 KEY_NEXT CONTROLLER_BUTTON_D
 KEY_PREVIOUS CONTROLLER_BUTTON_C
 
-# These two mappings are CRUCIAL for the WiiMote Analog X/Y channels to work
-# The resulting X/Y coordinates calculated on basis of the IR data will emulated as ABS_X and ABS_Y events to emulated the default controller behaviour.
+# These two mappings are CRUCIAL for the Wiimote Analog X/Y channels to work
+# The resulting X/Y coordinates calculated on basis of the IR data will be emulated as ABS_X and ABS_Y events to emulate the default controller behaviour.
 ABS_X CONTROLLER_ANALOGUE_X
 ABS_Y CONTROLLER_ANALOGUE_Y
 
@@ -26,5 +26,5 @@ ABS_Y CONTROLLER_ANALOGUE_Y
 KEY_O CONTROLLER_BUTTON_B
 
 # Nunchuk buttons
-BTN_Z CONTROLLER_BUTTON_START
+BTN_Z CONTROLLER_BUTTON_E
 BTN_C CONTROLLER_BUTTON_F
