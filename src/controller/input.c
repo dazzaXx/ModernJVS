@@ -962,61 +962,60 @@ JVSInputStatus initInputs(char *outputMappingPath, char *configPath, char *secon
 
         EVInputs evInputs = {0};
         
-        // Determine which player number to use for this device
+        // Determine which player number to use for this device with correct precedence:
+        // 1. Fixed config value (inputMappings.player)
+        // 2. Merged with wiimote (lastPhysicalLocationPlayer)
+        // 3. Auto-assigned (playerNumber)
         int effectivePlayerNumber = playerNumber;
+        
+        // First check if this device should merge with a wiimote
         if (shouldMergeWithWiimote && lastPhysicalLocationPlayer != -1)
         {
-            // Use the same player as the Wiimote for the nunchuk
             effectivePlayerNumber = lastPhysicalLocationPlayer;
         }
         
+        // Parse the input mapping to check if a fixed player is set
         if (!processMappings(&inputMappings, &outputMappings, &evInputs, (ControllerPlayer)effectivePlayerNumber))
         {
             debug(0, "Error: Failed to process the mapping for %s\n", deviceList->devices[i].name);
             continue;
         }
-
+        
+        // Fixed config value overrides all other assignments
         if (inputMappings.player != -1)
         {
-            // When player is fixed via config, use that instead of effectivePlayerNumber
             effectivePlayerNumber = inputMappings.player;
-            double playerDeadzone = getPlayerDeadzone(effectivePlayerNumber, analogDeadzoneP1, analogDeadzoneP2, analogDeadzoneP3, analogDeadzoneP4);
-            if (startThread(&evInputs, device->path, strcmp(device->name, WIIMOTE_DEVICE_NAME_IR) == 0, effectivePlayerNumber, jvsIO, playerDeadzone) == THREAD_STATUS_SUCCESS)
+        }
+
+        double playerDeadzone = getPlayerDeadzone(effectivePlayerNumber, analogDeadzoneP1, analogDeadzoneP2, analogDeadzoneP3, analogDeadzoneP4);
+        if (startThread(&evInputs, device->path, strcmp(device->name, WIIMOTE_DEVICE_NAME_IR) == 0, effectivePlayerNumber, jvsIO, playerDeadzone) == THREAD_STATUS_SUCCESS)
+        {
+            // Check if this is a special device that shouldn't increment player number
+            int isAimtrakRemap = (strcmp(deviceList->devices[i].name, AIMTRAK_DEVICE_NAME_REMAP_OUT_SCREEN) == 0 || 
+                                 strcmp(deviceList->devices[i].name, AIMTRAK_DEVICE_NAME_REMAP_JOYSTICK) == 0);
+            int isWiimoteIR = (strcmp(deviceList->devices[i].name, WIIMOTE_DEVICE_NAME_IR) == 0);
+            int isFixedConfig = (inputMappings.player != -1);
+            int shouldIncrementPlayer = !isAimtrakRemap && !isWiimoteIR && !shouldMergeWithWiimote && !isFixedConfig;
+            
+            if (isFixedConfig)
             {
                 debug(0, "  Player %d (Fixed via config):  %s%s\n", effectivePlayerNumber, deviceList->devices[i].name, specialMap);
-                controllersStarted++;
-                
-                // Track this for nunchuk merging
-                updateDeviceTracking(lastPhysicalLocation, &lastPhysicalLocationPlayer, 
-                                   &isLastDeviceWiimote, device, effectivePlayerNumber);
             }
-        }
-        else
-        {
-            double playerDeadzone = getPlayerDeadzone(effectivePlayerNumber, analogDeadzoneP1, analogDeadzoneP2, analogDeadzoneP3, analogDeadzoneP4);
-            if (startThread(&evInputs, device->path, strcmp(device->name, WIIMOTE_DEVICE_NAME_IR) == 0, effectivePlayerNumber, jvsIO, playerDeadzone) == THREAD_STATUS_SUCCESS)
+            else if (shouldMergeWithWiimote)
             {
-                // Check if this is a special device that shouldn't increment player number
-                int isAimtrakRemap = (strcmp(deviceList->devices[i].name, AIMTRAK_DEVICE_NAME_REMAP_OUT_SCREEN) == 0 || 
-                                     strcmp(deviceList->devices[i].name, AIMTRAK_DEVICE_NAME_REMAP_JOYSTICK) == 0);
-                int isWiimoteIR = (strcmp(deviceList->devices[i].name, WIIMOTE_DEVICE_NAME_IR) == 0);
-                int shouldIncrementPlayer = !isAimtrakRemap && !isWiimoteIR && !shouldMergeWithWiimote;
-                
-                if (shouldIncrementPlayer)
-                {
-                    debug(0, "  Player %d:                  %s%s\n", effectivePlayerNumber, deviceName, specialMap);
-                    playerNumber++;
-                }
-                else if (shouldMergeWithWiimote)
-                {
-                    debug(0, "  Player %d (merged):        %s%s\n", effectivePlayerNumber, deviceName, specialMap);
-                }
-                controllersStarted++;
-                
-                // Track physical location and whether this was a Wiimote for nunchuk merging
-                updateDeviceTracking(lastPhysicalLocation, &lastPhysicalLocationPlayer, 
-                                   &isLastDeviceWiimote, device, effectivePlayerNumber);
+                debug(0, "  Player %d (merged):        %s%s\n", effectivePlayerNumber, deviceName, specialMap);
             }
+            else if (shouldIncrementPlayer)
+            {
+                debug(0, "  Player %d:                  %s%s\n", effectivePlayerNumber, deviceName, specialMap);
+                playerNumber++;
+            }
+            
+            controllersStarted++;
+            
+            // Track physical location and whether this was a Wiimote for nunchuk merging
+            updateDeviceTracking(lastPhysicalLocation, &lastPhysicalLocationPlayer, 
+                               &isLastDeviceWiimote, device, effectivePlayerNumber);
         }
     }
 
