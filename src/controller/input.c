@@ -963,7 +963,12 @@ JVSInputStatus initInputs(char *outputMappingPath, char *configPath, char *secon
                     else if (shouldMerge && nunchukDeviceIndexToSkip == j)
                     {
                         // This Nunchuk was already claimed by a previous Wiimote device (e.g., IR device)
-                        debug(1, "    -> Nunchuk already claimed by another Wiimote device\n");
+                        // But this device should also use the combined configuration since the Nunchuk exists
+                        debug(1, "    -> Nunchuk already claimed, also using combined configuration\n");
+                        strncpy(deviceName, WIIMOTE_DEVICE_NAME_PLUS_NUNCHUK, MAX_PATH_LENGTH - 1);
+                        deviceName[MAX_PATH_LENGTH - 1] = '\0';
+                        strncpy(specialMap, " (Wiimote+Nunchuk)", sizeof(specialMap) - 1);
+                        specialMap[sizeof(specialMap) - 1] = '\0';
                         break;
                     }
                 }
