@@ -1052,8 +1052,8 @@ JVSInputStatus initInputs(char *outputMappingPath, char *configPath, char *secon
             int isMergedNunchuk = (i == nunchukDeviceIndexMerged);
             int shouldIncrementPlayer = !isAimtrakRemap && !isWiimoteIR && !isFixedConfig && !isMergedNunchuk;
             
-            // Don't print player message for merged Nunchuk to avoid duplicate output
-            int shouldPrintPlayerMessage = !isMergedNunchuk;
+            // Don't print player message for merged Nunchuk or IR device to avoid duplicate output
+            int shouldPrintPlayerMessage = !isMergedNunchuk && !isWiimoteIR;
             
             if (isFixedConfig && shouldPrintPlayerMessage)
             {
@@ -1063,11 +1063,6 @@ JVSInputStatus initInputs(char *outputMappingPath, char *configPath, char *secon
             {
                 debug(0, "  Player %d:                  %s%s\n", effectivePlayerNumber, deviceName, specialMap);
                 playerNumber++;
-            }
-            else if (!shouldIncrementPlayer && !isFixedConfig && shouldPrintPlayerMessage)
-            {
-                // Special device (IR, Aimtrak remap) that doesn't increment player but should still show message
-                debug(0, "  Player %d:                  %s%s\n", effectivePlayerNumber, deviceName, specialMap);
             }
             
             controllersStarted++;
