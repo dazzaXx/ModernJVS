@@ -83,9 +83,12 @@ int initJVS(JVSIO *jvsIO)
 	/* Pulse the sense line to signal state change and trigger re-enumeration */
 	/* This is critical when the program restarts - it ensures the arcade */
 	/* detects a state transition even if the sense line was already floating */
-	setSenseLine(1);  /* Pull low briefly */
-	usleep(50 * 1000);  /* Wait 50ms */
+	/* Some arcade systems (especially Namco 246/256) require a longer pulse */
+	/* to reliably detect the state change and initiate bus re-enumeration */
+	setSenseLine(1);  /* Pull low */
+	usleep(200 * 1000);  /* Wait 200ms for arcade to detect the LOW state */
 	setSenseLine(0);  /* Float the sense line ready for connection */
+	usleep(100 * 1000);  /* Wait 100ms for line to stabilize in floating state */
 
 	return 1;
 }
@@ -221,6 +224,26 @@ JVSStatus processPacket(JVSIO *jvsIO)
 
 		if (inputPacket.destination != jvsIO->deviceID)
 		{
+			/* If we receive a packet to a specific address but we don't have an address assigned,
+			 * the arcade might have restarted ModernJVS without power-cycling.
+			 * Try to trigger re-enumeration by pulsing the sense line again.
+			 * This is especially important for Namco 246/256 systems that may not
+			 * continuously monitor the sense line after boot. */
+			static time_t lastPulseTime = 0;
+			time_t currentTime = time(NULL);
+			
+			/* Only pulse once per second to avoid spamming */
+			if (jvsIO->deviceID == -1 && (currentTime - lastPulseTime) >= 1)
+			{
+				debug(1, "Received packet to address 0x%02X but not assigned - pulsing sense line\n", 
+				      inputPacket.destination);
+				flushDevice();
+				setSenseLine(1);  /* Pull low */
+				usleep(200 * 1000);  /* 200ms */
+				setSenseLine(0);  /* Float */
+				lastPulseTime = currentTime;
+			}
+			
 			return JVS_STATUS_NOT_FOR_US;
 		}
 	}
