@@ -893,6 +893,8 @@ JVSInputStatus initInputs(char *outputMappingPath, char *configPath, char *secon
         }
         
         // Check if this is a Wiimote that has a Nunchuk attached
+        // If no Nunchuk is found, the Wiimote will use its standalone configuration.
+        // If a Nunchuk is found at the same location, use the combined configuration.
         // Look ahead to see if the next device is a Nunchuk at the same location
         int isWiimote = (strcmp(device->name, WIIMOTE_DEVICE_NAME) == 0 || 
                          strcmp(device->name, WIIMOTE_DEVICE_NAME_IR) == 0);
@@ -906,7 +908,7 @@ JVSInputStatus initInputs(char *outputMappingPath, char *configPath, char *secon
                     nextDevice->physicalLocation[0] != '\0' &&
                     strcmp(device->physicalLocation, nextDevice->physicalLocation) == 0)
                 {
-                    // Found a Nunchuk at the same location - merge them
+                    // Found a Nunchuk at the same location - merge them into combined device
                     nunchukDeviceIndexToSkip = j;
                     strncpy(deviceName, WIIMOTE_DEVICE_NAME_PLUS_NUNCHUK, MAX_PATH_LENGTH - 1);
                     deviceName[MAX_PATH_LENGTH - 1] = '\0';
@@ -915,6 +917,7 @@ JVSInputStatus initInputs(char *outputMappingPath, char *configPath, char *secon
                     break;
                 }
             }
+            // If no Nunchuk was found, deviceName remains as WIIMOTE_DEVICE_NAME (standalone)
         }
 
         // Use the standard ultimarc-aimtrak mapping file for both screen events
