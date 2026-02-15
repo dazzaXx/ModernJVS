@@ -26,5 +26,6 @@ ABS_Y CONTROLLER_ANALOGUE_Y
 KEY_O CONTROLLER_BUTTON_B
 
 # Nunchuk buttons
+# BTN_Z is the same as BTN_SOUTH - A Button, to provide an alternate, easier button for the foot pedal.
 BTN_Z CONTROLLER_BUTTON_START
 BTN_C CONTROLLER_BUTTON_F
