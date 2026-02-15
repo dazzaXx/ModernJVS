@@ -229,6 +229,9 @@ JVSStatus processPacket(JVSIO *jvsIO)
 			 * Try to trigger re-enumeration by pulsing the sense line again.
 			 * This is especially important for Namco 246/256 systems that may not
 			 * continuously monitor the sense line after boot. */
+			
+			/* Note: lastPulseTime is safe as static here because processPacket() is only
+			 * called from the main thread (see modernjvs.c main loop). */
 			static time_t lastPulseTime = 0;
 			time_t currentTime = time(NULL);
 			
@@ -237,6 +240,9 @@ JVSStatus processPacket(JVSIO *jvsIO)
 			{
 				debug(1, "Received packet to address 0x%02X but not assigned - pulsing sense line\n", 
 				      inputPacket.destination);
+				
+				/* Flush serial buffers before pulsing to ensure clean state and prevent
+				 * any stale data from interfering with the re-enumeration process */
 				flushDevice();
 				setSenseLine(1);  /* Pull low */
 				usleep(200 * 1000);  /* 200ms */
