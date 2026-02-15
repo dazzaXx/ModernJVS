@@ -65,13 +65,52 @@ Skipping nintendo-wii-remote-nunchuk (merged with Wiimote)
 
 ## Hot-Plugging Support
 
-The device detection happens during initialization. If you:
+**The Nunchuk supports hot-plugging during active use!**
 
-1. **Start with Wiimote only**, then later attach a Nunchuk:
-   - You need to restart ModernJVS for the combined configuration to be used
+The system automatically detects when devices are connected or disconnected:
 
-2. **Start with Wiimote + Nunchuk**, then disconnect the Nunchuk:
-   - You need to restart ModernJVS for it to detect the standalone Wiimote configuration
+### How It Works
+
+ModernJVS includes a watchdog thread that monitors `/dev/input` for device changes every second. When a change is detected:
+
+1. **Detection**: Watchdog notices device count changed
+2. **Reinitialization**: System stops all input threads and re-scans devices
+3. **Configuration**: New configuration is loaded based on current device state
+4. **JVS Maintained**: The JVS connection to the arcade board remains intact throughout
+
+### Hot-Plug Scenarios
+
+**Connecting Nunchuk During Use:**
+1. Start ModernJVS with Wiimote only
+2. System uses `nintendo-wii-remote` configuration
+3. Plug in Nunchuk to the Wiimote
+4. Within ~1 second, system detects the new device
+5. System automatically switches to `nintendo-wii-remote-plus-nunchuk` configuration
+6. All Wiimote and Nunchuk buttons now available
+
+**Disconnecting Nunchuk During Use:**
+1. Start ModernJVS with Wiimote + Nunchuk
+2. System uses `nintendo-wii-remote-plus-nunchuk` configuration  
+3. Unplug Nunchuk from the Wiimote
+4. Within ~1 second, system detects the device removal
+5. System automatically switches back to `nintendo-wii-remote` configuration
+6. Wiimote continues to work normally
+
+### Technical Details
+
+- **Detection Time**: ~1 second (watchdog polling interval)
+- **Thread Interruption**: Brief interruption (< 200ms) during reinitialization
+- **JVS Connection**: Maintained throughout (no arcade system reset needed)
+- **Input Buffer**: Minimal input loss during transition
+- **Game State**: Preserved (no crash or disconnect)
+
+### Important Notes
+
+- The brief reinitialization pause is typically unnoticeable during gameplay
+- Any inputs during the transition (< 200ms window) may be lost
+- The JVS connection state is preserved, so the arcade game continues normally
+- This is significantly better than requiring a full system restart
+- No manual intervention needed - hot-plugging "just works"
 
 ## Configuration Files
 
