@@ -817,6 +817,31 @@ static double getPlayerDeadzone(int player, double p1, double p2, double p3, dou
 }
 
 /**
+ * Helper function to track device state for Wii Remote nunchuk merging
+ * Updates the tracking variables with the current device's information
+ */
+static void updateDeviceTracking(char *lastPhysicalLocation, int *lastPhysicalLocationPlayer, 
+                                 int *isLastDeviceWiimote, Device *device, 
+                                 int playerNumber)
+{
+    // Track physical location
+    if (device->physicalLocation[0] != '\0')
+    {
+        strncpy(lastPhysicalLocation, device->physicalLocation, MAX_PATH_LENGTH - 1);
+        lastPhysicalLocation[MAX_PATH_LENGTH - 1] = '\0';
+    }
+    else
+    {
+        lastPhysicalLocation[0] = '\0';
+    }
+    
+    // Track player number and whether this was a Wiimote
+    *lastPhysicalLocationPlayer = playerNumber;
+    *isLastDeviceWiimote = (strcmp(device->name, WIIMOTE_DEVICE_NAME) == 0 || 
+                            strcmp(device->name, WIIMOTE_DEVICE_NAME_IR) == 0);
+}
+
+/**
  * Initialise all of the input devices and start the threads
  * 
  * This function initialises all the input devices that have mappings and
@@ -953,25 +978,17 @@ JVSInputStatus initInputs(char *outputMappingPath, char *configPath, char *secon
 
         if (inputMappings.player != -1)
         {
-            double playerDeadzone = getPlayerDeadzone(inputMappings.player, analogDeadzoneP1, analogDeadzoneP2, analogDeadzoneP3, analogDeadzoneP4);
-            if (startThread(&evInputs, device->path, strcmp(device->name, WIIMOTE_DEVICE_NAME_IR) == 0, inputMappings.player, jvsIO, playerDeadzone) == THREAD_STATUS_SUCCESS)
+            // When player is fixed via config, use that instead of effectivePlayerNumber
+            effectivePlayerNumber = inputMappings.player;
+            double playerDeadzone = getPlayerDeadzone(effectivePlayerNumber, analogDeadzoneP1, analogDeadzoneP2, analogDeadzoneP3, analogDeadzoneP4);
+            if (startThread(&evInputs, device->path, strcmp(device->name, WIIMOTE_DEVICE_NAME_IR) == 0, effectivePlayerNumber, jvsIO, playerDeadzone) == THREAD_STATUS_SUCCESS)
             {
-                debug(0, "  Player %d (Fixed via config):  %s%s\n", inputMappings.player, deviceList->devices[i].name, specialMap);
+                debug(0, "  Player %d (Fixed via config):  %s%s\n", effectivePlayerNumber, deviceList->devices[i].name, specialMap);
                 controllersStarted++;
                 
                 // Track this for nunchuk merging
-                if (device->physicalLocation[0] != '\0')
-                {
-                    strncpy(lastPhysicalLocation, device->physicalLocation, MAX_PATH_LENGTH - 1);
-                    lastPhysicalLocation[MAX_PATH_LENGTH - 1] = '\0';
-                }
-                else
-                {
-                    lastPhysicalLocation[0] = '\0';
-                }
-                lastPhysicalLocationPlayer = inputMappings.player;
-                isLastDeviceWiimote = (strcmp(device->name, WIIMOTE_DEVICE_NAME) == 0 || 
-                                       strcmp(device->name, WIIMOTE_DEVICE_NAME_IR) == 0);
+                updateDeviceTracking(lastPhysicalLocation, &lastPhysicalLocationPlayer, 
+                                   &isLastDeviceWiimote, device, effectivePlayerNumber);
             }
         }
         else
@@ -997,18 +1014,8 @@ JVSInputStatus initInputs(char *outputMappingPath, char *configPath, char *secon
                 controllersStarted++;
                 
                 // Track physical location and whether this was a Wiimote for nunchuk merging
-                if (device->physicalLocation[0] != '\0')
-                {
-                    strncpy(lastPhysicalLocation, device->physicalLocation, MAX_PATH_LENGTH - 1);
-                    lastPhysicalLocation[MAX_PATH_LENGTH - 1] = '\0';
-                }
-                else
-                {
-                    lastPhysicalLocation[0] = '\0';
-                }
-                lastPhysicalLocationPlayer = effectivePlayerNumber;
-                isLastDeviceWiimote = (strcmp(device->name, WIIMOTE_DEVICE_NAME) == 0 || 
-                                       strcmp(device->name, WIIMOTE_DEVICE_NAME_IR) == 0);
+                updateDeviceTracking(lastPhysicalLocation, &lastPhysicalLocationPlayer, 
+                                   &isLastDeviceWiimote, device, effectivePlayerNumber);
             }
         }
     }
