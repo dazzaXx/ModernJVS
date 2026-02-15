@@ -885,6 +885,9 @@ JVSInputStatus initInputs(char *outputMappingPath, char *configPath, char *secon
         strncpy(deviceName, device->name, MAX_PATH_LENGTH - 1);
         deviceName[MAX_PATH_LENGTH - 1] = '\0';
 
+        debug(1, "  Processing device[%d]: name='%s', physicalLocation='%s'\n", 
+              i, device->name, device->physicalLocation);
+
         // Use the standard nintendo-wii-remote mapping file for the IR Version too
         if (strcmp(deviceName, WIIMOTE_DEVICE_NAME_IR) == 0)
         {
