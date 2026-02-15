@@ -858,6 +858,8 @@ JVSInputStatus initInputs(char *outputMappingPath, char *configPath, char *secon
     {
         Device *device = &deviceList->devices[i];
         
+        debug(1, "Checking device[%d]: name='%s'\n", i, device->name);
+        
         // Skip this device if it was already merged with a Wiimote
         if (i == nunchukDeviceIndexToSkip)
         {
