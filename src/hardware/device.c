@@ -225,6 +225,18 @@ int writeBytes(unsigned char *buffer, int amount)
   return write(serialIO, buffer, amount);
 }
 
+/* Flush the serial port buffers */
+int flushDevice(void)
+{
+  if (serialIO < 0)
+    return 0;
+  
+  tcflush(serialIO, TCIOFLUSH);
+  usleep(100 * 1000); // Required to make flush work, for some reason
+  
+  return 1;
+}
+
 /* Sets the configuration of the serial port */
 int setSerialAttributes(int fd, int myBaud)
 {

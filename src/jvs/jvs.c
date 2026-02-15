@@ -251,6 +251,7 @@ JVSStatus processPacket(JVSIO *jvsIO)
 				jvsIO = jvsIO->chainedIO;
 				jvsIO->deviceID = -1;
 			}
+			flushDevice();
 			setSenseLine(0);
 		}
 		break;
