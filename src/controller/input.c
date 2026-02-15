@@ -899,31 +899,65 @@ JVSInputStatus initInputs(char *outputMappingPath, char *configPath, char *secon
         
         // Check if this is a Wiimote that has a Nunchuk attached
         // If no Nunchuk is found, the Wiimote will use its standalone configuration.
-        // If a Nunchuk is found at the same location, use the combined configuration.
+        // If a Nunchuk is found at the same location (or nearby if no physical location), use the combined configuration.
         // Look ahead to see if the next device is a Nunchuk at the same location
         int isWiimote = (strcmp(device->name, WIIMOTE_DEVICE_NAME) == 0 || 
                          strcmp(device->name, WIIMOTE_DEVICE_NAME_IR) == 0);
-        if (isWiimote && device->physicalLocation[0] != '\0')
+        if (isWiimote)
         {
-            debug(1, "  Wiimote detected at physical location: '%s', looking for Nunchuk...\n", device->physicalLocation);
+            int hasPhysicalLocation = (device->physicalLocation[0] != '\0');
+            if (hasPhysicalLocation)
+            {
+                debug(1, "  Wiimote detected at physical location: '%s', looking for Nunchuk...\n", device->physicalLocation);
+            }
+            else
+            {
+                debug(1, "  Wiimote detected (no physical location), looking for nearby Nunchuk...\n");
+            }
+            
             // Look for a Nunchuk device in the remaining devices
-            for (int j = i + 1; j < deviceList->length; j++)
+            // For devices without physical location (like Bluetooth), check only nearby devices (within next 5)
+            int maxLookahead = hasPhysicalLocation ? deviceList->length : (i + 6);
+            if (maxLookahead > deviceList->length)
+                maxLookahead = deviceList->length;
+                
+            for (int j = i + 1; j < maxLookahead; j++)
             {
                 Device *nextDevice = &deviceList->devices[j];
                 debug(1, "    Checking device[%d]: name='%s', physicalLocation='%s'\n", 
                       j, nextDevice->name, nextDevice->physicalLocation);
-                if (strcmp(nextDevice->name, WIIMOTE_DEVICE_NAME_NUNCHUK) == 0 &&
-                    nextDevice->physicalLocation[0] != '\0' &&
-                    strcmp(device->physicalLocation, nextDevice->physicalLocation) == 0)
+                      
+                if (strcmp(nextDevice->name, WIIMOTE_DEVICE_NAME_NUNCHUK) == 0)
                 {
-                    // Found a Nunchuk at the same location - merge them into combined device
-                    debug(0, "  Found Nunchuk at same location, using combined configuration\n");
-                    nunchukDeviceIndexToSkip = j;
-                    strncpy(deviceName, WIIMOTE_DEVICE_NAME_PLUS_NUNCHUK, MAX_PATH_LENGTH - 1);
-                    deviceName[MAX_PATH_LENGTH - 1] = '\0';
-                    strncpy(specialMap, " (Wiimote+Nunchuk)", sizeof(specialMap) - 1);
-                    specialMap[sizeof(specialMap) - 1] = '\0';
-                    break;
+                    int nunchukHasPhysicalLocation = (nextDevice->physicalLocation[0] != '\0');
+                    int shouldMerge = 0;
+                    
+                    // Merge if both have matching physical locations
+                    if (hasPhysicalLocation && nunchukHasPhysicalLocation &&
+                        strcmp(device->physicalLocation, nextDevice->physicalLocation) == 0)
+                    {
+                        shouldMerge = 1;
+                        debug(1, "    -> Matching physical locations\n");
+                    }
+                    // Merge if both have no physical location (e.g., Bluetooth devices)
+                    // and they're close together in the device list
+                    else if (!hasPhysicalLocation && !nunchukHasPhysicalLocation)
+                    {
+                        shouldMerge = 1;
+                        debug(1, "    -> Both have no physical location, assuming same controller\n");
+                    }
+                    
+                    if (shouldMerge)
+                    {
+                        // Found a Nunchuk to merge - use combined device configuration
+                        debug(0, "  Found Nunchuk, using combined configuration\n");
+                        nunchukDeviceIndexToSkip = j;
+                        strncpy(deviceName, WIIMOTE_DEVICE_NAME_PLUS_NUNCHUK, MAX_PATH_LENGTH - 1);
+                        deviceName[MAX_PATH_LENGTH - 1] = '\0';
+                        strncpy(specialMap, " (Wiimote+Nunchuk)", sizeof(specialMap) - 1);
+                        specialMap[sizeof(specialMap) - 1] = '\0';
+                        break;
+                    }
                 }
             }
             if (nunchukDeviceIndexToSkip == -1)
