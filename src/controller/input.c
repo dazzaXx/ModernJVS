@@ -900,15 +900,19 @@ JVSInputStatus initInputs(char *outputMappingPath, char *configPath, char *secon
                          strcmp(device->name, WIIMOTE_DEVICE_NAME_IR) == 0);
         if (isWiimote && device->physicalLocation[0] != '\0')
         {
+            debug(1, "  Wiimote detected at physical location: '%s', looking for Nunchuk...\n", device->physicalLocation);
             // Look for a Nunchuk device in the remaining devices
             for (int j = i + 1; j < deviceList->length; j++)
             {
                 Device *nextDevice = &deviceList->devices[j];
+                debug(1, "    Checking device[%d]: name='%s', physicalLocation='%s'\n", 
+                      j, nextDevice->name, nextDevice->physicalLocation);
                 if (strcmp(nextDevice->name, WIIMOTE_DEVICE_NAME_NUNCHUK) == 0 &&
                     nextDevice->physicalLocation[0] != '\0' &&
                     strcmp(device->physicalLocation, nextDevice->physicalLocation) == 0)
                 {
                     // Found a Nunchuk at the same location - merge them into combined device
+                    debug(0, "  Found Nunchuk at same location, using combined configuration\n");
                     nunchukDeviceIndexToSkip = j;
                     strncpy(deviceName, WIIMOTE_DEVICE_NAME_PLUS_NUNCHUK, MAX_PATH_LENGTH - 1);
                     deviceName[MAX_PATH_LENGTH - 1] = '\0';
@@ -916,6 +920,10 @@ JVSInputStatus initInputs(char *outputMappingPath, char *configPath, char *secon
                     specialMap[sizeof(specialMap) - 1] = '\0';
                     break;
                 }
+            }
+            if (nunchukDeviceIndexToSkip == -1)
+            {
+                debug(1, "  No Nunchuk found, using standalone Wiimote configuration\n");
             }
             // If no Nunchuk was found, deviceName remains as WIIMOTE_DEVICE_NAME (standalone)
         }
