@@ -891,6 +891,7 @@ JVSInputStatus initInputs(char *outputMappingPath, char *configPath, char *secon
         int isNunchuk = (strcmp(device->name, WIIMOTE_DEVICE_NAME_NUNCHUCK) == 0);
         int shouldMergeWithWiimote = 0;
         if (isNunchuk && isLastDeviceWiimote && 
+            device->physicalLocation[0] != '\0' && lastPhysicalLocation[0] != '\0' &&
             strcmp(device->physicalLocation, lastPhysicalLocation) == 0)
         {
             // Nunchuk shares the same physical location as the Wiimote - merge them
@@ -959,8 +960,15 @@ JVSInputStatus initInputs(char *outputMappingPath, char *configPath, char *secon
                 controllersStarted++;
                 
                 // Track this for nunchuk merging
-                strncpy(lastPhysicalLocation, device->physicalLocation, MAX_PATH_LENGTH - 1);
-                lastPhysicalLocation[MAX_PATH_LENGTH - 1] = '\0';
+                if (device->physicalLocation[0] != '\0')
+                {
+                    strncpy(lastPhysicalLocation, device->physicalLocation, MAX_PATH_LENGTH - 1);
+                    lastPhysicalLocation[MAX_PATH_LENGTH - 1] = '\0';
+                }
+                else
+                {
+                    lastPhysicalLocation[0] = '\0';
+                }
                 lastPhysicalLocationPlayer = inputMappings.player;
                 isLastDeviceWiimote = (strcmp(device->name, WIIMOTE_DEVICE_NAME) == 0 || 
                                        strcmp(device->name, WIIMOTE_DEVICE_NAME_IR) == 0);
@@ -971,7 +979,13 @@ JVSInputStatus initInputs(char *outputMappingPath, char *configPath, char *secon
             double playerDeadzone = getPlayerDeadzone(effectivePlayerNumber, analogDeadzoneP1, analogDeadzoneP2, analogDeadzoneP3, analogDeadzoneP4);
             if (startThread(&evInputs, device->path, strcmp(device->name, WIIMOTE_DEVICE_NAME_IR) == 0, effectivePlayerNumber, jvsIO, playerDeadzone) == THREAD_STATUS_SUCCESS)
             {
-                if (strcmp(deviceList->devices[i].name, AIMTRAK_DEVICE_NAME_REMAP_OUT_SCREEN) != 0 && strcmp(deviceList->devices[i].name, AIMTRAK_DEVICE_NAME_REMAP_JOYSTICK) != 0 && strcmp(deviceList->devices[i].name, WIIMOTE_DEVICE_NAME_IR) != 0 && !shouldMergeWithWiimote)
+                // Check if this is a special device that shouldn't increment player number
+                int isAimtrakRemap = (strcmp(deviceList->devices[i].name, AIMTRAK_DEVICE_NAME_REMAP_OUT_SCREEN) == 0 || 
+                                     strcmp(deviceList->devices[i].name, AIMTRAK_DEVICE_NAME_REMAP_JOYSTICK) == 0);
+                int isWiimoteIR = (strcmp(deviceList->devices[i].name, WIIMOTE_DEVICE_NAME_IR) == 0);
+                int shouldIncrementPlayer = !isAimtrakRemap && !isWiimoteIR && !shouldMergeWithWiimote;
+                
+                if (shouldIncrementPlayer)
                 {
                     debug(0, "  Player %d:                  %s%s\n", effectivePlayerNumber, deviceName, specialMap);
                     playerNumber++;
@@ -983,8 +997,15 @@ JVSInputStatus initInputs(char *outputMappingPath, char *configPath, char *secon
                 controllersStarted++;
                 
                 // Track physical location and whether this was a Wiimote for nunchuk merging
-                strncpy(lastPhysicalLocation, device->physicalLocation, MAX_PATH_LENGTH - 1);
-                lastPhysicalLocation[MAX_PATH_LENGTH - 1] = '\0';
+                if (device->physicalLocation[0] != '\0')
+                {
+                    strncpy(lastPhysicalLocation, device->physicalLocation, MAX_PATH_LENGTH - 1);
+                    lastPhysicalLocation[MAX_PATH_LENGTH - 1] = '\0';
+                }
+                else
+                {
+                    lastPhysicalLocation[0] = '\0';
+                }
                 lastPhysicalLocationPlayer = effectivePlayerNumber;
                 isLastDeviceWiimote = (strcmp(device->name, WIIMOTE_DEVICE_NAME) == 0 || 
                                        strcmp(device->name, WIIMOTE_DEVICE_NAME_IR) == 0);
