@@ -232,7 +232,7 @@ int flushDevice(void)
     return 0;
   
   tcflush(serialIO, TCIOFLUSH);
-  usleep(100 * 1000); // Required to make flush work, for some reason
+  usleep(100 * 1000); // Wait for OS and hardware to complete the flush operation
   
   return 1;
 }
