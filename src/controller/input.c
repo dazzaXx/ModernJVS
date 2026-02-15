@@ -948,7 +948,8 @@ JVSInputStatus initInputs(char *outputMappingPath, char *configPath, char *secon
                         debug(1, "    -> Both have no physical location, assuming same controller\n");
                     }
                     
-                    if (shouldMerge)
+                    // Only merge if this Nunchuk hasn't already been claimed by another Wiimote device
+                    if (shouldMerge && nunchukDeviceIndexToSkip != j)
                     {
                         // Found a Nunchuk to merge - use combined device configuration
                         debug(0, "  Found Nunchuk, using combined configuration\n");
@@ -957,6 +958,12 @@ JVSInputStatus initInputs(char *outputMappingPath, char *configPath, char *secon
                         deviceName[MAX_PATH_LENGTH - 1] = '\0';
                         strncpy(specialMap, " (Wiimote+Nunchuk)", sizeof(specialMap) - 1);
                         specialMap[sizeof(specialMap) - 1] = '\0';
+                        break;
+                    }
+                    else if (shouldMerge && nunchukDeviceIndexToSkip == j)
+                    {
+                        // This Nunchuk was already claimed by a previous Wiimote device (e.g., IR device)
+                        debug(1, "    -> Nunchuk already claimed by another Wiimote device\n");
                         break;
                     }
                 }
