@@ -59,6 +59,7 @@ static const char *FILTERED_DEVICE_PATTERNS[] = {
     "power-button",       // Power buttons (lowercase)
     "Sleep Button",       // Sleep buttons
     "Lid Switch",         // Lid switches
+    "pwr_button",         // Pi 5 Power Button
     
     // Video/Camera devices (specific patterns)
     "Video Bus",          // Video4Linux bus devices
