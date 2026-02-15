@@ -904,7 +904,7 @@ JVSInputStatus initInputs(char *outputMappingPath, char *configPath, char *secon
             for (int j = i + 1; j < deviceList->length; j++)
             {
                 Device *nextDevice = &deviceList->devices[j];
-                if (strcmp(nextDevice->name, WIIMOTE_DEVICE_NAME_NUNCHUCK) == 0 &&
+                if (strcmp(nextDevice->name, WIIMOTE_DEVICE_NAME_NUNCHUK) == 0 &&
                     nextDevice->physicalLocation[0] != '\0' &&
                     strcmp(device->physicalLocation, nextDevice->physicalLocation) == 0)
                 {
