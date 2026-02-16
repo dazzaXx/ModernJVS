@@ -59,6 +59,7 @@ static const char *FILTERED_DEVICE_PATTERNS[] = {
     "power-button",       // Power buttons (lowercase)
     "Sleep Button",       // Sleep buttons
     "Lid Switch",         // Lid switches
+    "pwr_button",         // Rpi 5 Power Button
     
     // Video/Camera devices (specific patterns)
     "Video Bus",          // Video4Linux bus devices
@@ -850,11 +851,16 @@ JVSInputStatus initInputs(char *outputMappingPath, char *configPath, char *secon
 
     int playerNumber = 1;
     int controllersStarted = 0;
+    
+    // Track which Nunchuk device index has been merged with a Wiimote
+    int nunchukDeviceIndexMerged = -1;
 
     for (int i = 0; i < deviceList->length; i++)
     {
         Device *device = &deviceList->devices[i];
-
+        
+        debug(1, "Checking device[%d]: name='%s'\n", i, device->name);
+        
         char disabledPath[MAX_PATH_LENGTH];
         int ret = snprintf(disabledPath, sizeof(disabledPath), "%s%s.disabled", DEFAULT_DEVICE_MAPPING_PATH, device->name);
         if (ret < 0 || ret >= (int)sizeof(disabledPath))
@@ -875,11 +881,108 @@ JVSInputStatus initInputs(char *outputMappingPath, char *configPath, char *secon
         strncpy(deviceName, device->name, MAX_PATH_LENGTH - 1);
         deviceName[MAX_PATH_LENGTH - 1] = '\0';
 
+        debug(1, "  Processing device[%d]: name='%s', physicalLocation='%s'\n", 
+              i, device->name, device->physicalLocation);
+
         // Use the standard nintendo-wii-remote mapping file for the IR Version too
         if (strcmp(deviceName, WIIMOTE_DEVICE_NAME_IR) == 0)
         {
             strncpy(deviceName, WIIMOTE_DEVICE_NAME, MAX_PATH_LENGTH - 1);
             deviceName[MAX_PATH_LENGTH - 1] = '\0';
+        }
+        
+        // Check if this is a Wiimote that has a Nunchuk attached
+        // If no Nunchuk is found, the Wiimote will use its standalone configuration.
+        // If a Nunchuk is found at the same location (or nearby if no physical location), use the combined configuration.
+        // Look ahead to see if the next device is a Nunchuk at the same location
+        int isWiimote = (strcmp(device->name, WIIMOTE_DEVICE_NAME) == 0 || 
+                         strcmp(device->name, WIIMOTE_DEVICE_NAME_IR) == 0);
+        if (isWiimote)
+        {
+            int hasPhysicalLocation = (device->physicalLocation[0] != '\0');
+            if (hasPhysicalLocation)
+            {
+                debug(1, "  Wiimote detected at physical location: '%s', looking for Nunchuk...\n", device->physicalLocation);
+            }
+            else
+            {
+                debug(1, "  Wiimote detected (no physical location), looking for nearby Nunchuk...\n");
+            }
+            
+            // Look for a Nunchuk device in the remaining devices
+            // For devices without physical location (like Bluetooth), check only nearby devices (within next 5)
+            int maxLookahead = hasPhysicalLocation ? deviceList->length : (i + 6);
+            if (maxLookahead > deviceList->length)
+                maxLookahead = deviceList->length;
+                
+            for (int j = i + 1; j < maxLookahead; j++)
+            {
+                Device *nextDevice = &deviceList->devices[j];
+                debug(1, "    Checking device[%d]: name='%s', physicalLocation='%s'\n", 
+                      j, nextDevice->name, nextDevice->physicalLocation);
+                      
+                if (strcmp(nextDevice->name, WIIMOTE_DEVICE_NAME_NUNCHUK) == 0)
+                {
+                    int nunchukHasPhysicalLocation = (nextDevice->physicalLocation[0] != '\0');
+                    int shouldMerge = 0;
+                    
+                    // Merge if both have matching physical locations
+                    if (hasPhysicalLocation && nunchukHasPhysicalLocation &&
+                        strcmp(device->physicalLocation, nextDevice->physicalLocation) == 0)
+                    {
+                        shouldMerge = 1;
+                        debug(1, "    -> Matching physical locations\n");
+                    }
+                    // Merge if both have no physical location (e.g., Bluetooth devices)
+                    // and they're close together in the device list
+                    else if (!hasPhysicalLocation && !nunchukHasPhysicalLocation)
+                    {
+                        shouldMerge = 1;
+                        debug(1, "    -> Both have no physical location, assuming same controller\n");
+                    }
+                    
+                    // Only merge if this Nunchuk hasn't already been claimed by another Wiimote device
+                    if (shouldMerge && nunchukDeviceIndexMerged != j)
+                    {
+                        // Found a Nunchuk to merge - use combined device configuration
+                        debug(0, "  Found Nunchuk, using combined configuration\n");
+                        nunchukDeviceIndexMerged = j;
+                        strncpy(deviceName, WIIMOTE_DEVICE_NAME_PLUS_NUNCHUK, MAX_PATH_LENGTH - 1);
+                        deviceName[MAX_PATH_LENGTH - 1] = '\0';
+                        strncpy(specialMap, " (Wiimote+Nunchuk)", sizeof(specialMap) - 1);
+                        specialMap[sizeof(specialMap) - 1] = '\0';
+                        break;
+                    }
+                    else if (shouldMerge && nunchukDeviceIndexMerged == j)
+                    {
+                        // This Nunchuk was already claimed by a previous Wiimote device (e.g., IR device)
+                        // But this device should also use the combined configuration since the Nunchuk exists
+                        debug(1, "    -> Nunchuk already claimed, also using combined configuration\n");
+                        strncpy(deviceName, WIIMOTE_DEVICE_NAME_PLUS_NUNCHUK, MAX_PATH_LENGTH - 1);
+                        deviceName[MAX_PATH_LENGTH - 1] = '\0';
+                        strncpy(specialMap, " (Wiimote+Nunchuk)", sizeof(specialMap) - 1);
+                        specialMap[sizeof(specialMap) - 1] = '\0';
+                        break;
+                    }
+                }
+            }
+            if (nunchukDeviceIndexMerged == -1)
+            {
+                debug(1, "  No Nunchuk found, using standalone Wiimote configuration\n");
+            }
+            // If no Nunchuk was found, deviceName remains as WIIMOTE_DEVICE_NAME (standalone)
+        }
+        
+        // Check if this is a Nunchuk that has been merged with a Wiimote
+        // If so, it should use the combined configuration
+        int isNunchuk = (strcmp(device->name, WIIMOTE_DEVICE_NAME_NUNCHUK) == 0);
+        if (isNunchuk && i == nunchukDeviceIndexMerged)
+        {
+            debug(1, "  Nunchuk device merged with Wiimote, using combined configuration\n");
+            strncpy(deviceName, WIIMOTE_DEVICE_NAME_PLUS_NUNCHUK, MAX_PATH_LENGTH - 1);
+            deviceName[MAX_PATH_LENGTH - 1] = '\0';
+            strncpy(specialMap, " (Wiimote+Nunchuk)", sizeof(specialMap) - 1);
+            specialMap[sizeof(specialMap) - 1] = '\0';
         }
 
         // Use the standard ultimarc-aimtrak mapping file for both screen events
@@ -920,33 +1023,49 @@ JVSInputStatus initInputs(char *outputMappingPath, char *configPath, char *secon
         }
 
         EVInputs evInputs = {0};
-        if (!processMappings(&inputMappings, &outputMappings, &evInputs, (ControllerPlayer)playerNumber))
+        
+        // Determine which player number to use for this device
+        // Fixed config value overrides auto-assignment
+        int effectivePlayerNumber = playerNumber;
+        
+        // Parse the input mapping to check if a fixed player is set
+        if (!processMappings(&inputMappings, &outputMappings, &evInputs, (ControllerPlayer)effectivePlayerNumber))
         {
             debug(0, "Error: Failed to process the mapping for %s\n", deviceList->devices[i].name);
             continue;
         }
-
+        
+        // Fixed config value overrides auto-assignment
         if (inputMappings.player != -1)
         {
-            double playerDeadzone = getPlayerDeadzone(inputMappings.player, analogDeadzoneP1, analogDeadzoneP2, analogDeadzoneP3, analogDeadzoneP4);
-            if (startThread(&evInputs, device->path, strcmp(device->name, WIIMOTE_DEVICE_NAME_IR) == 0, inputMappings.player, jvsIO, playerDeadzone) == THREAD_STATUS_SUCCESS)
-            {
-                debug(0, "  Player %d (Fixed via config):  %s%s\n", inputMappings.player, deviceList->devices[i].name, specialMap);
-                controllersStarted++;
-            }
+            effectivePlayerNumber = inputMappings.player;
         }
-        else
+
+        double playerDeadzone = getPlayerDeadzone(effectivePlayerNumber, analogDeadzoneP1, analogDeadzoneP2, analogDeadzoneP3, analogDeadzoneP4);
+        if (startThread(&evInputs, device->path, strcmp(device->name, WIIMOTE_DEVICE_NAME_IR) == 0, effectivePlayerNumber, jvsIO, playerDeadzone) == THREAD_STATUS_SUCCESS)
         {
-            double playerDeadzone = getPlayerDeadzone(playerNumber, analogDeadzoneP1, analogDeadzoneP2, analogDeadzoneP3, analogDeadzoneP4);
-            if (startThread(&evInputs, device->path, strcmp(device->name, WIIMOTE_DEVICE_NAME_IR) == 0, playerNumber, jvsIO, playerDeadzone) == THREAD_STATUS_SUCCESS)
+            // Check if this is a special device that shouldn't increment player number
+            int isAimtrakRemap = (strcmp(deviceList->devices[i].name, AIMTRAK_DEVICE_NAME_REMAP_OUT_SCREEN) == 0 || 
+                                 strcmp(deviceList->devices[i].name, AIMTRAK_DEVICE_NAME_REMAP_JOYSTICK) == 0);
+            int isWiimoteIR = (strcmp(deviceList->devices[i].name, WIIMOTE_DEVICE_NAME_IR) == 0);
+            int isFixedConfig = (inputMappings.player != -1);
+            int isMergedNunchuk = (i == nunchukDeviceIndexMerged);
+            int shouldIncrementPlayer = !isAimtrakRemap && !isWiimoteIR && !isFixedConfig && !isMergedNunchuk;
+            
+            // Don't print player message for merged Nunchuk or IR device to avoid duplicate output
+            int shouldPrintPlayerMessage = !isMergedNunchuk && !isWiimoteIR;
+            
+            if (isFixedConfig && shouldPrintPlayerMessage)
             {
-                if (strcmp(deviceList->devices[i].name, AIMTRAK_DEVICE_NAME_REMAP_OUT_SCREEN) != 0 && strcmp(deviceList->devices[i].name, AIMTRAK_DEVICE_NAME_REMAP_JOYSTICK) != 0 && strcmp(deviceList->devices[i].name, WIIMOTE_DEVICE_NAME_IR) != 0)
-                {
-                    debug(0, "  Player %d:                  %s%s\n", playerNumber, deviceName, specialMap);
-                    playerNumber++;
-                }
-                controllersStarted++;
+                debug(0, "  Player %d (Fixed via config):  %s%s\n", effectivePlayerNumber, deviceList->devices[i].name, specialMap);
             }
+            else if (shouldIncrementPlayer && shouldPrintPlayerMessage)
+            {
+                debug(0, "  Player %d:                  %s%s\n", effectivePlayerNumber, deviceName, specialMap);
+                playerNumber++;
+            }
+            
+            controllersStarted++;
         }
     }
 
