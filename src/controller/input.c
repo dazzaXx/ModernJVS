@@ -858,12 +858,14 @@ JVSInputStatus initInputs(char *outputMappingPath, char *configPath, char *secon
     
     // Track which Nunchuk device indices have been merged with a Wiimote
     // Multiple Wiimote+Nunchuk pairs are supported (one per player slot)
+    // Non-zero values indicate the Nunchuk at that index is merged
     int mergedNunchukDevices[MAX_DEVICES];
     memset(mergedNunchukDevices, 0, sizeof(mergedNunchukDevices));
 
     for (int i = 0; i < deviceList->length; i++)
     {
         Device *device = &deviceList->devices[i];
+        // Cache original device name for comparisons (deviceName may be remapped below)
         const char *originalName = device->name;
         
         debug(1, "Checking device[%d]: name='%s'\n", i, originalName);
@@ -1067,7 +1069,7 @@ JVSInputStatus initInputs(char *outputMappingPath, char *configPath, char *secon
                                  strcmp(originalName, AIMTRAK_DEVICE_NAME_REMAP_JOYSTICK) == 0);
             int isWiimoteIR = (strcmp(originalName, WIIMOTE_DEVICE_NAME_IR) == 0);
             int isFixedConfig = (inputMappings.player != -1);
-            int isMergedNunchuk = mergedNunchukDevices[i];
+            int isMergedNunchuk = (mergedNunchukDevices[i] != 0);
             int shouldIncrementPlayer = !isAimtrakRemap && !isWiimoteIR && !isFixedConfig && !isMergedNunchuk;
             
             // Don't print player message for merged Nunchuk or IR device to avoid duplicate output
