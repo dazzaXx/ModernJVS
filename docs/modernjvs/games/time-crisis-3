@@ -6,9 +6,8 @@ INCLUDE generic-shooting
 # Emulate the Namco JYU IO that came with Time Crisis
 EMULATE namco-v185
 
-# Pedal Buttons, the 2nd line binds Nunchuk Button Z to be the pedal, otherwise the A button on the wiimote is the pedal.
+# Pedal Button, this line binds both the Nunchuk Button Z and the A button on the wiimote to be the pedal.
 CONTROLLER_BUTTON_START CONTROLLER_1 BUTTON_3 PLAYER_1
-CONTROLLER_BUTTON_START CONTROLLER_2 BUTTON_3 PLAYER_1
 
 # Triggers, don't do anything but need binding to something so that the screen out doesn't press the gun trigger.
 CONTROLLER_BUTTON_B CONTROLLER_1 BUTTON_10 PLAYER_1
