@@ -46,8 +46,24 @@ static void *watchdogThread(void *_args)
         // - currentDeviceCount != originalDevicesCount: device added/removed → restart
         // This allows detection of controllers being plugged in or unplugged
         int currentDeviceCount = getNumberOfDevices();
-        if ((currentDeviceCount == -1) || (currentDeviceCount != originalDevicesCount))
+        if (currentDeviceCount == -1)
         {
+            debug(1, "Watchdog: Error accessing /dev/input, triggering reinitialization\n");
+            *args->running = 0;
+            break;
+        }
+        else if (currentDeviceCount != originalDevicesCount)
+        {
+            if (currentDeviceCount > originalDevicesCount)
+            {
+                debug(1, "Watchdog: Device connected (%d -> %d), triggering reinitialization\n", 
+                      originalDevicesCount, currentDeviceCount);
+            }
+            else
+            {
+                debug(1, "Watchdog: Device disconnected (%d -> %d), triggering reinitialization\n", 
+                      originalDevicesCount, currentDeviceCount);
+            }
             *args->running = 0;
             break;
         }
