@@ -37,9 +37,9 @@
 #define ANALOG_CENTER_VALUE 0.5
 #define MIN_DIVISION_THRESHOLD 0.0001
 
-/* Maximum number of devices to look ahead when searching for a Nunchuk
- * without a physical location (e.g., Bluetooth devices) */
-#define BLUETOOTH_DEVICE_LOOKAHEAD_DISTANCE 6
+/* Maximum number of devices to look ahead when searching for a Nunchuk.
+ * Wiimotes are Bluetooth-only devices so proximity-based search is always used. */
+#define DEVICE_LOOKAHEAD_DISTANCE 6
 
 // Device name patterns to filter out (non-controller devices)
 // These patterns match device names that should not be treated as game controllers
@@ -901,27 +901,17 @@ JVSInputStatus initInputs(char *outputMappingPath, char *configPath, char *secon
         }
         
         // Check if this is a Wiimote that has a Nunchuk attached
+        // Wiimotes are Bluetooth-only devices, so we use proximity-based search
+        // within nearby devices in the sorted list to find a matching Nunchuk.
         // If no Nunchuk is found, the Wiimote will use its standalone configuration.
-        // If a Nunchuk is found at the same location (or nearby if no physical location), use the combined configuration.
-        // Look ahead to see if the next device is a Nunchuk at the same location
         int isWiimote = (strcmp(originalName, WIIMOTE_DEVICE_NAME) == 0 || 
                          strcmp(originalName, WIIMOTE_DEVICE_NAME_IR) == 0);
         if (isWiimote)
         {
-            int hasPhysicalLocation = (device->physicalLocation[0] != '\0');
-            if (hasPhysicalLocation)
-            {
-                debug(1, "  Wiimote detected at physical location: '%s', looking for Nunchuk...\n", device->physicalLocation);
-            }
-            else
-            {
-                debug(1, "  Wiimote detected (no physical location), looking for nearby Nunchuk...\n");
-            }
+            debug(1, "  Wiimote detected, looking for nearby Nunchuk...\n");
             
-            // Look for a Nunchuk device in the remaining devices
-            // For devices with physical location (USB), search all remaining devices
-            // For devices without physical location (Bluetooth), check only nearby devices
-            int maxLookahead = hasPhysicalLocation ? deviceList->length : (i + BLUETOOTH_DEVICE_LOOKAHEAD_DISTANCE);
+            // Look for a Nunchuk device in nearby devices (within lookahead distance)
+            int maxLookahead = i + DEVICE_LOOKAHEAD_DISTANCE;
             if (maxLookahead > deviceList->length)
                 maxLookahead = deviceList->length;
             
@@ -933,35 +923,17 @@ JVSInputStatus initInputs(char *outputMappingPath, char *configPath, char *secon
             for (int j = i + 1; j < maxLookahead; j++)
             {
                 Device *nextDevice = &deviceList->devices[j];
-                debug(1, "    Checking device[%d]: name='%s', physicalLocation='%s'\n", 
-                      j, nextDevice->name, nextDevice->physicalLocation);
+                debug(1, "    Checking device[%d]: name='%s'\n", 
+                      j, nextDevice->name);
                       
                 if (strcmp(nextDevice->name, WIIMOTE_DEVICE_NAME_NUNCHUK) == 0)
                 {
-                    int nunchukHasPhysicalLocation = (nextDevice->physicalLocation[0] != '\0');
-                    int shouldMerge = 0;
-                    
-                    // Merge if both have matching physical locations
-                    if (hasPhysicalLocation && nunchukHasPhysicalLocation &&
-                        strcmp(device->physicalLocation, nextDevice->physicalLocation) == 0)
-                    {
-                        shouldMerge = 1;
-                        debug(1, "    -> Matching physical locations\n");
-                    }
-                    // Merge if both have no physical location (e.g., Bluetooth devices)
-                    // and they're close together in the device list
-                    else if (!hasPhysicalLocation && !nunchukHasPhysicalLocation)
-                    {
-                        shouldMerge = 1;
-                        debug(1, "    -> Both have no physical location, assuming same controller\n");
-                    }
-                    
-                    if (shouldMerge && !mergedNunchukDevices[j])
+                    if (!mergedNunchukDevices[j])
                     {
                         foundNunchukIndex = j;
                         break;
                     }
-                    else if (shouldMerge && mergedNunchukDevices[j] && claimedNunchukIndex == -1)
+                    else if (claimedNunchukIndex == -1)
                     {
                         claimedNunchukIndex = j;
                     }
