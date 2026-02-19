@@ -1,0 +1,31 @@
+# Combined Wii Remote + Nunchuk configuration
+# This configuration is used when both Wiimote and Nunchuk are detected together
+
+# Wiimote buttons
+BTN_EAST CONTROLLER_BUTTON_A
+BTN_SOUTH CONTROLLER_BUTTON_START
+
+KEY_UP CONTROLLER_BUTTON_UP
+KEY_DOWN CONTROLLER_BUTTON_DOWN
+KEY_LEFT CONTROLLER_BUTTON_LEFT
+KEY_RIGHT CONTROLLER_BUTTON_RIGHT
+
+BTN_MODE CONTROLLER_BUTTON_TEST
+BTN_1 CONTROLLER_BUTTON_COIN
+BTN_2 CONTROLLER_BUTTON_SERVICE
+
+KEY_NEXT CONTROLLER_BUTTON_D
+KEY_PREVIOUS CONTROLLER_BUTTON_C
+
+# These two mappings are CRUCIAL for the Wiimote Analog X/Y channels to work
+# The resulting X/Y coordinates calculated on basis of the IR data will be emulated as ABS_X and ABS_Y events to emulate the default controller behaviour.
+ABS_X CONTROLLER_ANALOGUE_X
+ABS_Y CONTROLLER_ANALOGUE_Y
+
+# This mapping is for the screen out button which is emulated as KEY_O
+KEY_O CONTROLLER_BUTTON_B
+
+# Nunchuk buttons
+# BTN_Z is the same as BTN_SOUTH - A Button, to provide an alternate, easier button for the foot pedal.
+BTN_Z CONTROLLER_BUTTON_START
+BTN_C CONTROLLER_BUTTON_F

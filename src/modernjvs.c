@@ -251,7 +251,15 @@ int main(int argc, char **argv)
             switch (processingStatus)
             {
             case JVS_STATUS_ERROR_CHECKSUM:
-                debug(0, "Error: A checksum error occurred\n");
+                // Check if we're reinitializing (hot-plug event)
+                if (running == 0)
+                {
+                    debug(0, "Warning: Checksum error during controller reinitialization (expected during hot-plug)\n");
+                }
+                else
+                {
+                    debug(0, "Error: A checksum error occurred\n");
+                }
                 break;
             case JVS_STATUS_ERROR_WRITE_FAIL:
                 debug(0, "Error: A write failure occurred\n");
