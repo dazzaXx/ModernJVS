@@ -764,14 +764,14 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
         <div class="settings-field">
           <label>Colour Theme</label>
           <div class="theme-swatches">
-            <div class="swatch" data-theme="dark"     title="Dark (default)" style="background:#1e1e2e;border-color:#e05555"></div>
-            <div class="swatch" data-theme="light"    title="Light"          style="background:#ffffff"></div>
-            <div class="swatch" data-theme="midnight" title="Midnight Blue"  style="background:#111c38"></div>
-            <div class="swatch" data-theme="dracula"  title="Dracula"        style="background:#282a36"></div>
-            <div class="swatch" data-theme="terminal" title="Green Terminal" style="background:#0a0f0a"></div>
-            <div class="swatch" data-theme="black"    title="Pure Black"     style="background:#000000;border:1px solid #444"></div>
+            <div class="swatch" data-theme="dark"     title="Dark"                   style="background:#1e1e2e;border-color:#e05555"></div>
+            <div class="swatch" data-theme="light"    title="Light"                  style="background:#ffffff"></div>
+            <div class="swatch" data-theme="midnight" title="Midnight Blue"          style="background:#111c38"></div>
+            <div class="swatch" data-theme="dracula"  title="Dracula"                style="background:#282a36"></div>
+            <div class="swatch" data-theme="terminal" title="Green Terminal"         style="background:#0a0f0a"></div>
+            <div class="swatch" data-theme="black"    title="Pure Black (default)"   style="background:#000000;border:1px solid #444"></div>
           </div>
-          <div class="settings-preview" id="themePreviewLabel">Current: Dark (default)</div>
+          <div class="settings-preview" id="themePreviewLabel">Current: Pure Black (default)</div>
         </div>
         <div class="settings-field">
           <label>Accent Colour</label>
@@ -1184,12 +1184,12 @@ function downloadLogs() {
 // ---- Appearance / Settings ----
 
 const THEME_NAMES = {
-  dark:     'Dark (default)',
+  dark:     'Dark',
   light:    'Light',
   midnight: 'Midnight Blue',
   dracula:  'Dracula',
   terminal: 'Green Terminal',
-  black:    'Pure Black',
+  black:    'Pure Black (default)',
 };
 
 const FONT_MAP = {
