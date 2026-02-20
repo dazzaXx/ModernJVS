@@ -715,25 +715,25 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
           <input type="checkbox" id="scrollBottom" checked> Scroll to bottom
         </label>
       </div>
-      <div class="log-filter-bar" style="margin-bottom:0.75rem;">
-        <span style="font-size:0.82rem;color:var(--muted);">Filter:</span>
-        <select id="logFilter" onchange="applyLogFilter()">
-          <option value="all">All Messages</option>
-          <option value="errors">Errors &amp; Critical</option>
-          <option value="warnings">Warnings</option>
-          <option value="jvs">JVS Activity</option>
-          <option value="controllers">Controllers</option>
-          <option value="init">Initialization</option>
-        </select>
-        <input type="text" id="logSearch" placeholder="Search…" oninput="applyLogFilter()">
-        <button class="btn btn-refresh btn-xs" onclick="clearLogFilter()">✕ Clear</button>
-      </div>
       <div class="log-wrap" id="logBox"></div>
     </div>
 
     <div class="card">
-      <h2>Recent JVS Activity</h2>
-      <div class="log-wrap" id="jvsBox" style="height:220px;"></div>
+      <h2>Log Filter</h2>
+      <div class="log-filter-bar" style="margin-bottom:0.75rem;">
+        <span style="font-size:0.82rem;color:var(--muted);">Filter:</span>
+        <select id="logFilter" onchange="applyJvsFilter()">
+          <option value="all">All Messages</option>
+          <option value="errors">Errors &amp; Critical</option>
+          <option value="warnings">Warnings</option>
+          <option value="jvs" selected>JVS Activity</option>
+          <option value="controllers">Controllers</option>
+          <option value="init">Initialization</option>
+        </select>
+        <input type="text" id="logSearch" placeholder="Search…" oninput="applyJvsFilter()">
+        <button class="btn btn-refresh btn-xs" onclick="clearLogFilter()">✕ Clear</button>
+      </div>
+      <div class="log-wrap" id="jvsBox" style="height:340px;"></div>
     </div>
   </div>
 
@@ -743,8 +743,8 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
       <h2>Connected Input Devices <button class="btn btn-refresh btn-xs" onclick="loadDevices()" style="margin-left:0.5rem;vertical-align:middle;">⟳ Refresh</button></h2>
       <p style="font-size:0.83rem;color:var(--muted);margin-bottom:1rem;">Shows all <code style="color:var(--accent2);font-family:monospace">/dev/input/event*</code> nodes currently present on the system.</p>
       <table class="device-table">
-        <thead><tr><th>Event Node</th><th>Device Name</th></tr></thead>
-        <tbody id="deviceTableBody"><tr><td colspan="2" style="color:var(--muted)">Loading…</td></tr></tbody>
+        <thead><tr><th>Event Node</th><th>Device Name</th><th>Status</th></tr></thead>
+        <tbody id="deviceTableBody"><tr><td colspan="3" style="color:var(--muted)">Loading…</td></tr></tbody>
       </table>
     </div>
   </div>
@@ -1054,16 +1054,15 @@ async function fetchLogs() {
   if (d.error) { box.textContent = 'Error: ' + d.error; return; }
 
   rawLogLines = d.lines || [];
-  applyLogFilter();
 
-  // JVS activity pane – always shows JVS-specific lines from the raw set
-  const jvsBox = document.getElementById('jvsBox');
-  const jvsLines = rawLogLines.filter(l =>
-    /jvs|packet|checksum|cmd|emulat|address|sense|RS485/i.test(l));
-  renderLines(jvsBox, jvsLines, 'No JVS activity in current log window.', true);
+  // Live log shows ALL lines unfiltered
+  renderLines(box, rawLogLines, 'No log entries.');
+
+  // Apply current filter to the Log Filter / JVS Activity pane
+  applyJvsFilter();
 }
 
-function applyLogFilter() {
+function applyJvsFilter() {
   const filter = document.getElementById('logFilter').value;
   const search = document.getElementById('logSearch').value.toLowerCase();
 
@@ -1088,7 +1087,7 @@ function applyLogFilter() {
   if (search) {
     lines = lines.filter(l => l.toLowerCase().includes(search));
   }
-  renderLines(document.getElementById('logBox'), lines, 'No matching log entries.');
+  renderLines(document.getElementById('jvsBox'), lines, 'No matching log entries.');
 }
 
 function renderLines(box, lines, emptyMsg, alwaysScroll) {
@@ -1116,8 +1115,9 @@ function renderLines(box, lines, emptyMsg, alwaysScroll) {
 
 function clearLogFilter() {
   document.getElementById('logSearch').value = '';
-  document.getElementById('logFilter').value = 'all';
-  applyLogFilter();
+  // 'jvs' is the default — mirrors the `selected` attribute on the HTML option
+  document.getElementById('logFilter').value = 'jvs';
+  applyJvsFilter();
 }
 
 // ---- Devices ----
@@ -1125,17 +1125,20 @@ async function loadDevices() {
   const d = await api('/api/input_devices');
   const tbody = document.getElementById('deviceTableBody');
   if (d.error) {
-    tbody.innerHTML = `<tr><td colspan="2" style="color:var(--red)">Error: ${d.error}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="3" style="color:var(--red)">Error: ${d.error}</td></tr>`;
     return;
   }
   const devs = d.devices || [];
   if (devs.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="2" style="color:var(--muted)">No input devices found.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="3" style="color:var(--muted)">No input devices found.</td></tr>';
     return;
   }
-  tbody.innerHTML = devs.map(dev =>
-    `<tr><td><code>${dev.event}</code></td><td>${dev.name}</td></tr>`
-  ).join('');
+  tbody.innerHTML = devs.map(dev => {
+    const statusHtml = dev.ignored
+      ? '<span style="color:var(--yellow);font-size:0.8rem;">⚠ Ignored by ModernJVS</span>'
+      : '<span style="color:var(--green);font-size:0.8rem;">✓ Active</span>';
+    return `<tr><td><code>${dev.event}</code></td><td>${dev.name}</td><td>${statusHtml}</td></tr>`;
+  }).join('');
 }
 
 // ---- Log download ----
@@ -1802,8 +1805,34 @@ def get_version():
 # Connected input devices helper
 # ---------------------------------------------------------------------------
 
+# Mirrors FILTERED_DEVICE_PATTERNS in src/controller/input.c (lines 46-71).
+# If you add or remove patterns in that C array, update this list to match.
+# The C source is the authoritative definition; this list is a read-only copy
+# used only to annotate the Devices tab in the WebUI.
+_FILTERED_DEVICE_PATTERNS = [
+    # Audio/HDMI devices
+    "vc4-hdmi", "HDMI", "hdmi", "headphone", "Headphone",
+    # Sound devices
+    "snd_bcm2835", "snd_hda", "snd_usb", "pcspkr", "PC Speaker",
+    # Power management
+    "Power Button", "power-button", "Sleep Button", "Lid Switch", "pwr_button",
+    # Video/Camera devices
+    "Video Bus",
+]
+
+
+def _is_filtered_device(name):
+    """Return True if the device name matches any filtered pattern."""
+    return any(pat in name for pat in _FILTERED_DEVICE_PATTERNS)
+
+
 def get_input_devices():
-    """Return list of connected /dev/input/event* devices with sysfs names."""
+    """Return list of connected /dev/input/event* devices with sysfs names.
+
+    Each entry has: event, name, path, ignored.
+    ignored=True means ModernJVS will skip this device (it matches a filter
+    pattern in FILTERED_DEVICE_PATTERNS).
+    """
     devices = []
     try:
         for event_path in sorted(_glob.glob("/dev/input/event*")):
@@ -1815,7 +1844,12 @@ def get_input_devices():
                     name = f.read().strip()
             except OSError:
                 pass
-            devices.append({"event": event_name, "name": name, "path": event_path})
+            devices.append({
+                "event":   event_name,
+                "name":    name,
+                "path":    event_path,
+                "ignored": _is_filtered_device(name),
+            })
     except OSError:
         pass
     return devices
