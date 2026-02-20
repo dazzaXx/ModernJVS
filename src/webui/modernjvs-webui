@@ -30,6 +30,7 @@ ALLOWED_IMAGE_MIMES = {
     "image/jpeg", "image/png", "image/gif",
     "image/webp", "image/svg+xml", "image/bmp",
 }
+MAX_SETTING_STRING_LENGTH = 64  # cap per string field in webui-settings.json
 
 # Server-side WebUI settings persistence
 WEBUI_SETTINGS_PATH = "/etc/modernjvs/webui-settings.json"
@@ -70,7 +71,7 @@ def write_webui_settings(settings):
             if isinstance(default, bool):
                 cleaned[key] = bool(val)
             elif isinstance(default, str):
-                cleaned[key] = str(val)[:64]  # 64-char cap per field
+                cleaned[key] = str(val)[:MAX_SETTING_STRING_LENGTH]
             else:
                 cleaned[key] = val
         except (TypeError, ValueError):
@@ -531,7 +532,7 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
     <button class="tab" onclick="showTab('config', this)">Configuration</button>
     <button class="tab" onclick="showTab('monitor', this)">Monitor &amp; Logs</button>
     <button class="tab" onclick="showTab('devices', this)">Devices</button>
-    <button class="tab" onclick="showTab('appearance', this)">&#9881; WebUI Settings</button>
+    <button class="tab" onclick="showTab('webui-settings', this)">&#9881; WebUI Settings</button>
   </div>
 
   <!-- ====== DASHBOARD ====== -->
@@ -731,7 +732,7 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
   </div>
 
   <!-- ====== APPEARANCE ====== -->
-  <div id="panel-appearance" class="panel">
+  <div id="panel-webui-settings" class="panel">
     <div class="card">
       <h2>Theme</h2>
       <div class="settings-grid">
@@ -839,7 +840,7 @@ function showTab(name, btn) {
   if (name === 'monitor') fetchLogs();
   if (name === 'config') loadConfig();
   if (name === 'devices') loadDevices();
-  if (name === 'appearance') initAppearancePanel();
+  if (name === 'webui-settings') initAppearancePanel();
 }
 
 // ---- API helpers ----
@@ -1130,6 +1131,9 @@ const FONT_MAP = {
   rounded: "'Nunito', 'Varela Round', system-ui, sans-serif",
 };
 
+// Seconds to wait for the WebUI service to come back up after a restart
+const WEBUI_RESTART_WAIT_SECS = 8;
+
 function _getSettings() {
   try {
     return JSON.parse(localStorage.getItem('webui_appearance') || '{}');
@@ -1321,7 +1325,7 @@ async function restartWebUI() {
     msg.textContent = 'Error: ' + d.error;
     return;
   }
-  let secs = 8;
+  let secs = WEBUI_RESTART_WAIT_SECS;
   const tick = () => {
     msg.textContent = 'WebUI restarting — reconnecting in ' + secs + 's…';
     if (secs-- > 0) { setTimeout(tick, 1000); }
@@ -1845,8 +1849,8 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
         elif path == "/api/bg":
             self._serve_bg()
         elif path == "/api/bg/status":
-            has = os.path.isfile(WEBUI_BG_PATH) and os.path.getsize(WEBUI_BG_PATH) > 0
-            size = os.path.getsize(WEBUI_BG_PATH) if has else 0
+            size = os.path.getsize(WEBUI_BG_PATH) if os.path.isfile(WEBUI_BG_PATH) else 0
+            has = size > 0
             mime = ""
             if has:
                 try:
