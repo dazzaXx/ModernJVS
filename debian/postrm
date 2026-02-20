@@ -9,7 +9,9 @@ case "$1" in
         # Remove WebUI runtime state files created after installation.
         rm -f /etc/modernjvs/webui-settings.json \
               /etc/modernjvs/webui-bg \
-              /etc/modernjvs/webui-bg.mime
+              /etc/modernjvs/webui-bg.mime \
+              /etc/modernjvs/webui-font \
+              /etc/modernjvs/webui-font-name
 
         # Remove the directory itself if nothing else remains inside it.
         rmdir /etc/modernjvs 2>/dev/null || true

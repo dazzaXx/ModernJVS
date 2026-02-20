@@ -31,16 +31,25 @@ ALLOWED_IMAGE_MIMES = {
     "image/webp", "image/svg+xml", "image/bmp",
 }
 MAX_SETTING_STRING_LENGTH = 64  # cap per string field in webui-settings.json
+MAX_FONT_UPLOAD_BYTES = 10 * 1024 * 1024   # 10 MB hard cap for font files
+ALLOWED_FONT_EXTS  = {".ttf", ".otf", ".woff", ".woff2"}
+FONT_EXT_TO_MIME   = {
+    ".ttf":   "font/ttf",
+    ".otf":   "font/otf",
+    ".woff":  "font/woff",
+    ".woff2": "font/woff2",
+}
 
 # Server-side WebUI settings persistence
-WEBUI_SETTINGS_PATH = "/etc/modernjvs/webui-settings.json"
-WEBUI_BG_PATH       = "/etc/modernjvs/webui-bg"
-WEBUI_BG_MIME_PATH  = "/etc/modernjvs/webui-bg.mime"
+WEBUI_SETTINGS_PATH  = "/etc/modernjvs/webui-settings.json"
+WEBUI_BG_PATH        = "/etc/modernjvs/webui-bg"
+WEBUI_BG_MIME_PATH   = "/etc/modernjvs/webui-bg.mime"
+WEBUI_FONT_PATH      = "/etc/modernjvs/webui-font"
+WEBUI_FONT_NAME_PATH = "/etc/modernjvs/webui-font-name"
 
 _SETTINGS_DEFAULTS = {
     "theme":          "black",
-    "accent":         "#e05555",
-    "font":           "system",
+    "accent":         "#ff0000",
     "bgColor":        "#000000",
     "compact":        False,
     "noAnim":         False,
@@ -159,8 +168,8 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
     --surface: #16161f;
     --card:    #1e1e2e;
     --border:  #2e2e42;
-    --accent:  #e05555;
-    --accent2: #ff7e7e;
+    --accent:  #ff0000;
+    --accent2: #ff6666;
     --text:    #e2e2f0;
     --muted:   #7878a0;
     --green:   #50fa7b;
@@ -380,8 +389,8 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
     --surface: #16161f;
     --card:    #1e1e2e;
     --border:  #2e2e42;
-    --accent:  #e05555;
-    --accent2: #ff7e7e;
+    --accent:  #ff0000;
+    --accent2: #ff6666;
     --text:    #e2e2f0;
     --muted:   #7878a0;
   }
@@ -763,7 +772,7 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
         <div class="settings-field">
           <label>Colour Theme</label>
           <div class="theme-swatches">
-            <div class="swatch" data-theme="dark"     title="Dark"                   style="background:#1e1e2e;border-color:#e05555"></div>
+            <div class="swatch" data-theme="dark"     title="Dark"                   style="background:#1e1e2e;border-color:#ff0000"></div>
             <div class="swatch" data-theme="light"    title="Light"                  style="background:#ffffff"></div>
             <div class="swatch" data-theme="midnight" title="Midnight Blue"          style="background:#111c38"></div>
             <div class="swatch" data-theme="dracula"  title="Dracula"                style="background:#282a36"></div>
@@ -774,7 +783,7 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
         </div>
         <div class="settings-field">
           <label>Accent Colour</label>
-          <input type="color" id="stAccent" value="#e05555">
+          <input type="color" id="stAccent" value="#ff0000">
           <div class="settings-preview">Applied to buttons, borders and highlights</div>
         </div>
       </div>
@@ -784,13 +793,19 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
       <h2>Typography</h2>
       <div class="settings-grid">
         <div class="settings-field">
-          <label>Font Family</label>
-          <select id="stFont">
-            <option value="system">System UI (default)</option>
-            <option value="mono">Monospace</option>
-            <option value="serif">Serif</option>
-            <option value="rounded">"Nunito", rounded sans-serif</option>
-          </select>
+          <label>Custom Font</label>
+          <div class="bg-upload-area" id="fontUploadArea">
+            <input type="file" id="stFontFile" accept=".ttf,.otf,.woff,.woff2" onchange="onFontFileChosen(this)">
+            <div class="bg-upload-icon">&#119070;</div>
+            <div class="bg-upload-label">Click or drag a font file here<br><span style="font-size:0.75rem">TTF, OTF, WOFF, WOFF2 · max 10 MB</span></div>
+          </div>
+          <div class="bg-preview" id="fontPreview">
+            <div>
+              <div class="bg-preview-info" id="fontPreviewName"></div>
+              <button class="btn btn-refresh btn-xs" style="margin-top:0.4rem;" onclick="clearFont()">✕ Clear Font</button>
+            </div>
+          </div>
+          <div class="settings-preview">Leave empty to use the default system font</div>
         </div>
       </div>
     </div>
@@ -1187,13 +1202,6 @@ const THEME_NAMES = {
   black:    'Pure Black (default)',
 };
 
-const FONT_MAP = {
-  system:  "'Segoe UI', system-ui, sans-serif",
-  mono:    "'Courier New', Courier, monospace",
-  serif:   "Georgia, 'Times New Roman', serif",
-  rounded: "'Nunito', 'Varela Round', system-ui, sans-serif",
-};
-
 // Seconds to wait for the WebUI service to come back up after a restart
 const WEBUI_RESTART_WAIT_SECS = 8;
 
@@ -1210,7 +1218,7 @@ function applyAppearanceSettings(s) {
   root.setAttribute('data-theme', s.theme || 'black');
 
   // Accent colour (CSS custom property override on :root)
-  if (s.accent && s.accent !== '#e05555') {
+  if (s.accent && s.accent !== '#ff0000') {
     root.style.setProperty('--accent',  s.accent);
     root.style.setProperty('--accent2', s.accent);  // same hue; theme CSS handles lightening
   } else {
@@ -1218,9 +1226,7 @@ function applyAppearanceSettings(s) {
     root.style.removeProperty('--accent2');
   }
 
-  // Font
-  const fontValue = FONT_MAP[s.font || 'system'];
-  root.style.setProperty('--font', fontValue);
+  // Font is applied server-side via applyServerFont(); nothing to do here.
 
   // Background colour
   if (s.bgColor && s.bgColor !== '#000000') {
@@ -1315,6 +1321,73 @@ async function clearBgImage() {
   if (inp) inp.value = '';
 }
 
+// ---- Custom font helpers ----
+function applyServerFont() {
+  api('/api/font/status').then(d => {
+    const root = document.documentElement;
+    let styleEl = document.getElementById('customFontStyle');
+    if (d.hasFont) {
+      if (!styleEl) {
+        styleEl = document.createElement('style');
+        styleEl.id = 'customFontStyle';
+        document.head.appendChild(styleEl);
+      }
+      styleEl.textContent =
+        "@font-face { font-family: 'CustomFont'; src: url('/api/font?t=" + Date.now() + "'); }";
+      root.style.setProperty('--font', "'CustomFont', system-ui, sans-serif");
+    } else {
+      if (styleEl) styleEl.remove();
+      root.style.removeProperty('--font');
+    }
+  });
+}
+
+async function onFontFileChosen(input) {
+  const file = input.files && input.files[0];
+  if (!file) return;
+  const ext = file.name.split('.').pop().toLowerCase();
+  if (!['ttf', 'otf', 'woff', 'woff2'].includes(ext)) {
+    alert('Only TTF, OTF, WOFF, or WOFF2 font files can be uploaded.');
+    input.value = '';
+    return;
+  }
+  if (file.size > 10 * 1024 * 1024) {
+    alert('Font file is too large. Maximum size is 10 MB.');
+    input.value = '';
+    return;
+  }
+  const res = await fetch('/api/font/upload', {
+    method: 'POST',
+    headers: {'Content-Type': file.type || 'application/octet-stream',
+               'X-File-Name': file.name},
+    body: file,
+  });
+  const d = await res.json();
+  if (d.error) { alert('Upload failed: ' + d.error); return; }
+  _showFontPreview(file.name + ' (' + (file.size / 1024).toFixed(0) + ' KB)');
+  applyServerFont();
+}
+
+async function clearFont() {
+  const d = await api('/api/font/clear', {method: 'POST'});
+  if (d.error) { alert('Could not clear font: ' + d.error); return; }
+  _hideFontPreview();
+  applyServerFont();
+  const inp = document.getElementById('stFontFile');
+  if (inp) inp.value = '';
+}
+
+function _showFontPreview(label) {
+  document.getElementById('fontPreviewName').textContent = label;
+  document.getElementById('fontPreview').classList.add('visible');
+}
+
+function _hideFontPreview() {
+  document.getElementById('fontPreview').classList.remove('visible');
+  document.getElementById('fontPreviewName').textContent = '';
+}
+
+
 async function initAppearancePanel() {
   const d = await api('/api/webui/settings');
   if (d.error) return;
@@ -1333,8 +1406,7 @@ async function initAppearancePanel() {
   document.getElementById('themePreviewLabel').textContent =
     'Current: ' + (THEME_NAMES[d.theme || 'black'] || d.theme || 'Pure Black (default)');
 
-  document.getElementById('stAccent').value    = d.accent   || '#e05555';
-  document.getElementById('stFont').value      = d.font     || 'system';
+  document.getElementById('stAccent').value    = d.accent   || '#ff0000';
   document.getElementById('stBgColor').value   = d.bgColor  || '#000000';
   document.getElementById('stCompact').checked = !!d.compact;
   document.getElementById('stNoAnim').checked  = !!d.noAnim;
@@ -1359,6 +1431,14 @@ async function initAppearancePanel() {
   } else {
     _hideBgPreview();
   }
+
+  // Show font preview if a custom font is stored on the server
+  const font = await api('/api/font/status');
+  if (font.hasFont) {
+    _showFontPreview(font.name + ' (' + (font.size / 1024).toFixed(0) + ' KB)');
+  } else {
+    _hideFontPreview();
+  }
 }
 
 async function saveAppearanceSettings() {
@@ -1366,7 +1446,6 @@ async function saveAppearanceSettings() {
   const s = {
     theme:          activeSwatch ? activeSwatch.dataset.theme : 'black',
     accent:         document.getElementById('stAccent').value,
-    font:           document.getElementById('stFont').value,
     bgColor:        document.getElementById('stBgColor').value,
     compact:        document.getElementById('stCompact').checked,
     noAnim:         document.getElementById('stNoAnim').checked,
@@ -1385,7 +1464,7 @@ async function saveAppearanceSettings() {
 }
 
 async function resetAppearanceSettings() {
-  const defaults = {theme:'black', accent:'#e05555', font:'system',
+  const defaults = {theme:'black', accent:'#ff0000',
                     bgColor:'#000000', compact:false, noAnim:false,
                     bgScrimOpacity:0.70};
   await api('/api/webui/settings', {
@@ -1394,6 +1473,7 @@ async function resetAppearanceSettings() {
     body: JSON.stringify(defaults),
   });
   await clearBgImage();
+  await clearFont();
   applyAppearanceSettings(defaults);
   initAppearancePanel();
 }
@@ -1422,6 +1502,7 @@ api('/api/webui/settings').then(s => {
   applyAppearanceSettings(s.error ? {} : s);
 });
 applyServerBg();
+applyServerFont();
 refreshDashboard();
 refreshSysinfo();
 setInterval(refreshDashboard, 10000);
@@ -1975,6 +2056,20 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
                 except OSError:
                     mime = "image/jpeg"
             self._json({"hasImage": has, "size": size, "mime": mime})
+        elif path == "/api/font":
+            self._serve_font()
+        elif path == "/api/font/status":
+            has = os.path.isfile(WEBUI_FONT_PATH)
+            name = ""
+            size = 0
+            if has:
+                size = os.path.getsize(WEBUI_FONT_PATH)
+                try:
+                    with open(WEBUI_FONT_NAME_PATH) as f:
+                        name = f.read().strip()
+                except OSError:
+                    name = "custom-font"
+            self._json({"hasFont": has, "name": name, "size": size})
         else:
             self._not_found()
 
@@ -1989,6 +2084,9 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
         # attempting to UTF-8 decode raw image bytes.
         if path == "/api/bg/upload":
             self._handle_bg_upload()
+            return
+        if path == "/api/font/upload":
+            self._handle_font_upload()
             return
 
         body = self._read_body()
@@ -2047,6 +2145,17 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
         elif path == "/api/bg/clear":
             try:
                 for p in (WEBUI_BG_PATH, WEBUI_BG_MIME_PATH):
+                    try:
+                        os.remove(p)
+                    except FileNotFoundError:
+                        pass
+                self._json({"ok": True})
+            except OSError as e:
+                self._json({"error": str(e)}, HTTPStatus.INTERNAL_SERVER_ERROR)
+
+        elif path == "/api/font/clear":
+            try:
+                for p in (WEBUI_FONT_PATH, WEBUI_FONT_NAME_PATH):
                     try:
                         os.remove(p)
                     except FileNotFoundError:
@@ -2114,6 +2223,73 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
             self.send_header("Content-Type", mime)
             self.send_header("Content-Length", len(data))
             # No long-term cache – clients should see cleared images promptly
+            self.send_header("Cache-Control", "no-cache")
+            self.end_headers()
+            self.wfile.write(data)
+        except OSError:
+            self._not_found()
+
+    def _handle_font_upload(self):
+        """Accept a font file upload (.ttf/.otf/.woff/.woff2) and persist it to disk."""
+        # Validate by filename extension sent in X-File-Name header.
+        # Use X-File-Name as the primary gate; fall back to content-type when absent.
+        raw_name = self.headers.get("X-File-Name", "")
+        # Sanitize: strip path separators and limit to safe filename characters
+        safe_name = re.sub(r'[^A-Za-z0-9._\- ]', '', os.path.basename(raw_name))[:64]
+        ext = os.path.splitext(safe_name.lower())[1]
+        content_type = self.headers.get("Content-Type", "").split(";")[0].strip().lower()
+        # If a name was provided, the extension must be in the allowed set.
+        # If no name was provided, require a known font content-type.
+        if safe_name:
+            valid = ext in ALLOWED_FONT_EXTS
+        else:
+            valid = content_type in FONT_EXT_TO_MIME.values()
+        if not valid:
+            self._json({"error": "Only TTF, OTF, WOFF, or WOFF2 font files are accepted."},
+                       HTTPStatus.BAD_REQUEST)
+            return
+        content_length = int(self.headers.get("Content-Length", 0))
+        if content_length > MAX_FONT_UPLOAD_BYTES:
+            self._json(
+                {"error": f"File too large. Maximum size is {MAX_FONT_UPLOAD_BYTES // (1024 * 1024)} MB."},
+                HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
+            )
+            return
+        raw = self.rfile.read(content_length) if content_length else b""
+        if not raw:
+            self._json({"error": "Empty upload."}, HTTPStatus.BAD_REQUEST)
+            return
+        try:
+            os.makedirs(os.path.dirname(WEBUI_FONT_PATH), exist_ok=True)
+            with open(WEBUI_FONT_PATH, "wb") as f:
+                f.write(raw)
+            display_name = safe_name if safe_name else ("custom-font" + ext)
+            with open(WEBUI_FONT_NAME_PATH, "w") as f:
+                f.write(display_name)
+            mime = FONT_EXT_TO_MIME.get(ext, "font/ttf")
+            self._json({"ok": True, "size": len(raw), "name": display_name, "mime": mime})
+        except OSError as e:
+            self._json({"error": str(e)}, HTTPStatus.INTERNAL_SERVER_ERROR)
+
+    def _serve_font(self):
+        """Serve the stored custom font file."""
+        if not os.path.isfile(WEBUI_FONT_PATH):
+            self._not_found()
+            return
+        try:
+            name = ""
+            try:
+                with open(WEBUI_FONT_NAME_PATH) as f:
+                    name = f.read().strip()
+            except OSError:
+                pass
+            ext = os.path.splitext(name.lower())[1] if name else ""
+            mime = FONT_EXT_TO_MIME.get(ext, "font/ttf")
+            with open(WEBUI_FONT_PATH, "rb") as f:
+                data = f.read()
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", mime)
+            self.send_header("Content-Length", len(data))
             self.send_header("Cache-Control", "no-cache")
             self.end_headers()
             self.wfile.write(data)
