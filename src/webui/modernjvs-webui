@@ -241,6 +241,7 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
 
   /* --- version badge in header --- */
   .ver-badge {
+    display: none;
     font-size: 0.72rem;
     color: var(--muted);
     background: var(--surface);
@@ -251,6 +252,7 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
     vertical-align: middle;
     white-space: nowrap;
   }
+  .ver-badge.visible { display: inline-block; }
 
   /* --- device table --- */
   .device-table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
@@ -302,6 +304,109 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
   /* --- footer --- */
   footer { text-align: center; color: var(--muted); font-size: 0.78rem; padding: 1.5rem; }
   footer a { color: var(--accent); text-decoration: none; }
+
+  /* ================================================================
+     THEMES – variable overrides applied via data-theme on <html>
+     ================================================================ */
+  [data-theme="light"] {
+    --bg:      #f0f0f5;
+    --surface: #e0e0ea;
+    --card:    #ffffff;
+    --border:  #c4c4d4;
+    --text:    #1a1a2e;
+    --muted:   #55558a;
+  }
+  [data-theme="midnight"] {
+    --bg:      #080c18;
+    --surface: #0d1528;
+    --card:    #111c38;
+    --border:  #1a2d54;
+    --text:    #c5d8f5;
+    --muted:   #4d6a9a;
+  }
+  [data-theme="dracula"] {
+    --bg:      #1e1f29;
+    --surface: #282a36;
+    --card:    #313442;
+    --border:  #44475a;
+    --text:    #f8f8f2;
+    --muted:   #6272a4;
+    --accent:  #bd93f9;
+    --accent2: #ff79c6;
+  }
+  [data-theme="terminal"] {
+    --bg:      #0a0f0a;
+    --surface: #0d150d;
+    --card:    #111c11;
+    --border:  #1a2e1a;
+    --text:    #a0f0a0;
+    --muted:   #4a8a4a;
+    --accent:  #50fa7b;
+    --accent2: #69ff47;
+  }
+
+  /* ---- compact mode ---- */
+  body.compact .card { padding: 0.85rem 1rem; }
+  body.compact .card h2 { font-size: 1rem; margin-bottom: 0.6rem; }
+  body.compact .stat-card { padding: 0.65rem 0.85rem; }
+  body.compact .stat-card .val { font-size: 1.3rem; }
+  body.compact .tabs { gap: 0.15rem; }
+  body.compact .tab { padding: 0.5rem 1rem; font-size: 0.82rem; }
+
+  /* ---- no-animations ---- */
+  body.no-anim *, body.no-anim *::before, body.no-anim *::after {
+    transition: none !important;
+    animation: none !important;
+  }
+
+  /* ---- settings panel ---- */
+  .settings-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 1.25rem;
+    margin-bottom: 1.5rem;
+  }
+  .settings-field { display: flex; flex-direction: column; gap: 0.35rem; }
+  .settings-field label { font-size: 0.82rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+  .settings-field select,
+  .settings-field input[type="text"],
+  .settings-field input[type="url"] {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: var(--text);
+    padding: 0.4rem 0.6rem;
+    font-family: var(--font);
+    font-size: 0.88rem;
+  }
+  .settings-field input[type="color"] {
+    width: 100%;
+    height: 36px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--surface);
+    cursor: pointer;
+    padding: 2px 4px;
+  }
+  .settings-toggle { display: flex; align-items: center; gap: 0.6rem; margin-top: 0.15rem; }
+  .settings-toggle input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; }
+  .settings-toggle span { font-size: 0.88rem; color: var(--text); }
+  .theme-swatches { display: flex; gap: 0.4rem; flex-wrap: wrap; margin-top: 0.15rem; }
+  .swatch {
+    width: 32px; height: 32px;
+    border-radius: 50%;
+    border: 2px solid var(--border);
+    cursor: pointer;
+    transition: border-color 0.2s, transform 0.15s;
+  }
+  .swatch:hover { transform: scale(1.15); }
+  .swatch.active { border-color: var(--accent); }
+  .settings-preview {
+    font-size: 0.78rem;
+    color: var(--muted);
+    margin-top: 0.5rem;
+    font-style: italic;
+  }
 </style>
 </head>
 <body>
@@ -320,6 +425,7 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
     <button class="tab" onclick="showTab('config', this)">Configuration</button>
     <button class="tab" onclick="showTab('monitor', this)">Monitor &amp; Logs</button>
     <button class="tab" onclick="showTab('devices', this)">Devices</button>
+    <button class="tab" onclick="showTab('appearance', this)">&#9881; Appearance</button>
   </div>
 
   <!-- ====== DASHBOARD ====== -->
@@ -509,6 +615,87 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
       </table>
     </div>
   </div>
+
+  <!-- ====== APPEARANCE ====== -->
+  <div id="panel-appearance" class="panel">
+    <div class="card">
+      <h2>Theme</h2>
+      <div class="settings-grid">
+        <div class="settings-field">
+          <label>Colour Theme</label>
+          <div class="theme-swatches">
+            <div class="swatch" data-theme="dark"     title="Dark (default)" style="background:#1e1e2e;border-color:#e05555"></div>
+            <div class="swatch" data-theme="light"    title="Light"          style="background:#ffffff"></div>
+            <div class="swatch" data-theme="midnight" title="Midnight Blue"  style="background:#111c38"></div>
+            <div class="swatch" data-theme="dracula"  title="Dracula"        style="background:#282a36"></div>
+            <div class="swatch" data-theme="terminal" title="Green Terminal" style="background:#0a0f0a"></div>
+          </div>
+          <div class="settings-preview" id="themePreviewLabel">Current: Dark (default)</div>
+        </div>
+        <div class="settings-field">
+          <label>Accent Colour</label>
+          <input type="color" id="stAccent" value="#e05555">
+          <div class="settings-preview">Applied to buttons, borders and highlights</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Typography</h2>
+      <div class="settings-grid">
+        <div class="settings-field">
+          <label>Font Family</label>
+          <select id="stFont">
+            <option value="system">System UI (default)</option>
+            <option value="mono">Monospace</option>
+            <option value="serif">Serif</option>
+            <option value="rounded">"Nunito", rounded sans-serif</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Background</h2>
+      <div class="settings-grid">
+        <div class="settings-field">
+          <label>Background Colour</label>
+          <input type="color" id="stBgColor" value="#0d0d14">
+          <div class="settings-preview">Overrides the theme background colour</div>
+        </div>
+        <div class="settings-field">
+          <label>Background Image URL</label>
+          <input type="url" id="stBgImage" placeholder="https://example.com/image.jpg">
+          <div class="settings-preview">Leave empty to use the solid colour above</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Layout &amp; Behaviour</h2>
+      <div class="settings-grid">
+        <div class="settings-field">
+          <label>Display Density</label>
+          <div class="settings-toggle">
+            <input type="checkbox" id="stCompact">
+            <span>Compact mode (reduce card padding and spacing)</span>
+          </div>
+        </div>
+        <div class="settings-field">
+          <label>Animations</label>
+          <div class="settings-toggle">
+            <input type="checkbox" id="stNoAnim">
+            <span>Disable all CSS transitions and animations</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="control-row">
+      <button class="btn btn-save" onclick="saveAppearanceSettings()">&#128190; Save &amp; Apply</button>
+      <button class="btn btn-refresh" onclick="resetAppearanceSettings()">&#8635; Reset to Defaults</button>
+    </div>
+  </div>
 </div>
 
 <footer>ModernJVS WebUI &mdash; <a href="https://github.com/dazzaXx/ModernJVS" target="_blank">github.com/dazzaXx/ModernJVS</a></footer>
@@ -527,6 +714,7 @@ function showTab(name, btn) {
   if (name === 'monitor') fetchLogs();
   if (name === 'config') loadConfig();
   if (name === 'devices') loadDevices();
+  if (name === 'appearance') initAppearancePanel();
 }
 
 // ---- API helpers ----
@@ -800,16 +988,136 @@ function downloadLogs() {
   document.body.removeChild(a);
 }
 
+// ---- Appearance / Settings ----
+
+const THEME_NAMES = {
+  dark:     'Dark (default)',
+  light:    'Light',
+  midnight: 'Midnight Blue',
+  dracula:  'Dracula',
+  terminal: 'Green Terminal',
+};
+
+const FONT_MAP = {
+  system:  "'Segoe UI', system-ui, sans-serif",
+  mono:    "'Courier New', Courier, monospace",
+  serif:   "Georgia, 'Times New Roman', serif",
+  rounded: "'Nunito', 'Varela Round', system-ui, sans-serif",
+};
+
+function _getSettings() {
+  try {
+    return JSON.parse(localStorage.getItem('webui_appearance') || '{}');
+  } catch { return {}; }
+}
+
+function applyAppearanceSettings(s) {
+  const root = document.documentElement;
+
+  // Theme
+  const theme = s.theme || 'dark';
+  root.setAttribute('data-theme', theme === 'dark' ? '' : theme);
+
+  // Accent colour (CSS custom property override on :root)
+  if (s.accent && s.accent !== '#e05555') {
+    root.style.setProperty('--accent',  s.accent);
+    // lighten the accent2 slightly by using it at 85% opacity — simple approach
+    root.style.setProperty('--accent2', s.accent);
+  } else {
+    root.style.removeProperty('--accent');
+    root.style.removeProperty('--accent2');
+  }
+
+  // Font
+  const fontValue = FONT_MAP[s.font || 'system'];
+  root.style.setProperty('--font', fontValue);
+
+  // Background colour
+  if (s.bgColor && s.bgColor !== '#0d0d14') {
+    root.style.setProperty('--bg', s.bgColor);
+    document.body.style.backgroundColor = s.bgColor;
+  } else {
+    root.style.removeProperty('--bg');
+    document.body.style.backgroundColor = '';
+  }
+
+  // Background image
+  if (s.bgImage && s.bgImage.trim()) {
+    document.body.style.backgroundImage = 'url(' + s.bgImage.trim() + ')';
+    document.body.style.backgroundSize  = 'cover';
+    document.body.style.backgroundAttachment = 'fixed';
+  } else {
+    document.body.style.backgroundImage = '';
+    document.body.style.backgroundSize  = '';
+    document.body.style.backgroundAttachment = '';
+  }
+
+  // Compact mode
+  document.body.classList.toggle('compact', !!s.compact);
+
+  // No animations
+  document.body.classList.toggle('no-anim', !!s.noAnim);
+}
+
+function initAppearancePanel() {
+  const s = _getSettings();
+
+  // Mark active swatch
+  document.querySelectorAll('.swatch').forEach(sw => {
+    const t = sw.dataset.theme;
+    sw.classList.toggle('active', (s.theme || 'dark') === t);
+    sw.onclick = () => {
+      document.querySelectorAll('.swatch').forEach(x => x.classList.remove('active'));
+      sw.classList.add('active');
+      document.getElementById('themePreviewLabel').textContent =
+        'Current: ' + (THEME_NAMES[t] || t);
+    };
+  });
+  document.getElementById('themePreviewLabel').textContent =
+    'Current: ' + (THEME_NAMES[s.theme || 'dark'] || s.theme || 'Dark (default)');
+
+  document.getElementById('stAccent').value  = s.accent   || '#e05555';
+  document.getElementById('stFont').value    = s.font     || 'system';
+  document.getElementById('stBgColor').value = s.bgColor  || '#0d0d14';
+  document.getElementById('stBgImage').value = s.bgImage  || '';
+  document.getElementById('stCompact').checked = !!s.compact;
+  document.getElementById('stNoAnim').checked  = !!s.noAnim;
+}
+
+function saveAppearanceSettings() {
+  const activeSwatch = document.querySelector('.swatch.active');
+  const s = {
+    theme:   activeSwatch ? activeSwatch.dataset.theme : 'dark',
+    accent:  document.getElementById('stAccent').value,
+    font:    document.getElementById('stFont').value,
+    bgColor: document.getElementById('stBgColor').value,
+    bgImage: document.getElementById('stBgImage').value.trim(),
+    compact: document.getElementById('stCompact').checked,
+    noAnim:  document.getElementById('stNoAnim').checked,
+  };
+  localStorage.setItem('webui_appearance', JSON.stringify(s));
+  applyAppearanceSettings(s);
+}
+
+function resetAppearanceSettings() {
+  localStorage.removeItem('webui_appearance');
+  applyAppearanceSettings({});
+  initAppearancePanel();
+}
+
 // ---- Init ----
+applyAppearanceSettings(_getSettings());
 refreshDashboard();
 refreshSysinfo();
 setInterval(refreshDashboard, 10000);
 setInterval(refreshSysinfo, 5000);
 
-// Fetch version once and show in header badge
+// Fetch version once and show in header badge only when available
 api('/api/version').then(d => {
   if (d.version && d.version !== 'unknown') {
-    document.getElementById('verBadge').textContent = 'v' + d.version;
+    const badge = document.getElementById('verBadge');
+    badge.textContent = 'v' + d.version;
+    badge.classList.add('visible');
   }
 });
 </script>
