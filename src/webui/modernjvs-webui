@@ -4,6 +4,7 @@
 # Requires Python 3.6+ (stdlib only, no pip dependencies).
 
 import http.server
+import ipaddress
 import json
 import os
 import re
@@ -20,6 +21,61 @@ GAMES_PATH = "/etc/modernjvs/games"
 DEVICES_PATH = "/etc/modernjvs/devices"
 LOGO_PATH = "/usr/share/modernjvs/modernjvs2.png"
 SERVICE_NAME = "modernjvs"
+
+# ---------------------------------------------------------------------------
+# Internet access protection – only allow private / local-network addresses.
+# This prevents the WebUI from being accessible from the public internet even
+# when the Raspberry Pi has an internet connection.
+# ---------------------------------------------------------------------------
+
+_PRIVATE_NETS = [
+    ipaddress.ip_network("127.0.0.0/8"),    # loopback
+    ipaddress.ip_network("10.0.0.0/8"),     # RFC 1918
+    ipaddress.ip_network("172.16.0.0/12"),  # RFC 1918
+    ipaddress.ip_network("192.168.0.0/16"), # RFC 1918
+    ipaddress.ip_network("169.254.0.0/16"), # link-local (RFC 3927)
+    ipaddress.ip_network("::1/128"),        # IPv6 loopback
+    ipaddress.ip_network("fc00::/7"),       # IPv6 unique local (ULA)
+    ipaddress.ip_network("fe80::/10"),      # IPv6 link-local
+]
+
+
+def is_private_ip(addr):
+    """Return True if addr is a private/local address that should be allowed.
+
+    Also handles IPv4-mapped IPv6 addresses (::ffff:x.x.x.x) transparently.
+    """
+    try:
+        ip = ipaddress.ip_address(addr)
+        # Unwrap IPv4-mapped IPv6 so the RFC-1918 nets match correctly
+        if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped:
+            ip = ip.ipv4_mapped
+        return any(ip in net for net in _PRIVATE_NETS)
+    except ValueError:
+        return False
+
+
+# Simple one-page HTML shown to callers from public IPs
+_ACCESS_DENIED_HTML = """\
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><title>Access Denied \u2013 ModernJVS WebUI</title>
+<style>
+body{background:#0d0d14;color:#e2e2f0;font-family:system-ui,sans-serif;
+     display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0}
+.box{background:#1e1e2e;border:1px solid #2e2e42;border-radius:8px;
+     padding:2.5rem;max-width:500px;text-align:center}
+h1{color:#ff5555;margin-bottom:.75rem;font-size:1.4rem}
+p{color:#7878a0;line-height:1.6;margin:.5rem 0}
+code{color:#ff7e7e;font-family:monospace}
+</style></head>
+<body><div class="box">
+<h1>\U0001f512 Access Denied</h1>
+<p>The ModernJVS WebUI is only accessible from your <strong>local network</strong>.</p>
+<p>Your IP address <code>{client_ip}</code> is not a private network address.</p>
+<p>Connect from a device on the same LAN as the Raspberry Pi.</p>
+</div></body></html>
+"""
 
 # ---------------------------------------------------------------------------
 # HTML / CSS / JS – embedded so the server is a single file with no assets
@@ -183,6 +239,27 @@ HTML_PAGE = r"""<!DOCTYPE html>
   .stat-card .val { font-size: 1.4rem; font-weight: 700; color: var(--accent2); }
   .stat-card .lbl { font-size: 0.78rem; color: var(--muted); margin-top: 0.3rem; text-transform: uppercase; letter-spacing: 0.06em; }
 
+  /* --- version badge in header --- */
+  .ver-badge {
+    font-size: 0.72rem;
+    color: var(--muted);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0.2rem 0.5rem;
+    margin-left: 0.5rem;
+    vertical-align: middle;
+    white-space: nowrap;
+  }
+
+  /* --- device table --- */
+  .device-table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+  .device-table th { text-align: left; color: var(--muted); font-weight: 600; padding: 0.4rem 0.6rem; border-bottom: 1px solid var(--border); font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.06em; }
+  .device-table td { padding: 0.4rem 0.6rem; border-bottom: 1px solid rgba(46,46,66,0.5); color: var(--text); }
+  .device-table tr:last-child td { border-bottom: none; }
+  .device-table tr:hover td { background: rgba(255,255,255,0.03); }
+  .device-table td code { color: var(--accent2); font-family: monospace; font-size: 0.82rem; }
+
   /* --- usage / progress bars --- */
   .usage-row { margin-bottom: 0.9rem; }
   .usage-header { display: flex; justify-content: space-between; margin-bottom: 0.3rem; }
@@ -230,7 +307,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
 <body>
 <header>
   <img id="logo" src="/logo" alt="ModernJVS">
-  <h1>Modern<span>JVS</span> <span style="color:var(--muted);font-weight:400;font-size:0.9rem">WebUI</span></h1>
+  <h1>Modern<span>JVS</span> <span style="color:var(--muted);font-weight:400;font-size:0.9rem">WebUI</span><span class="ver-badge" id="verBadge"></span></h1>
   <div class="status-badge">
     <span class="dot" id="statusDot"></span>
     <span id="statusText">Loading…</span>
@@ -242,6 +319,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
     <button class="tab active" onclick="showTab('dashboard', this)">Dashboard</button>
     <button class="tab" onclick="showTab('config', this)">Configuration</button>
     <button class="tab" onclick="showTab('monitor', this)">Monitor &amp; Logs</button>
+    <button class="tab" onclick="showTab('devices', this)">Devices</button>
   </div>
 
   <!-- ====== DASHBOARD ====== -->
@@ -381,6 +459,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
       <h2>Live Log Monitor</h2>
       <div class="log-controls">
         <button class="btn btn-refresh" onclick="fetchLogs()">⟳ Refresh</button>
+        <button class="btn btn-refresh btn-xs" onclick="downloadLogs()" style="background:var(--border);">⬇ Download</button>
         <label>
           <input type="checkbox" id="autoRefresh" onchange="toggleAutoRefresh()"> Auto-refresh (5s)
         </label>
@@ -418,6 +497,18 @@ HTML_PAGE = r"""<!DOCTYPE html>
       <div class="log-wrap" id="jvsBox" style="height:220px;"></div>
     </div>
   </div>
+
+  <!-- ====== DEVICES ====== -->
+  <div id="panel-devices" class="panel">
+    <div class="card">
+      <h2>Connected Input Devices <button class="btn btn-refresh btn-xs" onclick="loadDevices()" style="margin-left:0.5rem;vertical-align:middle;">⟳ Refresh</button></h2>
+      <p style="font-size:0.83rem;color:var(--muted);margin-bottom:1rem;">Shows all <code style="color:var(--accent2);font-family:monospace">/dev/input/event*</code> nodes currently present on the system.</p>
+      <table class="device-table">
+        <thead><tr><th>Event Node</th><th>Device Name</th></tr></thead>
+        <tbody id="deviceTableBody"><tr><td colspan="2" style="color:var(--muted)">Loading…</td></tr></tbody>
+      </table>
+    </div>
+  </div>
 </div>
 
 <footer>ModernJVS WebUI &mdash; <a href="https://github.com/dazzaXx/ModernJVS" target="_blank">github.com/dazzaXx/ModernJVS</a></footer>
@@ -435,6 +526,7 @@ function showTab(name, btn) {
   btn.classList.add('active');
   if (name === 'monitor') fetchLogs();
   if (name === 'config') loadConfig();
+  if (name === 'devices') loadDevices();
 }
 
 // ---- API helpers ----
@@ -679,10 +771,47 @@ function clearLogFilter() {
   applyLogFilter();
 }
 
+// ---- Devices ----
+async function loadDevices() {
+  const d = await api('/api/input_devices');
+  const tbody = document.getElementById('deviceTableBody');
+  if (d.error) {
+    tbody.innerHTML = `<tr><td colspan="2" style="color:var(--red)">Error: ${d.error}</td></tr>`;
+    return;
+  }
+  const devs = d.devices || [];
+  if (devs.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="2" style="color:var(--muted)">No input devices found.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = devs.map(dev =>
+    `<tr><td><code>${dev.event}</code></td><td>${dev.name}</td></tr>`
+  ).join('');
+}
+
+// ---- Log download ----
+function downloadLogs() {
+  const lines = document.getElementById('logLines').value;
+  const a = document.createElement('a');
+  a.href = '/api/logs/download?lines=' + lines;
+  a.download = 'modernjvs.log';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+}
+
+// ---- Init ----
 refreshDashboard();
 refreshSysinfo();
 setInterval(refreshDashboard, 10000);
 setInterval(refreshSysinfo, 5000);
+
+// Fetch version once and show in header badge
+api('/api/version').then(d => {
+  if (d.version && d.version !== 'unknown') {
+    document.getElementById('verBadge').textContent = 'v' + d.version;
+  }
+});
 </script>
 </body>
 </html>
@@ -1012,8 +1141,49 @@ def get_logo_bytes():
 
 
 # ---------------------------------------------------------------------------
-# HTTP request handler
+# Version helper
 # ---------------------------------------------------------------------------
+
+def get_version():
+    """Return the installed ModernJVS binary version string."""
+    try:
+        result = subprocess.run(
+            ["modernjvs", "--version"],
+            capture_output=True, text=True, timeout=5
+        )
+        ver = (result.stdout + result.stderr).strip()
+        if ver:
+            return ver
+    except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
+        pass
+    return "unknown"
+
+
+# ---------------------------------------------------------------------------
+# Connected input devices helper
+# ---------------------------------------------------------------------------
+
+def get_input_devices():
+    """Return list of connected /dev/input/event* devices with sysfs names."""
+    import glob as _glob
+    devices = []
+    try:
+        for event_path in sorted(_glob.glob("/dev/input/event*")):
+            event_name = os.path.basename(event_path)
+            name = event_name  # fallback if sysfs name not available
+            sysfs_name_path = f"/sys/class/input/{event_name}/device/name"
+            try:
+                with open(sysfs_name_path) as f:
+                    name = f.read().strip()
+            except OSError:
+                pass
+            devices.append({"event": event_name, "name": name, "path": event_path})
+    except Exception:
+        pass
+    return devices
+
+
+
 
 class WebUIHandler(http.server.BaseHTTPRequestHandler):
     """Simple HTTP handler that serves the WebUI and its JSON API."""
@@ -1021,9 +1191,35 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):  # silence default Apache-style log
         pass
 
+    # ---- access control ----
+
+    def _check_client_ip(self):
+        """Return True if the client is on a private/local network.
+
+        Returns False and sends a 403 HTML page if the client IP is public,
+        preventing internet exposure even when the Pi has an internet connection.
+        """
+        client_ip = self.client_address[0]
+        if not is_private_ip(client_ip):
+            self._access_denied(client_ip)
+            return False
+        return True
+
+    def _access_denied(self, client_ip):
+        html = _ACCESS_DENIED_HTML.format(client_ip=client_ip)
+        data = html.encode("utf-8")
+        self.send_response(HTTPStatus.FORBIDDEN)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", len(data))
+        self.end_headers()
+        self.wfile.write(data)
+
     # ---- routing ----
 
     def do_GET(self):
+        if not self._check_client_ip():
+            return
+
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
         query = urllib.parse.parse_qs(parsed.query)
@@ -1045,16 +1241,38 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
                 lines = 100
             lines = max(10, min(lines, 1000))
             self._json({"lines": get_logs(lines)})
+        elif path == "/api/logs/download":
+            try:
+                lines = int(query.get("lines", ["500"])[0])
+            except (ValueError, IndexError):
+                lines = 500
+            lines = max(10, min(lines, 5000))
+            text = "\n".join(get_logs(lines))
+            data = text.encode("utf-8")
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.send_header("Content-Disposition",
+                             f'attachment; filename="{SERVICE_NAME}.log"')
+            self.send_header("Content-Length", len(data))
+            self.end_headers()
+            self.wfile.write(data)
         elif path == "/api/ios":
             self._json({"ios": list_dir(IOS_PATH)})
         elif path == "/api/games":
             self._json({"games": list_dir(GAMES_PATH)})
         elif path == "/api/devices":
             self._json({"devices": list_dir(DEVICES_PATH)})
+        elif path == "/api/input_devices":
+            self._json({"devices": get_input_devices()})
+        elif path == "/api/version":
+            self._json({"version": get_version()})
         else:
             self._not_found()
 
     def do_POST(self):
+        if not self._check_client_ip():
+            return
+
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
         body = self._read_body()

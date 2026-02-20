@@ -146,9 +146,10 @@ ModernJVS ships with a built-in web interface that you can access from any devic
 
 ### Features
 
-- **Dashboard** – live service status with animated indicator (running/stopped), PID, uptime, current I/O board / game / device path, Start / Stop / Restart buttons. Includes a **Pi System Usage** panel showing real-time CPU %, memory, CPU temperature, disk usage (with colour-coded progress bars) and load average. Local IP addresses are shown so you always know the URL to use from another device.
+- **Dashboard** – live service status with animated indicator (running/stopped), PID, uptime, current I/O board / game / device path, Start / Stop / Restart buttons. Includes a **Pi System Usage** panel showing real-time CPU %, memory, CPU temperature, disk usage (with colour-coded progress bars) and load average. Local IP addresses are shown so you always know the URL to use from another device. The installed ModernJVS version is displayed in the header.
 - **Configuration** – all key settings in a clean form: I/O board and game dropdowns (auto-populated from installed files), device path, sense line type and GPIO pin, debug mode, auto controller detection, and per-player analog deadzone. Saved directly to `/etc/modernjvs/config` with comments preserved.
-- **Monitor & Logs** – live log tail (journalctl on Raspberry Pi OS / DietPi, with automatic fallback to syslog files if journald is not available). Features a **category filter dropdown** (All / Errors & Critical / Warnings / JVS Activity / Controllers / Initialization), a **live text search box**, auto-refresh every 5 s, configurable line count, and a dedicated **JVS Activity** pane.
+- **Monitor & Logs** – live log tail (journalctl on Raspberry Pi OS / DietPi, with automatic fallback to syslog files if journald is not available). Features a **category filter dropdown** (All / Errors & Critical / Warnings / JVS Activity / Controllers / Initialization), a **live text search box**, auto-refresh every 5 s, configurable line count, a **Download Logs** button, and a dedicated **JVS Activity** pane.
+- **Devices** – shows all connected `/dev/input/event*` nodes and their human-readable device names (read from sysfs). Useful for confirming controllers are detected before starting the service.
 
 ### Starting the WebUI
 
@@ -163,9 +164,13 @@ To check that it is running:
 sudo systemctl status modernjvs-webui
 ```
 
-### Security Note
+### Security
 
-The WebUI runs as root (required to control the `modernjvs` service and write `/etc/modernjvs/config`). It binds to all network interfaces on port **8080** so you can reach it from any device on your local network. Do not expose this port to the internet (e.g. block it in your router's firewall if the Raspberry Pi has a public IP).
+The WebUI **actively blocks connections from public (non-private) IP addresses**. Every request is checked against the private network ranges (RFC 1918, link-local, and loopback) before being served. Requests from public internet IPs receive a `403 Forbidden` response with an explanatory page — so even if the Raspberry Pi has a public-facing IP (e.g. directly connected to a modem), the WebUI remains inaccessible from the internet.
+
+Allowed networks: `127.0.0.0/8`, `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `169.254.0.0/16`, IPv6 loopback, ULA, and link-local.
+
+The WebUI runs as root (required to control the `modernjvs` service and write `/etc/modernjvs/config`). It binds to all interfaces on port **8080** — only LAN devices can connect.
 
 ---
 
