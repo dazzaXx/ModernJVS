@@ -65,7 +65,7 @@ git clone https://github.com/dazzaXx/ModernJVS
 sudo make install
 ```
 
-> **Note:** The WebUI is included by default and requires Python 3. Raspberry Pi OS Lite includes Python 3 out of the box, so no extra step is needed.
+> **Note:** The WebUI is included by default and requires Python 3. Raspberry Pi OS Lite includes Python 3 out of the box, so no extra step is needed. Both the `modernjvs` and `modernjvs-webui` services are **automatically enabled and started** after installation.
 
 If using DietPi:
 
@@ -83,12 +83,32 @@ If you don't want the WebUI installed (e.g. on a minimal headless system), the r
 sudo make install-no-webui
 ```
 
-This target always reconfigures cmake with `-DENABLE_WEBUI=OFF` before building, so it works correctly regardless of whether a build directory already exists.
+This target always reconfigures cmake with `-DENABLE_WEBUI=OFF` before building, so it works correctly regardless of whether a build directory already exists. The `modernjvs` service is still automatically enabled and started (only `modernjvs-webui` is skipped).
 
 Alternatively, on a **fresh checkout** (or after `sudo make clean`), you can pass the flag explicitly:
 
 ```
 sudo make install WEBUI=OFF
+```
+
+### Installing without auto-enabling services
+
+To install without automatically enabling and starting the systemd services:
+
+```
+sudo make install ENABLE_SERVICES=OFF
+```
+
+This applies to both `install` and `install-no-webui`. You can then enable the services manually later:
+
+```
+sudo make enable-services
+```
+
+or directly with systemctl:
+
+```
+sudo systemctl enable --now modernjvs modernjvs-webui
 ```
 
 ## Supported Hardware
@@ -151,15 +171,11 @@ ModernJVS ships with a built-in web interface that you can access from any devic
 - **Monitor & Logs** – live log tail (journalctl on Raspberry Pi OS / DietPi, with automatic fallback to syslog files if journald is not available). Features a **category filter dropdown** (All / Errors & Critical / Warnings / JVS Activity / Controllers / Initialization), a **live text search box**, auto-refresh every 5 s, configurable line count, a **Download Logs** button, and a dedicated **JVS Activity** pane.
 - **Devices** – shows all connected `/dev/input/event*` nodes and their human-readable device names (read from sysfs). Useful for confirming controllers are detected before starting the service.
 
-### Starting the WebUI
+### Accessing the WebUI
 
-```
-sudo systemctl enable --now modernjvs-webui
-```
+Both the `modernjvs` and `modernjvs-webui` services are enabled and started automatically during `make install`. Open `http://<raspberry-pi-ip>:8080` in a browser on any device on your local network.
 
-Then open `http://<raspberry-pi-ip>:8080` in a browser on any device on your network.
-
-To check that it is running:
+To check that the WebUI service is running:
 ```
 sudo systemctl status modernjvs-webui
 ```

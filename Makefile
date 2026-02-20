@@ -6,6 +6,11 @@ BUILD = build
 # Example: make install WEBUI=OFF
 WEBUI ?= ON
 
+# Set ENABLE_SERVICES=OFF to skip automatically enabling and starting the
+# systemd services after installation.
+# Example: make install ENABLE_SERVICES=OFF
+ENABLE_SERVICES ?= ON
+
 SERVICE_NAME       = modernjvs
 WEBUI_SERVICE_NAME = modernjvs-webui
 
@@ -15,21 +20,31 @@ default: $(BUILD)/Makefile
 install: default
 	@cd $(BUILD) && cpack
 	@sudo dpkg --install $(BUILD)/*.deb
+ifeq ($(ENABLE_SERVICES),ON)
+ifeq ($(WEBUI),ON)
+	@sudo systemctl enable --now $(SERVICE_NAME) $(WEBUI_SERVICE_NAME)
+else
+	@sudo systemctl enable --now $(SERVICE_NAME)
+endif
+endif
 
 # Convenience target that builds and installs without the WebUI.
-# Equivalent to: make install WEBUI=OFF
+# Services are still enabled by default; pass ENABLE_SERVICES=OFF to skip.
 install-no-webui:
 	@mkdir -p $(BUILD)
 	@cd $(BUILD) && cmake .. -DENABLE_WEBUI=OFF
 	@cd $(BUILD) && $(MAKE) --no-print-directory
 	@cd $(BUILD) && cpack
 	@sudo dpkg --install $(BUILD)/*.deb
+ifeq ($(ENABLE_SERVICES),ON)
+	@sudo systemctl enable --now $(SERVICE_NAME)
+endif
 
 clean:
 	@rm -rf $(BUILD)
 
-# Enable and immediately start both the ModernJVS service and the WebUI service.
-# Equivalent to running: sudo systemctl enable --now modernjvs modernjvs-webui
+# Manually enable and immediately start both services.
+# Useful if ENABLE_SERVICES=OFF was used during installation.
 enable-services:
 	@sudo systemctl enable --now $(SERVICE_NAME) $(WEBUI_SERVICE_NAME)
 
