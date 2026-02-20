@@ -308,6 +308,17 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
   /* ================================================================
      THEMES – variable overrides applied via data-theme on <html>
      ================================================================ */
+  /* dark is the default; defined explicitly so the selector pattern is consistent */
+  [data-theme="dark"] {
+    --bg:      #0d0d14;
+    --surface: #16161f;
+    --card:    #1e1e2e;
+    --border:  #2e2e42;
+    --accent:  #e05555;
+    --accent2: #ff7e7e;
+    --text:    #e2e2f0;
+    --muted:   #7878a0;
+  }
   [data-theme="light"] {
     --bg:      #f0f0f5;
     --surface: #e0e0ea;
@@ -1014,15 +1025,13 @@ function _getSettings() {
 function applyAppearanceSettings(s) {
   const root = document.documentElement;
 
-  // Theme
-  const theme = s.theme || 'dark';
-  root.setAttribute('data-theme', theme === 'dark' ? '' : theme);
+  // Theme – always set an explicit data-theme value so selectors are consistent
+  root.setAttribute('data-theme', s.theme || 'dark');
 
   // Accent colour (CSS custom property override on :root)
   if (s.accent && s.accent !== '#e05555') {
     root.style.setProperty('--accent',  s.accent);
-    // lighten the accent2 slightly by using it at 85% opacity — simple approach
-    root.style.setProperty('--accent2', s.accent);
+    root.style.setProperty('--accent2', s.accent);  // same hue; theme CSS handles lightening
   } else {
     root.style.removeProperty('--accent');
     root.style.removeProperty('--accent2');
@@ -1041,9 +1050,12 @@ function applyAppearanceSettings(s) {
     document.body.style.backgroundColor = '';
   }
 
-  // Background image
-  if (s.bgImage && s.bgImage.trim()) {
-    document.body.style.backgroundImage = 'url(' + s.bgImage.trim() + ')';
+  // Background image – only accept http/https URLs to prevent CSS injection
+  const rawImg = (s.bgImage || '').trim();
+  if (rawImg && /^https?:\/\//i.test(rawImg)) {
+    // encodeURI to handle spaces/special chars; strip any embedded quotes/parens
+    const safeImg = encodeURI(rawImg.replace(/['"()]/g, ''));
+    document.body.style.backgroundImage = 'url(' + safeImg + ')';
     document.body.style.backgroundSize  = 'cover';
     document.body.style.backgroundAttachment = 'fixed';
   } else {
