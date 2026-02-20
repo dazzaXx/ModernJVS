@@ -734,6 +734,12 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
         <input type="text" id="logSearch" placeholder="Search…" oninput="applyJvsFilter()">
         <button class="btn btn-refresh btn-xs" onclick="clearLogFilter()">✕ Clear</button>
       </div>
+      <div id="logFilterHint" style="display:none;font-size:0.8rem;color:var(--yellow);margin-bottom:0.5rem;padding:0.35rem 0.5rem;border-left:3px solid var(--yellow);background:rgba(255,200,0,0.06);">
+        ⚠ <strong>JVS Activity</strong> shows <code style="color:var(--accent2)">CMD_</code> debug messages —
+        these are only logged when <strong>Debug Mode</strong> is set to <strong>1</strong> or <strong>2</strong>
+        in the <a href="#" onclick="showTab('config',document.querySelector('[onclick*=showTab].tab'));return false;"
+          style="color:var(--accent)">Configuration</a> tab.
+      </div>
       <div class="log-wrap" id="jvsBox" style="height:340px;"></div>
     </div>
   </div>
@@ -1081,7 +1087,12 @@ function applyJvsFilter() {
   const filter = document.getElementById('logFilter').value;
   const search = document.getElementById('logSearch').value.toLowerCase();
 
+  // Show the debug-level hint only when the JVS Activity filter is active
+  const hint = document.getElementById('logFilterHint');
+  if (hint) hint.style.display = (filter === 'jvs') ? 'block' : 'none';
+
   let lines = rawLogLines;
+  let emptyMsg = 'No matching log entries.';
   switch (filter) {
     case 'errors':
       lines = lines.filter(l => /error|critical|fail/i.test(l));
@@ -1092,6 +1103,7 @@ function applyJvsFilter() {
     case 'jvs':
       // Only show CMD_ debug output — these are the actual JVS packet commands
       lines = lines.filter(l => /CMD_/.test(l));
+      emptyMsg = 'No JVS activity found. CMD_ messages are only logged when Debug Mode is set to 1 or 2 in Configuration.';
       break;
     case 'controllers':
       lines = lines.filter(l => /controller|input|device|player|joystick|gamepad|wiimote/i.test(l));
@@ -1104,7 +1116,7 @@ function applyJvsFilter() {
   if (search) {
     lines = lines.filter(l => l.toLowerCase().includes(search));
   }
-  renderLines(document.getElementById('jvsBox'), lines, 'No matching log entries.');
+  renderLines(document.getElementById('jvsBox'), lines, emptyMsg);
 }
 
 function renderLines(box, lines, emptyMsg, alwaysScroll) {
