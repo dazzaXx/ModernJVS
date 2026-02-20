@@ -14,10 +14,13 @@ ENABLE_SERVICES ?= ON
 SERVICE_NAME       = modernjvs
 WEBUI_SERVICE_NAME = modernjvs-webui
 
+SERVICES_MSG = $(if $(filter ON,$(ENABLE_SERVICES)),enabled (use ENABLE_SERVICES=OFF to skip),disabled)
+
 default: $(BUILD)/Makefile
 	@cd $(BUILD) && $(MAKE) --no-print-directory
 
 install: default
+	@echo "-- Services: $(SERVICES_MSG)"
 	@cd $(BUILD) && cpack
 	@sudo dpkg --install $(BUILD)/*.deb
 ifeq ($(ENABLE_SERVICES),ON)
@@ -34,6 +37,7 @@ install-no-webui:
 	@mkdir -p $(BUILD)
 	@cd $(BUILD) && cmake .. -DENABLE_WEBUI=OFF
 	@cd $(BUILD) && $(MAKE) --no-print-directory
+	@echo "-- Services: $(SERVICES_MSG)"
 	@cd $(BUILD) && cpack
 	@sudo dpkg --install $(BUILD)/*.deb
 ifeq ($(ENABLE_SERVICES),ON)
