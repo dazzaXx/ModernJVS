@@ -81,7 +81,7 @@ code{color:#ff7e7e;font-family:monospace}
 # ---------------------------------------------------------------------------
 # HTML / CSS / JS – embedded so the server is a single file with no assets
 # ---------------------------------------------------------------------------
-HTML_PAGE = r"""<!DOCTYPE html>
+_HTML_TEMPLATE = r"""<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -119,8 +119,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
     z-index: 100;
   }
   header img { height: 42px; }
-  header h1 { font-size: 1.4rem; color: var(--text); letter-spacing: 0.05em; }
-  header h1 span { color: var(--accent); }
+  header h1 { font-size: 1.4rem; color: var(--muted); font-weight: 400; letter-spacing: 0.05em; }
   .status-badge {
     margin-left: auto;
     display: flex;
@@ -307,8 +306,8 @@ HTML_PAGE = r"""<!DOCTYPE html>
 </head>
 <body>
 <header>
-  <img id="logo" src="/logo" alt="ModernJVS">
-  <h1>Modern<span>JVS</span> <span style="color:var(--muted);font-weight:400;font-size:0.9rem">WebUI</span><span class="ver-badge" id="verBadge"></span></h1>
+  <img id="logo" src="__LOGO__" alt="ModernJVS">
+  <h1>WebUI<span class="ver-badge" id="verBadge"></span></h1>
   <div class="status-badge">
     <span class="dot" id="statusDot"></span>
     <span id="statusText">Loading…</span>
@@ -819,6 +818,30 @@ api('/api/version').then(d => {
 """
 
 # ---------------------------------------------------------------------------
+# Logo → HTML page builder
+# ---------------------------------------------------------------------------
+
+def _logo_data_uri():
+    """Return the logo as a base64 data URI, or '/logo' as a fallback URL.
+
+    Trying the base64 approach first ensures the logo always appears in the
+    browser without a separate HTTP round-trip, and works whether the WebUI
+    script is run directly from the repository or via the installed package.
+    """
+    data = get_logo_bytes()
+    if data:
+        return "data:image/png;base64," + base64.b64encode(data).decode()
+    return "/logo"
+
+
+def _build_html_page():
+    """Build the final HTML page, embedding the logo as a base64 data URI."""
+    return _HTML_TEMPLATE.replace("__LOGO__", _logo_data_uri())
+
+
+# HTML_PAGE is built after get_logo_bytes() is defined (see below).
+
+# ---------------------------------------------------------------------------
 # Config helpers
 # ---------------------------------------------------------------------------
 
@@ -1127,18 +1150,32 @@ def list_dir(path):
 # ---------------------------------------------------------------------------
 
 def get_logo_bytes():
-    """Return PNG logo bytes from the installed assets path."""
+    """Return PNG logo bytes, checking the installed path and the repo docs path.
+
+    The installed path (/usr/share/modernjvs/) is tried first.  When running
+    directly from the source repository (e.g. during development) the script
+    falls back to docs/modernjvs2.png two directory levels above this file.
+    """
+    # Resolve the script's real location so the fallback works even when the
+    # script is run via a symlink or from a different working directory.
+    _script_dir = os.path.dirname(os.path.abspath(__file__))
     candidates = [
         LOGO_PATH,
         "/usr/share/modernjvs/modernjvs2.png",
+        os.path.join(_script_dir, "..", "..", "docs", "modernjvs2.png"),
     ]
     for p in candidates:
         try:
-            with open(p, "rb") as f:
+            with open(os.path.normpath(p), "rb") as f:
                 return f.read()
         except OSError:
             pass
     return None
+
+
+# Build HTML_PAGE now that get_logo_bytes() is defined.
+# Done once at module load so every request serves the same cached bytes.
+HTML_PAGE = _build_html_page()
 
 
 # ---------------------------------------------------------------------------
