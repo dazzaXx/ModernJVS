@@ -117,4 +117,12 @@ endif()
 set(CPACK_GENERATOR "DEB")
 set(CPACK_DEBIAN_PACKAGE_MAINTAINER "dazzaXx")
 set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
+
+# Include the postrm maintainer script so dpkg can clean up runtime files
+# (webui-settings.json, webui-bg, webui-bg.mime) that are created after
+# installation and are therefore not tracked by dpkg.
+set(CPACK_DEBIAN_PACKAGE_CONTROL_EXTRA
+    "${CMAKE_SOURCE_DIR}/debian/postrm"
+)
+
 include(CPack)

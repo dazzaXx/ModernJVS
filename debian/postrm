@@ -1,0 +1,17 @@
+#!/bin/sh
+# postrm – invoked by dpkg after the package files have been removed.
+# Cleans up runtime-created files that dpkg does not track so that the
+# /etc/modernjvs directory is left empty and can be removed cleanly.
+set -e
+
+case "$1" in
+    remove|purge)
+        # Remove WebUI runtime state files created after installation.
+        rm -f /etc/modernjvs/webui-settings.json \
+              /etc/modernjvs/webui-bg \
+              /etc/modernjvs/webui-bg.mime
+
+        # Remove the directory itself if nothing else remains inside it.
+        rmdir /etc/modernjvs 2>/dev/null || true
+        ;;
+esac
