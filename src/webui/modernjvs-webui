@@ -183,6 +183,34 @@ HTML_PAGE = r"""<!DOCTYPE html>
   .stat-card .val { font-size: 1.4rem; font-weight: 700; color: var(--accent2); }
   .stat-card .lbl { font-size: 0.78rem; color: var(--muted); margin-top: 0.3rem; text-transform: uppercase; letter-spacing: 0.06em; }
 
+  /* --- usage / progress bars --- */
+  .usage-row { margin-bottom: 0.9rem; }
+  .usage-header { display: flex; justify-content: space-between; margin-bottom: 0.3rem; }
+  .usage-label { font-size: 0.82rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+  .usage-value { font-size: 0.82rem; color: var(--text); font-weight: 600; }
+  .progress { width: 100%; height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; }
+  .progress-bar { height: 100%; border-radius: 3px; background: var(--green); transition: width 0.5s ease, background 0.5s ease; }
+  .progress-bar.warm { background: var(--yellow); }
+  .progress-bar.hot  { background: var(--red); }
+  .sysinfo-footer { font-size: 0.78rem; color: var(--muted); margin-top: 0.25rem; }
+  .ip-info { font-size: 0.82rem; color: var(--muted); margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border); }
+  .ip-info span { color: var(--accent2); font-weight: 600; }
+
+  /* --- log filter bar --- */
+  .log-filter-bar { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
+  .log-filter-bar select, .log-filter-bar input[type="text"] {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: var(--text);
+    padding: 0.25rem 0.5rem;
+    font-family: var(--font);
+    font-size: 0.85rem;
+  }
+  .log-filter-bar input[type="text"] { width: 160px; }
+  .log-filter-bar input[type="text"]::placeholder { color: var(--muted); }
+  .btn-xs { padding: 0.25rem 0.6rem; font-size: 0.8rem; }
+
   /* --- alert --- */
   .alert {
     padding: 0.7rem 1rem;
@@ -240,6 +268,40 @@ HTML_PAGE = r"""<!DOCTYPE html>
         <div class="stat-card"><div class="val" id="currentGame">—</div><div class="lbl">Current Game</div></div>
         <div class="stat-card"><div class="val" id="currentDevice">—</div><div class="lbl">Device Path</div></div>
       </div>
+    </div>
+
+    <div class="card">
+      <h2>Pi System Usage <button class="btn btn-refresh btn-xs" onclick="refreshSysinfo()" style="margin-left:0.5rem;vertical-align:middle;">⟳</button></h2>
+      <div class="usage-row">
+        <div class="usage-header">
+          <span class="usage-label">CPU Usage</span>
+          <span class="usage-value" id="siCpu">—</span>
+        </div>
+        <div class="progress"><div class="progress-bar" id="siCpuBar" style="width:0%"></div></div>
+      </div>
+      <div class="usage-row">
+        <div class="usage-header">
+          <span class="usage-label">Memory</span>
+          <span class="usage-value" id="siMem">—</span>
+        </div>
+        <div class="progress"><div class="progress-bar" id="siMemBar" style="width:0%"></div></div>
+      </div>
+      <div class="usage-row">
+        <div class="usage-header">
+          <span class="usage-label">CPU Temperature</span>
+          <span class="usage-value" id="siTemp">—</span>
+        </div>
+        <div class="progress"><div class="progress-bar" id="siTempBar" style="width:0%"></div></div>
+      </div>
+      <div class="usage-row">
+        <div class="usage-header">
+          <span class="usage-label">Disk Usage (/)</span>
+          <span class="usage-value" id="siDisk">—</span>
+        </div>
+        <div class="progress"><div class="progress-bar" id="siDiskBar" style="width:0%"></div></div>
+      </div>
+      <div class="sysinfo-footer">Load Average: <span id="siLoad">—</span></div>
+      <div class="ip-info">Access WebUI from other devices: <span id="siIP">—</span></div>
     </div>
   </div>
 
@@ -335,6 +397,19 @@ HTML_PAGE = r"""<!DOCTYPE html>
           <input type="checkbox" id="scrollBottom" checked> Scroll to bottom
         </label>
       </div>
+      <div class="log-filter-bar" style="margin-bottom:0.75rem;">
+        <span style="font-size:0.82rem;color:var(--muted);">Filter:</span>
+        <select id="logFilter" onchange="applyLogFilter()">
+          <option value="all">All Messages</option>
+          <option value="errors">Errors &amp; Critical</option>
+          <option value="warnings">Warnings</option>
+          <option value="jvs">JVS Activity</option>
+          <option value="controllers">Controllers</option>
+          <option value="init">Initialization</option>
+        </select>
+        <input type="text" id="logSearch" placeholder="Search…" oninput="applyLogFilter()">
+        <button class="btn btn-refresh btn-xs" onclick="clearLogFilter()">✕ Clear</button>
+      </div>
       <div class="log-wrap" id="logBox"></div>
     </div>
 
@@ -385,12 +460,62 @@ async function refreshDashboard() {
   dot.className = 'dot ' + (running ? 'running' : 'stopped');
   txt.textContent = d.active_state || 'unknown';
 
-  document.getElementById('svcState').textContent  = d.active_state  || '—';
-  document.getElementById('svcPid').textContent    = d.main_pid      || '—';
-  document.getElementById('svcUptime').textContent = d.active_since  || '—';
-  document.getElementById('currentIO').textContent  = d.config?.emulate   || '—';
-  document.getElementById('currentGame').textContent= d.config?.game      || '—';
-  document.getElementById('currentDevice').textContent= d.config?.device  || '—';
+  document.getElementById('svcState').textContent    = d.active_state  || '—';
+  document.getElementById('svcPid').textContent      = d.main_pid      || '—';
+  document.getElementById('svcUptime').textContent   = d.active_since  || '—';
+  document.getElementById('currentIO').textContent   = d.config?.emulate  || '—';
+  document.getElementById('currentGame').textContent = d.config?.game     || '—';
+  document.getElementById('currentDevice').textContent = d.config?.device || '—';
+}
+
+async function refreshSysinfo() {
+  const d = await api('/api/sysinfo');
+  if (d.error) return;
+
+  // CPU
+  const cpuPct = d.cpu_pct ?? 0;
+  document.getElementById('siCpu').textContent = cpuPct.toFixed(1) + '%';
+  const cpuBar = document.getElementById('siCpuBar');
+  cpuBar.style.width = Math.min(100, cpuPct) + '%';
+  cpuBar.className = 'progress-bar' + (cpuPct > 80 ? ' hot' : cpuPct > 50 ? ' warm' : '');
+
+  // Memory
+  const memPct = d.mem_pct ?? 0;
+  document.getElementById('siMem').textContent =
+    (d.mem_used_mb ?? 0) + ' / ' + (d.mem_total_mb ?? 0) + ' MB (' + memPct.toFixed(0) + '%)';
+  const memBar = document.getElementById('siMemBar');
+  memBar.style.width = Math.min(100, memPct) + '%';
+  memBar.className = 'progress-bar' + (memPct > 80 ? ' hot' : memPct > 60 ? ' warm' : '');
+
+  // Temperature
+  const tempEl   = document.getElementById('siTemp');
+  const tempBar  = document.getElementById('siTempBar');
+  if (d.temp_c !== null && d.temp_c !== undefined) {
+    const t = d.temp_c;
+    tempEl.textContent = t.toFixed(1) + '\u00b0C';
+    const tempPct = Math.min(100, (t / 85) * 100);   // 85 °C = absolute max
+    tempBar.style.width = tempPct + '%';
+    tempBar.className = 'progress-bar' + (t > 70 ? ' hot' : t > 55 ? ' warm' : '');
+  } else {
+    tempEl.textContent = 'N/A';
+    tempBar.style.width = '0%';
+    tempBar.className = 'progress-bar';
+  }
+
+  // Disk
+  const diskPct = d.disk_pct ?? 0;
+  document.getElementById('siDisk').textContent =
+    (d.disk_used_gb ?? 0).toFixed(1) + ' / ' + (d.disk_total_gb ?? 0).toFixed(1) + ' GB (' + diskPct.toFixed(0) + '%)';
+  const diskBar = document.getElementById('siDiskBar');
+  diskBar.style.width = Math.min(100, diskPct) + '%';
+  diskBar.className = 'progress-bar' + (diskPct > 80 ? ' hot' : diskPct > 60 ? ' warm' : '');
+
+  // Load average & IP
+  document.getElementById('siLoad').textContent = d.load_avg || '—';
+  if (d.ip_addresses && d.ip_addresses.length) {
+    document.getElementById('siIP').textContent =
+      d.ip_addresses.map(ip => 'http://' + ip + ':8080').join('  |  ');
+  }
 }
 
 async function serviceAction(action) {
@@ -412,7 +537,6 @@ async function loadConfig() {
     api('/api/games')
   ]);
 
-  // Populate IO dropdown
   const ioSel = document.getElementById('cfgEmulate');
   ioSel.innerHTML = '';
   (iosData.ios || []).forEach(io => {
@@ -422,7 +546,6 @@ async function loadConfig() {
     ioSel.appendChild(o);
   });
 
-  // Populate game dropdown
   const gameSel = document.getElementById('cfgGame');
   gameSel.innerHTML = '';
   (gamesData.games || []).forEach(g => {
@@ -432,11 +555,11 @@ async function loadConfig() {
     gameSel.appendChild(o);
   });
 
-  document.getElementById('cfgDevice').value  = cfgData.device  || '/dev/ttyUSB0';
-  document.getElementById('cfgSense').value   = cfgData.sense_line_type  ?? '1';
-  document.getElementById('cfgPin').value     = cfgData.sense_line_pin   ?? '26';
-  document.getElementById('cfgDebug').value   = cfgData.debug_mode  ?? '0';
-  document.getElementById('cfgAutoCtrl').value = cfgData.auto_controller_detection ?? '1';
+  document.getElementById('cfgDevice').value    = cfgData.device  || '/dev/ttyUSB0';
+  document.getElementById('cfgSense').value     = cfgData.sense_line_type  ?? '1';
+  document.getElementById('cfgPin').value       = cfgData.sense_line_pin   ?? '26';
+  document.getElementById('cfgDebug').value     = cfgData.debug_mode  ?? '0';
+  document.getElementById('cfgAutoCtrl').value  = cfgData.auto_controller_detection ?? '1';
   document.getElementById('cfgDz1').value = cfgData.deadzone_p1 ?? '0.2';
   document.getElementById('cfgDz2').value = cfgData.deadzone_p2 ?? '0.2';
   document.getElementById('cfgDz3').value = cfgData.deadzone_p3 ?? '0.2';
@@ -463,11 +586,12 @@ async function saveConfig() {
     body: JSON.stringify(payload)
   });
   if (d.error) showAlert('cfgAlert', 'Error: ' + d.error, true);
-  else showAlert('cfgAlert', 'Configuration saved successfully. Restart the service to apply changes.', false);
+  else showAlert('cfgAlert', 'Configuration saved. Restart the service to apply changes.', false);
 }
 
 // ---- Monitor ----
 let autoRefreshTimer = null;
+let rawLogLines = [];   // cached raw lines for client-side filtering
 
 function toggleAutoRefresh() {
   if (document.getElementById('autoRefresh').checked) {
@@ -484,48 +608,78 @@ async function fetchLogs() {
   const box = document.getElementById('logBox');
   if (d.error) { box.textContent = 'Error: ' + d.error; return; }
 
+  rawLogLines = d.lines || [];
+  applyLogFilter();
+
+  // JVS activity pane – always shows JVS-specific lines from the raw set
+  const jvsBox = document.getElementById('jvsBox');
+  const jvsLines = rawLogLines.filter(l =>
+    /jvs|packet|checksum|cmd|emulat|address|sense|RS485/i.test(l));
+  renderLines(jvsBox, jvsLines, 'No JVS activity in current log window.', true);
+}
+
+function applyLogFilter() {
+  const filter = document.getElementById('logFilter').value;
+  const search = document.getElementById('logSearch').value.toLowerCase();
+
+  let lines = rawLogLines;
+  switch (filter) {
+    case 'errors':
+      lines = lines.filter(l => /error|critical|fail/i.test(l));
+      break;
+    case 'warnings':
+      lines = lines.filter(l => /warning|warn/i.test(l));
+      break;
+    case 'jvs':
+      lines = lines.filter(l => /jvs|packet|checksum|cmd|emulat|address|sense|RS485/i.test(l));
+      break;
+    case 'controllers':
+      lines = lines.filter(l => /controller|input|device|player|joystick|gamepad|wiimote/i.test(l));
+      break;
+    case 'init':
+      lines = lines.filter(l => /init|start|stop|reinit|watchdog|version|ModernJVS/i.test(l));
+      break;
+  }
+  if (search) {
+    lines = lines.filter(l => l.toLowerCase().includes(search));
+  }
+  renderLines(document.getElementById('logBox'), lines, 'No matching log entries.');
+}
+
+function renderLines(box, lines, emptyMsg, alwaysScroll) {
   box.innerHTML = '';
-  (d.lines || []).forEach(line => {
+  if (lines.length === 0) {
+    const div = document.createElement('div');
+    div.className = 'log-line log-info';
+    div.textContent = emptyMsg || 'No entries.';
+    box.appendChild(div);
+    return;
+  }
+  lines.forEach(line => {
     const div = document.createElement('div');
     div.className = 'log-line';
-    if (/error|critical|fail/i.test(line)) div.classList.add('log-err');
-    else if (/warning|warn/i.test(line))   div.classList.add('log-warn');
-    else div.classList.add('log-info');
+    if (/error|critical|fail/i.test(line))   div.classList.add('log-err');
+    else if (/warning|warn/i.test(line))     div.classList.add('log-warn');
+    else                                      div.classList.add('log-info');
     div.textContent = line;
     box.appendChild(div);
   });
-
-  if (document.getElementById('scrollBottom').checked) {
+  if (alwaysScroll || document.getElementById('scrollBottom').checked) {
     box.scrollTop = box.scrollHeight;
   }
+}
 
-  // JVS activity – filter for JVS-specific lines
-  const jvsBox = document.getElementById('jvsBox');
-  const jvsLines = (d.lines || []).filter(l =>
-    /jvs|packet|checksum|cmd|emulat|address|sense|RS485/i.test(l));
-  jvsBox.innerHTML = '';
-  if (jvsLines.length === 0) {
-    const div = document.createElement('div');
-    div.className = 'log-line log-info';
-    div.textContent = 'No JVS activity in current log window.';
-    jvsBox.appendChild(div);
-  } else {
-    jvsLines.forEach(line => {
-      const div = document.createElement('div');
-      div.className = 'log-line';
-      if (/error|critical|fail/i.test(line)) div.classList.add('log-err');
-      else if (/warning|warn/i.test(line))   div.classList.add('log-warn');
-      else div.classList.add('log-info');
-      div.textContent = line;
-      jvsBox.appendChild(div);
-    });
-    jvsBox.scrollTop = jvsBox.scrollHeight;
-  }
+function clearLogFilter() {
+  document.getElementById('logSearch').value = '';
+  document.getElementById('logFilter').value = 'all';
+  applyLogFilter();
 }
 
 // ---- Init ----
 refreshDashboard();
+refreshSysinfo();
 setInterval(refreshDashboard, 10000);
+setInterval(refreshSysinfo, 5000);
 </script>
 </body>
 </html>
@@ -666,16 +820,161 @@ def get_service_status():
 
 
 def get_logs(lines=100):
-    """Return recent journalctl log lines for the service."""
+    """Return recent log lines for the modernjvs service.
+
+    Tries journalctl first (works on Raspberry Pi OS and DietPi with journald).
+    Falls back to grepping syslog files on systems without a persistent journal
+    (e.g. DietPi configured with volatile-only journald or syslog-only logging).
+    """
+    lines_str = str(int(lines))
+
+    # Primary: journalctl (systemd journal – works on RPiOS and most DietPi setups)
     try:
         result = subprocess.run(
-            ["journalctl", "-u", SERVICE_NAME, "-n", str(int(lines)),
+            ["journalctl", "-u", SERVICE_NAME, "-n", lines_str,
              "--no-pager", "--output=short-iso"],
             capture_output=True, text=True, timeout=15
         )
-        return result.stdout.splitlines()
-    except Exception as e:
-        return [f"Error reading logs: {e}"]
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.splitlines()
+    except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
+        pass
+
+    # Fallback: grep system syslog files (DietPi with syslog / no journald persistence)
+    syslog_paths = [
+        "/var/log/syslog",
+        "/var/log/daemon.log",
+        "/var/log/messages",
+    ]
+    for path in syslog_paths:
+        try:
+            result = subprocess.run(
+                ["grep", "-i", SERVICE_NAME, path],
+                capture_output=True, text=True, timeout=10
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                log_lines = result.stdout.splitlines()
+                return log_lines[-int(lines):]
+        except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
+            continue
+
+    return [f"No log source found. Run:  journalctl -u {SERVICE_NAME}  to check manually."]
+
+
+# Module-level CPU sampling state for delta calculation between API calls
+_cpu_prev = None   # (total_jiffies, idle_jiffies)
+
+
+def get_sysinfo():
+    """Return system resource stats using /proc and /sys (no external deps).
+
+    Works on Raspberry Pi OS, DietPi, and any Linux with standard /proc/sys.
+    """
+    global _cpu_prev
+
+    # --- CPU usage (delta between consecutive calls) ---
+    cpu_pct = 0.0
+    try:
+        with open("/proc/stat") as f:
+            line = f.readline()
+        fields = [int(x) for x in line.split()[1:]]
+        # fields: user nice system idle iowait irq softirq steal guest guest_nice
+        idle  = fields[3] + (fields[4] if len(fields) > 4 else 0)  # idle + iowait
+        total = sum(fields)
+        if _cpu_prev is not None:
+            prev_total, prev_idle = _cpu_prev
+            dt = total - prev_total
+            di = idle - prev_idle
+            if dt > 0:
+                cpu_pct = round(max(0.0, min(100.0, 100.0 * (1.0 - di / dt))), 1)
+        _cpu_prev = (total, idle)
+    except Exception:
+        pass
+
+    # --- Memory ---
+    mem_used_mb = mem_total_mb = 0
+    mem_pct = 0.0
+    try:
+        meminfo = {}
+        with open("/proc/meminfo") as f:
+            for line in f:
+                parts = line.split()
+                if len(parts) >= 2:
+                    meminfo[parts[0].rstrip(":")] = int(parts[1])
+        mem_total_kb     = meminfo.get("MemTotal", 0)
+        mem_available_kb = meminfo.get("MemAvailable", meminfo.get("MemFree", 0))
+        mem_used_mb  = (mem_total_kb - mem_available_kb) // 1024
+        mem_total_mb = mem_total_kb // 1024
+        if mem_total_kb > 0:
+            mem_pct = round(100.0 * (mem_total_kb - mem_available_kb) / mem_total_kb, 1)
+    except Exception:
+        pass
+
+    # --- CPU temperature (Raspberry Pi & DietPi use thermal_zone0) ---
+    temp_c = None
+    for tz_path in (
+        "/sys/class/thermal/thermal_zone0/temp",
+        "/sys/class/thermal/thermal_zone1/temp",
+    ):
+        try:
+            with open(tz_path) as f:
+                temp_c = round(int(f.read().strip()) / 1000.0, 1)
+            break
+        except Exception:
+            continue
+
+    # --- Disk usage (root filesystem) ---
+    disk_used_gb = disk_total_gb = 0.0
+    disk_pct = 0.0
+    try:
+        st = os.statvfs("/")
+        disk_total = st.f_blocks * st.f_frsize
+        disk_free  = st.f_bavail * st.f_frsize
+        disk_used  = disk_total - disk_free
+        disk_total_gb = round(disk_total / 1e9, 1)
+        disk_used_gb  = round(disk_used  / 1e9, 1)
+        if disk_total > 0:
+            disk_pct = round(100.0 * disk_used / disk_total, 1)
+    except Exception:
+        pass
+
+    # --- Load average ---
+    load_avg = ""
+    try:
+        with open("/proc/loadavg") as f:
+            parts = f.read().split()
+            load_avg = " ".join(parts[:3])
+    except Exception:
+        pass
+
+    # --- Local IP addresses (LAN IPs only, no loopback) ---
+    ip_addresses = []
+    try:
+        result = subprocess.run(
+            ["hostname", "-I"],
+            capture_output=True, text=True, timeout=5
+        )
+        if result.returncode == 0:
+            ip_addresses = [
+                ip for ip in result.stdout.split()
+                if not ip.startswith("127.") and not ip.startswith("::1")
+                and ":" not in ip               # skip IPv6
+            ]
+    except Exception:
+        pass
+
+    return {
+        "cpu_pct":      cpu_pct,
+        "mem_used_mb":  mem_used_mb,
+        "mem_total_mb": mem_total_mb,
+        "mem_pct":      mem_pct,
+        "temp_c":       temp_c,
+        "disk_used_gb": disk_used_gb,
+        "disk_total_gb":disk_total_gb,
+        "disk_pct":     disk_pct,
+        "load_avg":     load_avg,
+        "ip_addresses": ip_addresses,
+    }
 
 
 def list_dir(path):
@@ -733,6 +1032,8 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
             self._json(get_service_status())
         elif path == "/api/config":
             self._json(config_to_api(read_config()))
+        elif path == "/api/sysinfo":
+            self._json(get_sysinfo())
         elif path == "/api/logs":
             try:
                 lines = int(query.get("lines", ["100"])[0])

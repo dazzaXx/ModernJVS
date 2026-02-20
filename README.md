@@ -68,7 +68,7 @@ sudo make install
 If using DietPi:
 
 ```
-sudo apt install -y build-essential cmake git file libgpiod-dev pkg-config
+sudo apt install -y build-essential cmake git file libgpiod-dev pkg-config python3
 git clone https://github.com/dazzaXx/ModernJVS
 sudo make install
 ```
@@ -124,13 +124,13 @@ A 1KOhm resistor or 4 signal diodes are known to work properly, the purpose of t
 
 ## WebUI
 
-ModernJVS ships with a built-in web interface that you can access from any device on your local network.
+ModernJVS ships with a built-in web interface that you can access from any device on your local network. It works on both **Raspberry Pi OS** and **DietPi**.
 
 ### Features
 
-- **Dashboard** – view service status (running/stopped), PID, uptime, and the current I/O board / game profile at a glance. Start, stop, and restart the service with a single click.
-- **Configuration** – change the emulated I/O board, game profile, device path, sense line settings, debug mode, and per-player analog deadzones without touching a text editor. Changes are saved to `/etc/modernjvs/config` immediately.
-- **Monitor & Logs** – live log viewer with auto-refresh that tails `journalctl`. A dedicated **JVS Activity** pane filters the log to show only JVS-related events (packets, checksums, commands, addressing, etc.).
+- **Dashboard** – live service status with animated indicator (running/stopped), PID, uptime, current I/O board / game / device path, Start / Stop / Restart buttons. Includes a **Pi System Usage** panel showing real-time CPU %, memory, CPU temperature, disk usage (with colour-coded progress bars) and load average. Local IP addresses are shown so you always know the URL to use from another device.
+- **Configuration** – all key settings in a clean form: I/O board and game dropdowns (auto-populated from installed files), device path, sense line type and GPIO pin, debug mode, auto controller detection, and per-player analog deadzone. Saved directly to `/etc/modernjvs/config` with comments preserved.
+- **Monitor & Logs** – live log tail (journalctl on Raspberry Pi OS / DietPi, with automatic fallback to syslog files if journald is not available). Features a **category filter dropdown** (All / Errors & Critical / Warnings / JVS Activity / Controllers / Initialization), a **live text search box**, auto-refresh every 5 s, configurable line count, and a dedicated **JVS Activity** pane.
 
 ### Starting the WebUI
 
