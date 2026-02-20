@@ -38,12 +38,13 @@ WEBUI_BG_PATH       = "/etc/modernjvs/webui-bg"
 WEBUI_BG_MIME_PATH  = "/etc/modernjvs/webui-bg.mime"
 
 _SETTINGS_DEFAULTS = {
-    "theme":   "dark",
-    "accent":  "#e05555",
-    "font":    "system",
-    "bgColor": "#0d0d14",
-    "compact": False,
-    "noAnim":  False,
+    "theme":          "dark",
+    "accent":         "#e05555",
+    "font":           "system",
+    "bgColor":        "#0d0d14",
+    "compact":        False,
+    "noAnim":         False,
+    "bgScrimOpacity": 0.45,   # 0.0 = no overlay, 0.9 = near-black overlay
 }
 
 _settings_lock = threading.Lock()
@@ -70,6 +71,9 @@ def write_webui_settings(settings):
         try:
             if isinstance(default, bool):
                 cleaned[key] = bool(val)
+            elif isinstance(default, float):
+                # Clamp float settings to [0.0, 1.0] (covers bgScrimOpacity)
+                cleaned[key] = max(0.0, min(1.0, float(val)))
             elif isinstance(default, str):
                 cleaned[key] = str(val)[:MAX_SETTING_STRING_LENGTH]
             else:
@@ -200,7 +204,8 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
   .dot.stopped { background: var(--red); }
 
   /* --- layout --- */
-  .container { max-width: 1100px; margin: 0 auto; padding: 1.5rem; }
+  .container { max-width: 1100px; margin: 0 auto; padding: 1.5rem; position: relative; z-index: 2; }
+  footer { text-align: center; color: var(--muted); font-size: 0.78rem; padding: 1.5rem; position: relative; z-index: 2; }
 
   /* --- tabs --- */
   .tabs { display: flex; gap: 0.25rem; margin-bottom: 1.5rem; border-bottom: 2px solid var(--border); }
@@ -364,7 +369,6 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
   .alert.err { background: rgba(255,85,85,0.12);  border: 1px solid var(--red);   color: var(--red);   display: block; }
 
   /* --- footer --- */
-  footer { text-align: center; color: var(--muted); font-size: 0.78rem; padding: 1.5rem; }
   footer a { color: var(--accent); text-decoration: none; }
 
   /* ================================================================
@@ -417,6 +421,14 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
     --accent:  #50fa7b;
     --accent2: #69ff47;
   }
+  [data-theme="black"] {
+    --bg:      #000000;
+    --surface: #0a0a0a;
+    --card:    #111111;
+    --border:  #1f1f1f;
+    --text:    #e2e2f0;
+    --muted:   #888888;
+  }
 
   /* ---- compact mode ---- */
   body.compact .card { padding: 0.85rem 1rem; }
@@ -430,6 +442,20 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
   body.no-anim *, body.no-anim *::before, body.no-anim *::after {
     transition: none !important;
     animation: none !important;
+  }
+
+  /* ---- background image scrim ----
+     When a background image is active, a semi-transparent dark overlay is
+     painted above the image (z-index:1) but below all content (z-index:2).
+     Opacity is controlled by --bg-scrim-opacity (set via JS from settings). */
+  :root { --bg-scrim-opacity: 0.45; }
+  body.has-bg-image::after {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, var(--bg-scrim-opacity));
+    z-index: 1;
+    pointer-events: none;
   }
 
   /* ---- settings panel ---- */
@@ -547,14 +573,6 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
         <button class="btn btn-restart" onclick="serviceAction('restart')">↺ Restart</button>
         <button class="btn btn-refresh" onclick="refreshDashboard()">⟳ Refresh Status</button>
       </div>
-    </div>
-
-    <div class="card">
-      <h2>WebUI</h2>
-      <div class="control-row">
-        <button class="btn btn-restart" onclick="restartWebUI()">↺ Restart WebUI</button>
-      </div>
-      <div id="webuiRestartMsg" style="display:none;margin-top:0.75rem;font-size:0.88rem;color:var(--muted)"></div>
     </div>
 
     <div class="card">
@@ -744,6 +762,7 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
             <div class="swatch" data-theme="midnight" title="Midnight Blue"  style="background:#111c38"></div>
             <div class="swatch" data-theme="dracula"  title="Dracula"        style="background:#282a36"></div>
             <div class="swatch" data-theme="terminal" title="Green Terminal" style="background:#0a0f0a"></div>
+            <div class="swatch" data-theme="black"    title="Pure Black"     style="background:#000000;border:1px solid #444"></div>
           </div>
           <div class="settings-preview" id="themePreviewLabel">Current: Dark (default)</div>
         </div>
@@ -794,6 +813,14 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
           </div>
           <div class="settings-preview">Leave empty to use the solid colour above</div>
         </div>
+        <div class="settings-field">
+          <label>Background Overlay Darkness</label>
+          <div style="display:flex;align-items:center;gap:0.75rem;">
+            <input type="range" id="stBgScrim" min="0" max="0.9" step="0.05" value="__BG_SCRIM_DEFAULT__" style="flex:1;">
+            <span id="stBgScrimVal" style="min-width:2.5rem;text-align:right;font-size:0.85rem;">45%</span>
+          </div>
+          <div class="settings-preview">Semi-transparent overlay to keep text readable over bright images (0 = none)</div>
+        </div>
       </div>
     </div>
 
@@ -815,6 +842,14 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
           </div>
         </div>
       </div>
+    </div>
+
+    <div class="card">
+      <h2>WebUI Process</h2>
+      <div class="control-row">
+        <button class="btn btn-restart" onclick="restartWebUI()">↺ Restart WebUI</button>
+      </div>
+      <div id="webuiRestartMsg" style="display:none;margin-top:0.75rem;font-size:0.88rem;color:var(--muted)"></div>
     </div>
 
     <div class="control-row">
@@ -1122,6 +1157,7 @@ const THEME_NAMES = {
   midnight: 'Midnight Blue',
   dracula:  'Dracula',
   terminal: 'Green Terminal',
+  black:    'Pure Black',
 };
 
 const FONT_MAP = {
@@ -1173,6 +1209,10 @@ function applyAppearanceSettings(s) {
 
   // No animations
   document.body.classList.toggle('no-anim', !!s.noAnim);
+
+  // Background overlay (scrim) opacity
+  const scrim = (typeof s.bgScrimOpacity === 'number') ? s.bgScrimOpacity : 0.45;
+  document.documentElement.style.setProperty('--bg-scrim-opacity', scrim);
 }
 
 // Apply the server-stored background image (if any) to the page body.
@@ -1183,10 +1223,12 @@ function applyServerBg() {
       document.body.style.backgroundImage = 'url(/api/bg?t=' + Date.now() + ')';
       document.body.style.backgroundSize  = 'cover';
       document.body.style.backgroundAttachment = 'fixed';
+      document.body.classList.add('has-bg-image');
     } else {
       document.body.style.backgroundImage = '';
       document.body.style.backgroundSize  = '';
       document.body.style.backgroundAttachment = '';
+      document.body.classList.remove('has-bg-image');
     }
   });
 }
@@ -1270,6 +1312,18 @@ async function initAppearancePanel() {
   document.getElementById('stCompact').checked = !!d.compact;
   document.getElementById('stNoAnim').checked  = !!d.noAnim;
 
+  // Scrim slider – live preview of opacity value
+  const scrimVal = (typeof d.bgScrimOpacity === 'number') ? d.bgScrimOpacity : 0.45;
+  const scrimEl  = document.getElementById('stBgScrim');
+  const scrimLbl = document.getElementById('stBgScrimVal');
+  scrimEl.value  = scrimVal;
+  scrimLbl.textContent = Math.round(scrimVal * 100) + '%';
+  scrimEl.oninput = () => {
+    const v = parseFloat(scrimEl.value);
+    scrimLbl.textContent = Math.round(v * 100) + '%';
+    document.documentElement.style.setProperty('--bg-scrim-opacity', v);
+  };
+
   // Show thumbnail if a background image is stored on the server
   const bg = await api('/api/bg/status');
   if (bg.hasImage) {
@@ -1283,12 +1337,13 @@ async function initAppearancePanel() {
 async function saveAppearanceSettings() {
   const activeSwatch = document.querySelector('.swatch.active');
   const s = {
-    theme:   activeSwatch ? activeSwatch.dataset.theme : 'dark',
-    accent:  document.getElementById('stAccent').value,
-    font:    document.getElementById('stFont').value,
-    bgColor: document.getElementById('stBgColor').value,
-    compact: document.getElementById('stCompact').checked,
-    noAnim:  document.getElementById('stNoAnim').checked,
+    theme:          activeSwatch ? activeSwatch.dataset.theme : 'dark',
+    accent:         document.getElementById('stAccent').value,
+    font:           document.getElementById('stFont').value,
+    bgColor:        document.getElementById('stBgColor').value,
+    compact:        document.getElementById('stCompact').checked,
+    noAnim:         document.getElementById('stNoAnim').checked,
+    bgScrimOpacity: parseFloat(document.getElementById('stBgScrim').value),
   };
   const d = await api('/api/webui/settings', {
     method: 'POST',
@@ -1304,7 +1359,8 @@ async function saveAppearanceSettings() {
 
 async function resetAppearanceSettings() {
   const defaults = {theme:'dark', accent:'#e05555', font:'system',
-                    bgColor:'#0d0d14', compact:false, noAnim:false};
+                    bgColor:'#0d0d14', compact:false, noAnim:false,
+                    bgScrimOpacity:0.45};
   await api('/api/webui/settings', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
@@ -1316,15 +1372,13 @@ async function resetAppearanceSettings() {
 }
 
 // ---- Restart WebUI ----
-async function restartWebUI() {
+function restartWebUI() {
   const msg = document.getElementById('webuiRestartMsg');
   msg.style.display = 'block';
-  msg.textContent = 'Restarting WebUI…';
-  const d = await api('/api/webui/restart', {method: 'POST'});
-  if (d.error) {
-    msg.textContent = 'Error: ' + d.error;
-    return;
-  }
+  // Fire-and-forget: the server schedules the restart after flushing the
+  // response, but it may still die before we receive it.  Either way, start
+  // the countdown immediately so the page reloads once the service is back up.
+  fetch('/api/webui/restart', {method: 'POST'}).catch(() => {});
   let secs = WEBUI_RESTART_WAIT_SECS;
   const tick = () => {
     msg.textContent = 'WebUI restarting — reconnecting in ' + secs + 's…';
@@ -1378,7 +1432,11 @@ def _logo_data_uri():
 
 def _build_html_page():
     """Build the final HTML page, embedding the logo as a base64 data URI."""
-    return _HTML_TEMPLATE.replace("__LOGO__", _logo_data_uri())
+    return (
+        _HTML_TEMPLATE
+        .replace("__LOGO__", _logo_data_uri())
+        .replace("__BG_SCRIM_DEFAULT__", str(_SETTINGS_DEFAULTS["bgScrimOpacity"]))
+    )
 
 
 # HTML_PAGE is built after get_logo_bytes() is defined (see below).
@@ -1906,11 +1964,15 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
                 self._json({"error": msg}, HTTPStatus.INTERNAL_SERVER_ERROR)
 
         elif path == "/api/webui/restart":
-            ok, msg = systemctl("restart", WEBUI_SERVICE_NAME)
-            if ok:
-                self._json({"ok": True})
-            else:
-                self._json({"error": msg}, HTTPStatus.INTERNAL_SERVER_ERROR)
+            # Send the response BEFORE restarting — systemctl kills this
+            # process immediately, so schedule it on a short timer so the
+            # HTTP response can be flushed first.
+            def _do_restart():
+                ok, msg = systemctl("restart", WEBUI_SERVICE_NAME)
+                if not ok:
+                    print(f"[webui] WARNING: WebUI restart failed: {msg}", flush=True)
+            threading.Timer(0.5, _do_restart).start()
+            self._json({"ok": True})
 
         elif path == "/api/webui/settings":
             try:
