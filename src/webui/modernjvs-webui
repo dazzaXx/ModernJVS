@@ -4,6 +4,7 @@
 # Requires Python 3.6+ (stdlib only, no pip dependencies).
 
 import http.server
+import glob as _glob
 import ipaddress
 import json
 import os
@@ -1165,7 +1166,6 @@ def get_version():
 
 def get_input_devices():
     """Return list of connected /dev/input/event* devices with sysfs names."""
-    import glob as _glob
     devices = []
     try:
         for event_path in sorted(_glob.glob("/dev/input/event*")):
@@ -1178,11 +1178,9 @@ def get_input_devices():
             except OSError:
                 pass
             devices.append({"event": event_name, "name": name, "path": event_path})
-    except Exception:
+    except OSError:
         pass
     return devices
-
-
 
 
 class WebUIHandler(http.server.BaseHTTPRequestHandler):
