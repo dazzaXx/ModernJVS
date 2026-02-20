@@ -423,6 +423,10 @@ HTML_PAGE = r"""<!DOCTYPE html>
 <footer>ModernJVS WebUI &mdash; <a href="https://github.com/dazzaXx/ModernJVS" target="_blank">github.com/dazzaXx/ModernJVS</a></footer>
 
 <script>
+// ---- Constants ----
+// Temperature scale reference: Pi throttles at ~80 °C, absolute hardware max ~85 °C
+const MAX_TEMP_C = 85;
+
 // ---- Tab navigation ----
 function showTab(name, btn) {
   document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
@@ -493,7 +497,7 @@ async function refreshSysinfo() {
   if (d.temp_c !== null && d.temp_c !== undefined) {
     const t = d.temp_c;
     tempEl.textContent = t.toFixed(1) + '\u00b0C';
-    const tempPct = Math.min(100, (t / 85) * 100);   // 85 °C = absolute max
+    const tempPct = Math.min(100, (t / MAX_TEMP_C) * 100);
     tempBar.style.width = tempPct + '%';
     tempBar.className = 'progress-bar' + (t > 70 ? ' hot' : t > 55 ? ' warm' : '');
   } else {
@@ -675,7 +679,6 @@ function clearLogFilter() {
   applyLogFilter();
 }
 
-// ---- Init ----
 refreshDashboard();
 refreshSysinfo();
 setInterval(refreshDashboard, 10000);
@@ -826,7 +829,8 @@ def get_logs(lines=100):
     Falls back to grepping syslog files on systems without a persistent journal
     (e.g. DietPi configured with volatile-only journald or syslog-only logging).
     """
-    lines_str = str(int(lines))
+    lines_count = int(lines)
+    lines_str = str(lines_count)
 
     # Primary: journalctl (systemd journal – works on RPiOS and most DietPi setups)
     try:
@@ -854,7 +858,7 @@ def get_logs(lines=100):
             )
             if result.returncode == 0 and result.stdout.strip():
                 log_lines = result.stdout.splitlines()
-                return log_lines[-int(lines):]
+                return log_lines[-lines_count:]
         except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
             continue
 

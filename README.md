@@ -65,6 +65,8 @@ git clone https://github.com/dazzaXx/ModernJVS
 sudo make install
 ```
 
+> **Note:** The WebUI is included by default and requires Python 3. Raspberry Pi OS Lite includes Python 3 out of the box, so no extra step is needed.
+
 If using DietPi:
 
 ```
@@ -75,19 +77,19 @@ sudo make install
 
 ### Installing without the WebUI
 
-If you don't want the WebUI installed (e.g. on a minimal headless system), use either of these equivalent methods:
+If you don't want the WebUI installed (e.g. on a minimal headless system), the recommended method is:
 
 ```
 sudo make install-no-webui
 ```
 
-or:
+This target always reconfigures cmake with `-DENABLE_WEBUI=OFF` before building, so it works correctly regardless of whether a build directory already exists.
+
+Alternatively, on a **fresh checkout** (or after `sudo make clean`), you can pass the flag explicitly:
 
 ```
 sudo make install WEBUI=OFF
 ```
-
-The `WEBUI=OFF` flag must be used on a fresh build directory. If you have already built with the default settings, run `sudo make clean` first.
 
 ## Supported Hardware
 
