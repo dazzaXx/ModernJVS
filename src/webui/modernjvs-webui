@@ -729,7 +729,6 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
           <option value="warnings">Warnings</option>
           <option value="jvs" selected>JVS Activity</option>
           <option value="controllers">Controllers</option>
-          <option value="init">Initialization</option>
         </select>
         <input type="text" id="logSearch" placeholder="Search…" oninput="applyJvsFilter()">
         <button class="btn btn-refresh btn-xs" onclick="clearLogFilter()">✕ Clear</button>
@@ -1107,10 +1106,6 @@ function applyJvsFilter() {
       break;
     case 'controllers':
       lines = lines.filter(l => /controller|input|device|player|joystick|gamepad|wiimote/i.test(l));
-      break;
-    case 'init':
-      // Initialisation messages but NOT CMD_ packet lines (those belong in JVS Activity)
-      lines = lines.filter(l => /init|start|stop|reinit|watchdog|version|ModernJVS/i.test(l) && !/CMD_/.test(l));
       break;
   }
   if (search) {
