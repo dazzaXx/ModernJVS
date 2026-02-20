@@ -22,6 +22,14 @@ GAMES_PATH = "/etc/modernjvs/games"
 DEVICES_PATH = "/etc/modernjvs/devices"
 LOGO_PATH = "/usr/share/modernjvs/modernjvs2.png"
 SERVICE_NAME = "modernjvs"
+WEBUI_SERVICE_NAME = "modernjvs-webui"
+
+# Background image upload limits
+MAX_UPLOAD_BYTES = 5 * 1024 * 1024          # 5 MB hard cap
+ALLOWED_IMAGE_MIMES = {
+    "image/jpeg", "image/png", "image/gif",
+    "image/webp", "image/svg+xml", "image/bmp",
+}
 
 # ---------------------------------------------------------------------------
 # Internet access protection – only allow private / local-network addresses.
@@ -380,8 +388,7 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
   .settings-field { display: flex; flex-direction: column; gap: 0.35rem; }
   .settings-field label { font-size: 0.82rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
   .settings-field select,
-  .settings-field input[type="text"],
-  .settings-field input[type="url"] {
+  .settings-field input[type="text"] {
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: 4px;
@@ -399,6 +406,41 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
     cursor: pointer;
     padding: 2px 4px;
   }
+  /* --- background image upload area --- */
+  .bg-upload-area {
+    border: 2px dashed var(--border);
+    border-radius: var(--radius);
+    padding: 1.2rem 1rem;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color 0.2s, background 0.2s;
+    position: relative;
+    overflow: hidden;
+  }
+  .bg-upload-area:hover, .bg-upload-area.dragover {
+    border-color: var(--accent);
+    background: rgba(255,255,255,0.03);
+  }
+  .bg-upload-area input[type="file"] {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    opacity: 0; cursor: pointer;
+  }
+  .bg-upload-icon { font-size: 1.8rem; margin-bottom: 0.3rem; }
+  .bg-upload-label { font-size: 0.85rem; color: var(--muted); }
+  .bg-preview {
+    margin-top: 0.75rem;
+    display: none;
+    align-items: center;
+    gap: 0.75rem;
+  }
+  .bg-preview.visible { display: flex; }
+  .bg-preview img {
+    width: 80px; height: 52px;
+    object-fit: cover;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+  }
+  .bg-preview-info { font-size: 0.82rem; color: var(--text); }
   .settings-toggle { display: flex; align-items: center; gap: 0.6rem; margin-top: 0.15rem; }
   .settings-toggle input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; }
   .settings-toggle span { font-size: 0.88rem; color: var(--text); }
@@ -436,7 +478,7 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
     <button class="tab" onclick="showTab('config', this)">Configuration</button>
     <button class="tab" onclick="showTab('monitor', this)">Monitor &amp; Logs</button>
     <button class="tab" onclick="showTab('devices', this)">Devices</button>
-    <button class="tab" onclick="showTab('appearance', this)">&#9881; Appearance</button>
+    <button class="tab" onclick="showTab('appearance', this)">&#9881; WebUI Settings</button>
   </div>
 
   <!-- ====== DASHBOARD ====== -->
@@ -451,6 +493,14 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
         <button class="btn btn-restart" onclick="serviceAction('restart')">↺ Restart</button>
         <button class="btn btn-refresh" onclick="refreshDashboard()">⟳ Refresh Status</button>
       </div>
+    </div>
+
+    <div class="card">
+      <h2>WebUI</h2>
+      <div class="control-row">
+        <button class="btn btn-restart" onclick="restartWebUI()">↺ Restart WebUI</button>
+      </div>
+      <div id="webuiRestartMsg" style="display:none;margin-top:0.75rem;font-size:0.88rem;color:var(--muted)"></div>
     </div>
 
     <div class="card">
@@ -675,8 +725,19 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
           <div class="settings-preview">Overrides the theme background colour</div>
         </div>
         <div class="settings-field">
-          <label>Background Image URL</label>
-          <input type="url" id="stBgImage" placeholder="https://example.com/image.jpg">
+          <label>Background Image</label>
+          <div class="bg-upload-area" id="bgUploadArea">
+            <input type="file" id="stBgFile" accept="image/*" onchange="onBgFileChosen(this)">
+            <div class="bg-upload-icon">&#128444;</div>
+            <div class="bg-upload-label">Click or drag an image here<br><span style="font-size:0.75rem">JPEG, PNG, GIF, WebP, SVG · max 5 MB</span></div>
+          </div>
+          <div class="bg-preview" id="bgPreview">
+            <img id="bgPreviewImg" src="" alt="preview">
+            <div>
+              <div class="bg-preview-info" id="bgPreviewName"></div>
+              <button class="btn btn-refresh btn-xs" style="margin-top:0.4rem;" onclick="clearBgImage()">✕ Clear Image</button>
+            </div>
+          </div>
           <div class="settings-preview">Leave empty to use the solid colour above</div>
         </div>
       </div>
@@ -1050,12 +1111,10 @@ function applyAppearanceSettings(s) {
     document.body.style.backgroundColor = '';
   }
 
-  // Background image – only accept http/https URLs to prevent CSS injection
+  // Background image – stored as a base64 data URI (set via file upload)
   const rawImg = (s.bgImage || '').trim();
-  if (rawImg && /^https?:\/\//i.test(rawImg)) {
-    // encodeURI to handle spaces/special chars; strip any embedded quotes/parens
-    const safeImg = encodeURI(rawImg.replace(/['"()]/g, ''));
-    document.body.style.backgroundImage = 'url(' + safeImg + ')';
+  if (rawImg && rawImg.startsWith('data:image/')) {
+    document.body.style.backgroundImage = 'url(' + rawImg + ')';
     document.body.style.backgroundSize  = 'cover';
     document.body.style.backgroundAttachment = 'fixed';
   } else {
@@ -1091,9 +1150,15 @@ function initAppearancePanel() {
   document.getElementById('stAccent').value  = s.accent   || '#e05555';
   document.getElementById('stFont').value    = s.font     || 'system';
   document.getElementById('stBgColor').value = s.bgColor  || '#0d0d14';
-  document.getElementById('stBgImage').value = s.bgImage  || '';
   document.getElementById('stCompact').checked = !!s.compact;
   document.getElementById('stNoAnim').checked  = !!s.noAnim;
+
+  // Restore bg image preview if one is saved
+  if (s.bgImage && s.bgImage.startsWith('data:image/')) {
+    _showBgPreview(s.bgImage, 'Saved background image');
+  } else {
+    _hideBgPreview();
+  }
 }
 
 function saveAppearanceSettings() {
@@ -1661,6 +1726,16 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
             else:
                 self._json({"error": msg}, HTTPStatus.INTERNAL_SERVER_ERROR)
 
+        elif path == "/api/webui/restart":
+            ok, msg = systemctl("restart", WEBUI_SERVICE_NAME)
+            if ok:
+                self._json({"ok": True})
+            else:
+                self._json({"error": msg}, HTTPStatus.INTERNAL_SERVER_ERROR)
+
+        elif path == "/api/bg/upload":
+            self._handle_bg_upload()
+
         else:
             self._not_found()
 
@@ -1669,6 +1744,31 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
     def _read_body(self):
         length = int(self.headers.get("Content-Length", 0))
         return self.rfile.read(length).decode("utf-8") if length else ""
+
+    def _read_raw_body(self):
+        """Read the raw request body as bytes (for binary uploads)."""
+        length = int(self.headers.get("Content-Length", 0))
+        return self.rfile.read(length) if length else b""
+
+    def _handle_bg_upload(self):
+        """Accept a background image upload; return its base64 data URI."""
+        content_type = self.headers.get("Content-Type", "").split(";")[0].strip().lower()
+        if content_type not in ALLOWED_IMAGE_MIMES:
+            self._json({"error": "Only image files are accepted."}, HTTPStatus.BAD_REQUEST)
+            return
+        content_length = int(self.headers.get("Content-Length", 0))
+        if content_length > MAX_UPLOAD_BYTES:
+            self._json(
+                {"error": f"File too large. Maximum size is {MAX_UPLOAD_BYTES // (1024*1024)} MB."},
+                HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
+            )
+            return
+        raw = self.rfile.read(content_length) if content_length else b""
+        if not raw:
+            self._json({"error": "Empty upload."}, HTTPStatus.BAD_REQUEST)
+            return
+        data_uri = f"data:{content_type};base64," + base64.b64encode(raw).decode()
+        self._json({"dataUri": data_uri})
 
     def _send_html(self, html):
         data = html.encode("utf-8")
