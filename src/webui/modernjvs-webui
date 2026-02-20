@@ -31,6 +31,59 @@ ALLOWED_IMAGE_MIMES = {
     "image/webp", "image/svg+xml", "image/bmp",
 }
 
+# Server-side WebUI settings persistence
+WEBUI_SETTINGS_PATH = "/etc/modernjvs/webui-settings.json"
+WEBUI_BG_PATH       = "/etc/modernjvs/webui-bg"
+WEBUI_BG_MIME_PATH  = "/etc/modernjvs/webui-bg.mime"
+
+_SETTINGS_DEFAULTS = {
+    "theme":   "dark",
+    "accent":  "#e05555",
+    "font":    "system",
+    "bgColor": "#0d0d14",
+    "compact": False,
+    "noAnim":  False,
+}
+
+_settings_lock = threading.Lock()
+
+
+def read_webui_settings():
+    """Return the saved WebUI appearance settings dict (merged with defaults)."""
+    try:
+        with open(WEBUI_SETTINGS_PATH, "r") as f:
+            data = json.load(f)
+        # Only keep known keys to avoid polluting the response
+        return {k: data.get(k, v) for k, v in _SETTINGS_DEFAULTS.items()}
+    except (OSError, json.JSONDecodeError):
+        return dict(_SETTINGS_DEFAULTS)
+
+
+def write_webui_settings(settings):
+    """Persist WebUI appearance settings to disk. Returns (ok, msg)."""
+    # Only persist known keys; validate types to prevent corruption
+    cleaned = {}
+    for key, default in _SETTINGS_DEFAULTS.items():
+        val = settings.get(key, default)
+        # Coerce to the same type as the default
+        try:
+            if isinstance(default, bool):
+                cleaned[key] = bool(val)
+            elif isinstance(default, str):
+                cleaned[key] = str(val)[:64]  # 64-char cap per field
+            else:
+                cleaned[key] = val
+        except (TypeError, ValueError):
+            cleaned[key] = default
+    try:
+        with _settings_lock:
+            os.makedirs(os.path.dirname(WEBUI_SETTINGS_PATH), exist_ok=True)
+            with open(WEBUI_SETTINGS_PATH, "w") as f:
+                json.dump(cleaned, f, indent=2)
+        return True, "ok"
+    except OSError as e:
+        return False, str(e)
+
 # ---------------------------------------------------------------------------
 # Internet access protection – only allow private / local-network addresses.
 # This prevents the WebUI from being accessible from the public internet even
@@ -1111,18 +1164,6 @@ function applyAppearanceSettings(s) {
     document.body.style.backgroundColor = '';
   }
 
-  // Background image – stored as a base64 data URI (set via file upload)
-  const rawImg = (s.bgImage || '').trim();
-  if (rawImg && rawImg.startsWith('data:image/')) {
-    document.body.style.backgroundImage = 'url(' + rawImg + ')';
-    document.body.style.backgroundSize  = 'cover';
-    document.body.style.backgroundAttachment = 'fixed';
-  } else {
-    document.body.style.backgroundImage = '';
-    document.body.style.backgroundSize  = '';
-    document.body.style.backgroundAttachment = '';
-  }
-
   // Compact mode
   document.body.classList.toggle('compact', !!s.compact);
 
@@ -1130,13 +1171,85 @@ function applyAppearanceSettings(s) {
   document.body.classList.toggle('no-anim', !!s.noAnim);
 }
 
-function initAppearancePanel() {
-  const s = _getSettings();
+// Apply the server-stored background image (if any) to the page body.
+// Uses a cache-busting timestamp so a newly uploaded image is always visible.
+function applyServerBg() {
+  api('/api/bg/status').then(d => {
+    if (d.hasImage) {
+      document.body.style.backgroundImage = 'url(/api/bg?t=' + Date.now() + ')';
+      document.body.style.backgroundSize  = 'cover';
+      document.body.style.backgroundAttachment = 'fixed';
+    } else {
+      document.body.style.backgroundImage = '';
+      document.body.style.backgroundSize  = '';
+      document.body.style.backgroundAttachment = '';
+    }
+  });
+}
+
+// ---- Background image preview helpers ----
+function _showBgPreview(src, label) {
+  document.getElementById('bgPreviewImg').src  = src;
+  document.getElementById('bgPreviewName').textContent = label;
+  document.getElementById('bgPreview').classList.add('visible');
+}
+
+function _hideBgPreview() {
+  document.getElementById('bgPreview').classList.remove('visible');
+  document.getElementById('bgPreviewImg').src = '';
+  document.getElementById('bgPreviewName').textContent = '';
+}
+
+// Called when the user picks a file via the upload widget.
+async function onBgFileChosen(input) {
+  const file = input.files && input.files[0];
+  if (!file) return;
+  if (!file.type.startsWith('image/')) {
+    alert('Only image files can be uploaded as a background.');
+    input.value = '';
+    return;
+  }
+  if (file.size > 5 * 1024 * 1024) {
+    alert('Image is too large. Maximum size is 5 MB.');
+    input.value = '';
+    return;
+  }
+  const res = await fetch('/api/bg/upload', {
+    method: 'POST',
+    headers: {'Content-Type': file.type},
+    body: file,
+  });
+  const d = await res.json();
+  if (d.error) {
+    alert('Upload failed: ' + d.error);
+    return;
+  }
+  // Show thumbnail preview using a temporary object URL (no localStorage needed)
+  const previewUrl = URL.createObjectURL(file);
+  _showBgPreview(previewUrl, file.name + ' (' + (file.size / 1024).toFixed(0) + ' KB)');
+  applyServerBg();
+}
+
+async function clearBgImage() {
+  const d = await api('/api/bg/clear', {method: 'POST'});
+  if (d.error) { alert('Could not clear image: ' + d.error); return; }
+  _hideBgPreview();
+  document.body.style.backgroundImage = '';
+  document.body.style.backgroundSize  = '';
+  document.body.style.backgroundAttachment = '';
+  // Reset file input so the same file can be re-selected if needed
+  const inp = document.getElementById('stBgFile');
+  if (inp) inp.value = '';
+}
+
+async function initAppearancePanel() {
+  const d = await api('/api/webui/settings');
+  if (d.error) return;
 
   // Mark active swatch
   document.querySelectorAll('.swatch').forEach(sw => {
     const t = sw.dataset.theme;
-    sw.classList.toggle('active', (s.theme || 'dark') === t);
+    sw.classList.toggle('active', (d.theme || 'dark') === t);
     sw.onclick = () => {
       document.querySelectorAll('.swatch').forEach(x => x.classList.remove('active'));
       sw.classList.add('active');
@@ -1145,45 +1258,85 @@ function initAppearancePanel() {
     };
   });
   document.getElementById('themePreviewLabel').textContent =
-    'Current: ' + (THEME_NAMES[s.theme || 'dark'] || s.theme || 'Dark (default)');
+    'Current: ' + (THEME_NAMES[d.theme || 'dark'] || d.theme || 'Dark (default)');
 
-  document.getElementById('stAccent').value  = s.accent   || '#e05555';
-  document.getElementById('stFont').value    = s.font     || 'system';
-  document.getElementById('stBgColor').value = s.bgColor  || '#0d0d14';
-  document.getElementById('stCompact').checked = !!s.compact;
-  document.getElementById('stNoAnim').checked  = !!s.noAnim;
+  document.getElementById('stAccent').value    = d.accent   || '#e05555';
+  document.getElementById('stFont').value      = d.font     || 'system';
+  document.getElementById('stBgColor').value   = d.bgColor  || '#0d0d14';
+  document.getElementById('stCompact').checked = !!d.compact;
+  document.getElementById('stNoAnim').checked  = !!d.noAnim;
 
-  // Restore bg image preview if one is saved
-  if (s.bgImage && s.bgImage.startsWith('data:image/')) {
-    _showBgPreview(s.bgImage, 'Saved background image');
+  // Show thumbnail if a background image is stored on the server
+  const bg = await api('/api/bg/status');
+  if (bg.hasImage) {
+    _showBgPreview('/api/bg?t=' + Date.now(), 'Server background image (' +
+      (bg.size / 1024).toFixed(0) + ' KB)');
   } else {
     _hideBgPreview();
   }
 }
 
-function saveAppearanceSettings() {
+async function saveAppearanceSettings() {
   const activeSwatch = document.querySelector('.swatch.active');
   const s = {
     theme:   activeSwatch ? activeSwatch.dataset.theme : 'dark',
     accent:  document.getElementById('stAccent').value,
     font:    document.getElementById('stFont').value,
     bgColor: document.getElementById('stBgColor').value,
-    bgImage: document.getElementById('stBgImage').value.trim(),
     compact: document.getElementById('stCompact').checked,
     noAnim:  document.getElementById('stNoAnim').checked,
   };
-  localStorage.setItem('webui_appearance', JSON.stringify(s));
+  const d = await api('/api/webui/settings', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(s),
+  });
+  if (d.error) {
+    alert('Failed to save settings: ' + d.error);
+    return;
+  }
   applyAppearanceSettings(s);
 }
 
-function resetAppearanceSettings() {
-  localStorage.removeItem('webui_appearance');
-  applyAppearanceSettings({});
+async function resetAppearanceSettings() {
+  const defaults = {theme:'dark', accent:'#e05555', font:'system',
+                    bgColor:'#0d0d14', compact:false, noAnim:false};
+  await api('/api/webui/settings', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(defaults),
+  });
+  await clearBgImage();
+  applyAppearanceSettings(defaults);
   initAppearancePanel();
 }
 
+// ---- Restart WebUI ----
+async function restartWebUI() {
+  const msg = document.getElementById('webuiRestartMsg');
+  msg.style.display = 'block';
+  msg.textContent = 'Restarting WebUI…';
+  const d = await api('/api/webui/restart', {method: 'POST'});
+  if (d.error) {
+    msg.textContent = 'Error: ' + d.error;
+    return;
+  }
+  let secs = 8;
+  const tick = () => {
+    msg.textContent = 'WebUI restarting — reconnecting in ' + secs + 's…';
+    if (secs-- > 0) { setTimeout(tick, 1000); }
+    else { window.location.reload(); }
+  };
+  tick();
+}
+
 // ---- Init ----
-applyAppearanceSettings(_getSettings());
+// Fetch appearance settings from the server and apply them before first render.
+// Falls back to sensible defaults if the server hasn't stored any yet.
+api('/api/webui/settings').then(s => {
+  applyAppearanceSettings(s.error ? {} : s);
+});
+applyServerBg();
 refreshDashboard();
 refreshSysinfo();
 setInterval(refreshDashboard, 10000);
@@ -1687,6 +1840,21 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
             self._json({"devices": get_input_devices()})
         elif path == "/api/version":
             self._json({"version": get_version()})
+        elif path == "/api/webui/settings":
+            self._json(read_webui_settings())
+        elif path == "/api/bg":
+            self._serve_bg()
+        elif path == "/api/bg/status":
+            has = os.path.isfile(WEBUI_BG_PATH) and os.path.getsize(WEBUI_BG_PATH) > 0
+            size = os.path.getsize(WEBUI_BG_PATH) if has else 0
+            mime = ""
+            if has:
+                try:
+                    with open(WEBUI_BG_MIME_PATH) as f:
+                        mime = f.read().strip()
+                except OSError:
+                    mime = "image/jpeg"
+            self._json({"hasImage": has, "size": size, "mime": mime})
         else:
             self._not_found()
 
@@ -1696,6 +1864,13 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
 
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
+
+        # Binary upload must be routed BEFORE _read_body() to avoid
+        # attempting to UTF-8 decode raw image bytes.
+        if path == "/api/bg/upload":
+            self._handle_bg_upload()
+            return
+
         body = self._read_body()
 
         if path == "/api/config":
@@ -1733,8 +1908,28 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
             else:
                 self._json({"error": msg}, HTTPStatus.INTERNAL_SERVER_ERROR)
 
-        elif path == "/api/bg/upload":
-            self._handle_bg_upload()
+        elif path == "/api/webui/settings":
+            try:
+                data = json.loads(body) if body else {}
+            except json.JSONDecodeError:
+                self._json({"error": "Invalid JSON"}, HTTPStatus.BAD_REQUEST)
+                return
+            ok, msg = write_webui_settings(data)
+            if ok:
+                self._json({"ok": True})
+            else:
+                self._json({"error": msg}, HTTPStatus.INTERNAL_SERVER_ERROR)
+
+        elif path == "/api/bg/clear":
+            try:
+                for p in (WEBUI_BG_PATH, WEBUI_BG_MIME_PATH):
+                    try:
+                        os.remove(p)
+                    except FileNotFoundError:
+                        pass
+                self._json({"ok": True})
+            except OSError as e:
+                self._json({"error": str(e)}, HTTPStatus.INTERNAL_SERVER_ERROR)
 
         else:
             self._not_found()
@@ -1751,7 +1946,7 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
         return self.rfile.read(length) if length else b""
 
     def _handle_bg_upload(self):
-        """Accept a background image upload; return its base64 data URI."""
+        """Accept a background image upload and persist it to disk."""
         content_type = self.headers.get("Content-Type", "").split(";")[0].strip().lower()
         if content_type not in ALLOWED_IMAGE_MIMES:
             self._json({"error": "Only image files are accepted."}, HTTPStatus.BAD_REQUEST)
@@ -1767,8 +1962,39 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
         if not raw:
             self._json({"error": "Empty upload."}, HTTPStatus.BAD_REQUEST)
             return
-        data_uri = f"data:{content_type};base64," + base64.b64encode(raw).decode()
-        self._json({"dataUri": data_uri})
+        try:
+            os.makedirs(os.path.dirname(WEBUI_BG_PATH), exist_ok=True)
+            with open(WEBUI_BG_PATH, "wb") as f:
+                f.write(raw)
+            with open(WEBUI_BG_MIME_PATH, "w") as f:
+                f.write(content_type)
+            self._json({"ok": True, "size": len(raw), "mime": content_type})
+        except OSError as e:
+            self._json({"error": str(e)}, HTTPStatus.INTERNAL_SERVER_ERROR)
+
+    def _serve_bg(self):
+        """Serve the stored background image file."""
+        if not os.path.isfile(WEBUI_BG_PATH):
+            self._not_found()
+            return
+        try:
+            mime = "image/jpeg"
+            try:
+                with open(WEBUI_BG_MIME_PATH) as f:
+                    mime = f.read().strip()
+            except OSError:
+                pass
+            with open(WEBUI_BG_PATH, "rb") as f:
+                data = f.read()
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", mime)
+            self.send_header("Content-Length", len(data))
+            # No long-term cache – clients should see cleared images promptly
+            self.send_header("Cache-Control", "no-cache")
+            self.end_headers()
+            self.wfile.write(data)
+        except OSError:
+            self._not_found()
 
     def _send_html(self, html):
         data = html.encode("utf-8")
