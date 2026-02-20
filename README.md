@@ -147,7 +147,7 @@ sudo systemctl status modernjvs-webui
 
 ### Security Note
 
-The WebUI runs as root (required to control the `modernjvs` service and write `/etc/modernjvs/config`). It binds only to your local network interface on port **8080** and is not intended to be exposed to the internet.
+The WebUI runs as root (required to control the `modernjvs` service and write `/etc/modernjvs/config`). It binds to all network interfaces on port **8080** so you can reach it from any device on your local network. Do not expose this port to the internet (e.g. block it in your router's firewall if the Raspberry Pi has a public IP).
 
 ---
 

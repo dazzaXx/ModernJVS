@@ -211,9 +211,9 @@ HTML_PAGE = r"""<!DOCTYPE html>
 
 <div class="container">
   <div class="tabs">
-    <button class="tab active" onclick="showTab('dashboard')">Dashboard</button>
-    <button class="tab" onclick="showTab('config')">Configuration</button>
-    <button class="tab" onclick="showTab('monitor')">Monitor &amp; Logs</button>
+    <button class="tab active" onclick="showTab('dashboard', this)">Dashboard</button>
+    <button class="tab" onclick="showTab('config', this)">Configuration</button>
+    <button class="tab" onclick="showTab('monitor', this)">Monitor &amp; Logs</button>
   </div>
 
   <!-- ====== DASHBOARD ====== -->
@@ -349,11 +349,11 @@ HTML_PAGE = r"""<!DOCTYPE html>
 
 <script>
 // ---- Tab navigation ----
-function showTab(name) {
+function showTab(name, btn) {
   document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
   document.getElementById('panel-' + name).classList.add('active');
-  event.target.classList.add('active');
+  btn.classList.add('active');
   if (name === 'monitor') fetchLogs();
   if (name === 'config') loadConfig();
 }
@@ -544,6 +544,7 @@ def read_config():
                 line = line.strip()
                 if not line or line.startswith("#"):
                     continue
+                # split on any whitespace, producing at most [directive, value]
                 parts = line.split(None, 1)
                 if len(parts) == 2:
                     cfg[parts[0]] = parts[1].strip()
@@ -590,6 +591,7 @@ def write_config(new_values):
     for line in lines:
         stripped = line.strip()
         if stripped and not stripped.startswith("#"):
+            # split on any whitespace, producing at most [directive, value]
             parts = stripped.split(None, 1)
             if parts and parts[0] in updates:
                 new_lines.append(f"{parts[0]} {updates[parts[0]]}\n")
@@ -692,15 +694,14 @@ def list_dir(path):
 # ---------------------------------------------------------------------------
 
 def get_logo_bytes():
-    """Return PNG logo bytes, trying the installed path first then the repo path."""
+    """Return PNG logo bytes from the installed assets path."""
     candidates = [
         LOGO_PATH,
         "/usr/share/modernjvs/modernjvs2.png",
-        os.path.join(os.path.dirname(__file__), "..", "..", "docs", "modernjvs2.png"),
     ]
     for p in candidates:
         try:
-            with open(os.path.realpath(p), "rb") as f:
+            with open(p, "rb") as f:
                 return f.read()
         except OSError:
             pass
@@ -733,7 +734,10 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
         elif path == "/api/config":
             self._json(config_to_api(read_config()))
         elif path == "/api/logs":
-            lines = int(query.get("lines", ["100"])[0])
+            try:
+                lines = int(query.get("lines", ["100"])[0])
+            except (ValueError, IndexError):
+                lines = 100
             lines = max(10, min(lines, 1000))
             self._json({"lines": get_logs(lines)})
         elif path == "/api/ios":
