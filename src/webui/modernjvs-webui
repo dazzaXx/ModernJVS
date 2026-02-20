@@ -25,7 +25,7 @@ SERVICE_NAME = "modernjvs"
 WEBUI_SERVICE_NAME = "modernjvs-webui"
 
 # Background image upload limits
-MAX_UPLOAD_BYTES = 5 * 1024 * 1024          # 5 MB hard cap
+MAX_UPLOAD_BYTES = 20 * 1024 * 1024         # 20 MB hard cap
 ALLOWED_IMAGE_MIMES = {
     "image/jpeg", "image/png", "image/gif",
     "image/webp", "image/svg+xml", "image/bmp",
@@ -38,13 +38,13 @@ WEBUI_BG_PATH       = "/etc/modernjvs/webui-bg"
 WEBUI_BG_MIME_PATH  = "/etc/modernjvs/webui-bg.mime"
 
 _SETTINGS_DEFAULTS = {
-    "theme":          "dark",
+    "theme":          "black",
     "accent":         "#e05555",
     "font":           "system",
-    "bgColor":        "#0d0d14",
+    "bgColor":        "#000000",
     "compact":        False,
     "noAnim":         False,
-    "bgScrimOpacity": 0.45,   # 0.0 = no overlay, 0.9 = near-black overlay
+    "bgScrimOpacity": 0.70,   # 0.0 = no overlay, 0.9 = near-black overlay
 }
 
 _settings_lock = threading.Lock()
@@ -128,7 +128,7 @@ _ACCESS_DENIED_HTML = """\
 <html lang="en">
 <head><meta charset="UTF-8"><title>Access Denied \u2013 ModernJVS WebUI</title>
 <style>
-body{background:#0d0d14;color:#e2e2f0;font-family:system-ui,sans-serif;
+body{background:#000000;color:#e2e2f0;font-family:system-ui,sans-serif;
      display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0}
 .box{background:#1e1e2e;border:1px solid #2e2e42;border-radius:8px;
      padding:2.5rem;max-width:500px;text-align:center}
@@ -448,7 +448,7 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
      When a background image is active, a semi-transparent dark overlay is
      painted above the image (z-index:1) but below all content (z-index:2).
      Opacity is controlled by --bg-scrim-opacity (set via JS from settings). */
-  :root { --bg-scrim-opacity: 0.45; }
+  :root { --bg-scrim-opacity: 0.70; }
   body.has-bg-image::after {
     content: '';
     position: fixed;
@@ -688,6 +688,7 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
       <div class="control-row">
         <button class="btn btn-save" onclick="saveConfig()">💾 Save Configuration</button>
         <button class="btn btn-refresh" onclick="loadConfig()">⟳ Reload from Disk</button>
+        <button class="btn btn-danger" onclick="resetConfig()">↩ Reset to Defaults</button>
       </div>
     </div>
   </div>
@@ -794,7 +795,7 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
       <div class="settings-grid">
         <div class="settings-field">
           <label>Background Colour</label>
-          <input type="color" id="stBgColor" value="#0d0d14">
+          <input type="color" id="stBgColor" value="#000000">
           <div class="settings-preview">Overrides the theme background colour</div>
         </div>
         <div class="settings-field">
@@ -802,7 +803,7 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
           <div class="bg-upload-area" id="bgUploadArea">
             <input type="file" id="stBgFile" accept="image/*" onchange="onBgFileChosen(this)">
             <div class="bg-upload-icon">&#128444;</div>
-            <div class="bg-upload-label">Click or drag an image here<br><span style="font-size:0.75rem">JPEG, PNG, GIF, WebP, SVG · max 5 MB</span></div>
+            <div class="bg-upload-label">Click or drag an image here<br><span style="font-size:0.75rem">JPEG, PNG, GIF, WebP, SVG · max 20 MB</span></div>
           </div>
           <div class="bg-preview" id="bgPreview">
             <img id="bgPreviewImg" src="" alt="preview">
@@ -1034,6 +1035,20 @@ async function saveConfig() {
   else showAlert('cfgAlert', 'Configuration saved. Restart the service to apply changes.', false);
 }
 
+function resetConfig() {
+  if (!confirm('Reset configuration fields to factory defaults?\n\nClick Save to write the changes to disk.')) return;
+  document.getElementById('cfgDevice').value   = '/dev/ttyUSB0';
+  document.getElementById('cfgSense').value    = '1';
+  document.getElementById('cfgPin').value      = '26';
+  document.getElementById('cfgDebug').value    = '0';
+  document.getElementById('cfgAutoCtrl').value = '1';
+  document.getElementById('cfgDz1').value = '0.2';
+  document.getElementById('cfgDz2').value = '0.2';
+  document.getElementById('cfgDz3').value = '0.2';
+  document.getElementById('cfgDz4').value = '0.2';
+  showAlert('cfgAlert', 'Fields reset to defaults. Click Save to write the configuration.', false);
+}
+
 // ---- Monitor ----
 let autoRefreshTimer = null;
 let rawLogLines = [];   // cached raw lines for client-side filtering
@@ -1075,13 +1090,15 @@ function applyJvsFilter() {
       lines = lines.filter(l => /warning|warn/i.test(l));
       break;
     case 'jvs':
-      lines = lines.filter(l => /jvs|packet|checksum|cmd|emulat|address|sense|RS485/i.test(l));
+      // Only show CMD_ debug output — these are the actual JVS packet commands
+      lines = lines.filter(l => /CMD_/.test(l));
       break;
     case 'controllers':
       lines = lines.filter(l => /controller|input|device|player|joystick|gamepad|wiimote/i.test(l));
       break;
     case 'init':
-      lines = lines.filter(l => /init|start|stop|reinit|watchdog|version|ModernJVS/i.test(l));
+      // Initialisation messages but NOT CMD_ packet lines (those belong in JVS Activity)
+      lines = lines.filter(l => /init|start|stop|reinit|watchdog|version|ModernJVS/i.test(l) && !/CMD_/.test(l));
       break;
   }
   if (search) {
@@ -1183,7 +1200,7 @@ function applyAppearanceSettings(s) {
   const root = document.documentElement;
 
   // Theme – always set an explicit data-theme value so selectors are consistent
-  root.setAttribute('data-theme', s.theme || 'dark');
+  root.setAttribute('data-theme', s.theme || 'black');
 
   // Accent colour (CSS custom property override on :root)
   if (s.accent && s.accent !== '#e05555') {
@@ -1199,7 +1216,7 @@ function applyAppearanceSettings(s) {
   root.style.setProperty('--font', fontValue);
 
   // Background colour
-  if (s.bgColor && s.bgColor !== '#0d0d14') {
+  if (s.bgColor && s.bgColor !== '#000000') {
     root.style.setProperty('--bg', s.bgColor);
     document.body.style.backgroundColor = s.bgColor;
   } else {
@@ -1214,7 +1231,7 @@ function applyAppearanceSettings(s) {
   document.body.classList.toggle('no-anim', !!s.noAnim);
 
   // Background overlay (scrim) opacity
-  const scrim = (typeof s.bgScrimOpacity === 'number') ? s.bgScrimOpacity : 0.45;
+  const scrim = (typeof s.bgScrimOpacity === 'number') ? s.bgScrimOpacity : 0.70;
   document.documentElement.style.setProperty('--bg-scrim-opacity', scrim);
 }
 
@@ -1258,8 +1275,8 @@ async function onBgFileChosen(input) {
     input.value = '';
     return;
   }
-  if (file.size > 5 * 1024 * 1024) {
-    alert('Image is too large. Maximum size is 5 MB.');
+  if (file.size > 20 * 1024 * 1024) {
+    alert('Image is too large. Maximum size is 20 MB.');
     input.value = '';
     return;
   }
@@ -1298,7 +1315,7 @@ async function initAppearancePanel() {
   // Mark active swatch
   document.querySelectorAll('.swatch').forEach(sw => {
     const t = sw.dataset.theme;
-    sw.classList.toggle('active', (d.theme || 'dark') === t);
+    sw.classList.toggle('active', (d.theme || 'black') === t);
     sw.onclick = () => {
       document.querySelectorAll('.swatch').forEach(x => x.classList.remove('active'));
       sw.classList.add('active');
@@ -1307,16 +1324,16 @@ async function initAppearancePanel() {
     };
   });
   document.getElementById('themePreviewLabel').textContent =
-    'Current: ' + (THEME_NAMES[d.theme || 'dark'] || d.theme || 'Dark (default)');
+    'Current: ' + (THEME_NAMES[d.theme || 'black'] || d.theme || 'Pure Black (default)');
 
   document.getElementById('stAccent').value    = d.accent   || '#e05555';
   document.getElementById('stFont').value      = d.font     || 'system';
-  document.getElementById('stBgColor').value   = d.bgColor  || '#0d0d14';
+  document.getElementById('stBgColor').value   = d.bgColor  || '#000000';
   document.getElementById('stCompact').checked = !!d.compact;
   document.getElementById('stNoAnim').checked  = !!d.noAnim;
 
   // Scrim slider – live preview of opacity value
-  const scrimVal = (typeof d.bgScrimOpacity === 'number') ? d.bgScrimOpacity : 0.45;
+  const scrimVal = (typeof d.bgScrimOpacity === 'number') ? d.bgScrimOpacity : 0.70;
   const scrimEl  = document.getElementById('stBgScrim');
   const scrimLbl = document.getElementById('stBgScrimVal');
   scrimEl.value  = scrimVal;
@@ -1340,7 +1357,7 @@ async function initAppearancePanel() {
 async function saveAppearanceSettings() {
   const activeSwatch = document.querySelector('.swatch.active');
   const s = {
-    theme:          activeSwatch ? activeSwatch.dataset.theme : 'dark',
+    theme:          activeSwatch ? activeSwatch.dataset.theme : 'black',
     accent:         document.getElementById('stAccent').value,
     font:           document.getElementById('stFont').value,
     bgColor:        document.getElementById('stBgColor').value,
@@ -1361,9 +1378,9 @@ async function saveAppearanceSettings() {
 }
 
 async function resetAppearanceSettings() {
-  const defaults = {theme:'dark', accent:'#e05555', font:'system',
-                    bgColor:'#0d0d14', compact:false, noAnim:false,
-                    bgScrimOpacity:0.45};
+  const defaults = {theme:'black', accent:'#e05555', font:'system',
+                    bgColor:'#000000', compact:false, noAnim:false,
+                    bgScrimOpacity:0.70};
   await api('/api/webui/settings', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
