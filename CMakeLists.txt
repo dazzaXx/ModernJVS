@@ -88,23 +88,30 @@ install(FILES
     DESTINATION "/etc/modules-load.d/"
 )
 
-install(PROGRAMS
-    ${CMAKE_SOURCE_DIR}/src/webui/modernjvs-webui
-    COMPONENT ${PROJECT_NAME}
-    DESTINATION "bin/"
-)
+# WebUI – Python3 local-network web interface (opt-out with -DENABLE_WEBUI=OFF)
+option(ENABLE_WEBUI "Include the WebUI server in the installation" ON)
+if(ENABLE_WEBUI)
+    message(STATUS "WebUI: enabled (use -DENABLE_WEBUI=OFF to exclude)")
+    install(PROGRAMS
+        ${CMAKE_SOURCE_DIR}/src/webui/modernjvs-webui
+        COMPONENT ${PROJECT_NAME}
+        DESTINATION "bin/"
+    )
 
-install(FILES
-    ${CMAKE_SOURCE_DIR}/docs/modernjvs-webui.service
-    COMPONENT ${PROJECT_NAME}
-    DESTINATION "/etc/systemd/system/"
-)
+    install(FILES
+        ${CMAKE_SOURCE_DIR}/docs/modernjvs-webui.service
+        COMPONENT ${PROJECT_NAME}
+        DESTINATION "/etc/systemd/system/"
+    )
 
-install(FILES
-    ${CMAKE_SOURCE_DIR}/docs/modernjvs2.png
-    COMPONENT ${PROJECT_NAME}
-    DESTINATION "/usr/share/modernjvs/"
-)
+    install(FILES
+        ${CMAKE_SOURCE_DIR}/docs/modernjvs2.png
+        COMPONENT ${PROJECT_NAME}
+        DESTINATION "/usr/share/modernjvs/"
+    )
+else()
+    message(STATUS "WebUI: disabled")
+endif()
 
 # CPack configuration for DEB package generation
 set(CPACK_GENERATOR "DEB")

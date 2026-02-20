@@ -73,6 +73,22 @@ git clone https://github.com/dazzaXx/ModernJVS
 sudo make install
 ```
 
+### Installing without the WebUI
+
+If you don't want the WebUI installed (e.g. on a minimal headless system), use either of these equivalent methods:
+
+```
+sudo make install-no-webui
+```
+
+or:
+
+```
+sudo make install WEBUI=OFF
+```
+
+The `WEBUI=OFF` flag must be used on a fresh build directory. If you have already built with the default settings, run `sudo make clean` first.
+
 ## Supported Hardware
 
 ### Raspberry Pi Models
