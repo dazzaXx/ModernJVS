@@ -1158,11 +1158,12 @@ def get_logo_bytes():
     """
     # Resolve the script's real location so the fallback works even when the
     # script is run via a symlink or from a different working directory.
-    _script_dir = os.path.dirname(os.path.abspath(__file__))
+    # Expected layout: src/webui/modernjvs-webui  →  ../../docs/modernjvs2.png
+    script_dir = os.path.dirname(os.path.abspath(__file__))
     candidates = [
         LOGO_PATH,
         "/usr/share/modernjvs/modernjvs2.png",
-        os.path.join(_script_dir, "..", "..", "docs", "modernjvs2.png"),
+        os.path.join(script_dir, "..", "..", "docs", "modernjvs2.png"),
     ]
     for p in candidates:
         try:
