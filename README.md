@@ -122,11 +122,40 @@ A 1KOhm resistor or 4 signal diodes are known to work properly, the purpose of t
 
 **What is the sense line?** The sense line is used by some arcade systems to detect when the cabinet is powered on. It helps synchronize communication between the arcade board and the I/O system.
 
+## WebUI
+
+ModernJVS ships with a built-in web interface that you can access from any device on your local network.
+
+### Features
+
+- **Dashboard** – view service status (running/stopped), PID, uptime, and the current I/O board / game profile at a glance. Start, stop, and restart the service with a single click.
+- **Configuration** – change the emulated I/O board, game profile, device path, sense line settings, debug mode, and per-player analog deadzones without touching a text editor. Changes are saved to `/etc/modernjvs/config` immediately.
+- **Monitor & Logs** – live log viewer with auto-refresh that tails `journalctl`. A dedicated **JVS Activity** pane filters the log to show only JVS-related events (packets, checksums, commands, addressing, etc.).
+
+### Starting the WebUI
+
+```
+sudo systemctl enable --now modernjvs-webui
+```
+
+Then open `http://<raspberry-pi-ip>:8080` in a browser on any device on your network.
+
+To check that it is running:
+```
+sudo systemctl status modernjvs-webui
+```
+
+### Security Note
+
+The WebUI runs as root (required to control the `modernjvs` service and write `/etc/modernjvs/config`). It binds only to your local network interface on port **8080** and is not intended to be exposed to the internet.
+
+---
+
 ## Configuration
 
 ### Basic Setup
 
-ModernJVS can be configured using the following command:
+ModernJVS can be configured using the following command, or via the WebUI:
 ```
 sudo nano /etc/modernjvs/config
 ```

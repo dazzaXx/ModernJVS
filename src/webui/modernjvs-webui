@@ -1,0 +1,837 @@
+#!/usr/bin/env python3
+# ModernJVS WebUI
+# A local-network web interface for configuring and monitoring ModernJVS.
+# Requires Python 3.6+ (stdlib only, no pip dependencies).
+
+import http.server
+import json
+import os
+import re
+import subprocess
+import threading
+import urllib.parse
+import base64
+from http import HTTPStatus
+
+WEBUI_PORT = 8080
+CONFIG_PATH = "/etc/modernjvs/config"
+IOS_PATH = "/etc/modernjvs/ios"
+GAMES_PATH = "/etc/modernjvs/games"
+DEVICES_PATH = "/etc/modernjvs/devices"
+LOGO_PATH = "/usr/share/modernjvs/modernjvs2.png"
+SERVICE_NAME = "modernjvs"
+
+# ---------------------------------------------------------------------------
+# HTML / CSS / JS – embedded so the server is a single file with no assets
+# ---------------------------------------------------------------------------
+HTML_PAGE = r"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ModernJVS WebUI</title>
+<style>
+  :root {
+    --bg:      #0d0d14;
+    --surface: #16161f;
+    --card:    #1e1e2e;
+    --border:  #2e2e42;
+    --accent:  #e05555;
+    --accent2: #ff7e7e;
+    --text:    #e2e2f0;
+    --muted:   #7878a0;
+    --green:   #50fa7b;
+    --yellow:  #f1fa8c;
+    --red:     #ff5555;
+    --radius:  8px;
+    --font:    'Segoe UI', system-ui, sans-serif;
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: var(--font); min-height: 100vh; }
+
+  /* --- header --- */
+  header {
+    background: var(--surface);
+    border-bottom: 2px solid var(--accent);
+    padding: 0.75rem 2rem;
+    display: flex;
+    align-items: center;
+    gap: 1.5rem;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+  header img { height: 42px; }
+  header h1 { font-size: 1.4rem; color: var(--text); letter-spacing: 0.05em; }
+  header h1 span { color: var(--accent); }
+  .status-badge {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.85rem;
+    color: var(--muted);
+  }
+  .dot {
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    background: var(--muted);
+    display: inline-block;
+  }
+  .dot.running { background: var(--green); box-shadow: 0 0 6px var(--green); }
+  .dot.stopped { background: var(--red); }
+
+  /* --- layout --- */
+  .container { max-width: 1100px; margin: 0 auto; padding: 1.5rem; }
+
+  /* --- tabs --- */
+  .tabs { display: flex; gap: 0.25rem; margin-bottom: 1.5rem; border-bottom: 2px solid var(--border); }
+  .tab {
+    padding: 0.6rem 1.25rem;
+    background: none;
+    border: none;
+    color: var(--muted);
+    cursor: pointer;
+    font-size: 0.95rem;
+    font-family: var(--font);
+    border-bottom: 2px solid transparent;
+    margin-bottom: -2px;
+    transition: color 0.15s, border-color 0.15s;
+  }
+  .tab:hover { color: var(--text); }
+  .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+  .panel { display: none; }
+  .panel.active { display: block; }
+
+  /* --- card --- */
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 1.25rem;
+    margin-bottom: 1.25rem;
+  }
+  .card h2 { font-size: 1rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 1rem; }
+
+  /* --- control row --- */
+  .control-row { display: flex; gap: 0.75rem; flex-wrap: wrap; align-items: center; }
+  .btn {
+    padding: 0.55rem 1.25rem;
+    border-radius: var(--radius);
+    border: none;
+    cursor: pointer;
+    font-family: var(--font);
+    font-size: 0.9rem;
+    font-weight: 600;
+    transition: opacity 0.15s, transform 0.1s;
+  }
+  .btn:active { transform: scale(0.97); }
+  .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+  .btn-start  { background: var(--green);  color: #0d0d14; }
+  .btn-stop   { background: var(--red);    color: #fff; }
+  .btn-restart{ background: var(--yellow); color: #0d0d14; }
+  .btn-save   { background: var(--accent); color: #fff; }
+  .btn-refresh{ background: var(--border); color: var(--text); }
+
+  /* --- form --- */
+  .form-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1rem; }
+  .field { display: flex; flex-direction: column; gap: 0.35rem; }
+  .field label { font-size: 0.82rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+  .field select, .field input[type="text"], .field input[type="number"] {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    color: var(--text);
+    padding: 0.5rem 0.75rem;
+    font-family: var(--font);
+    font-size: 0.9rem;
+    width: 100%;
+    transition: border-color 0.15s;
+  }
+  .field select:focus, .field input:focus { outline: none; border-color: var(--accent); }
+  .field select option { background: var(--surface); }
+
+  /* --- log terminal --- */
+  .log-wrap {
+    background: #0a0a10;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    height: 420px;
+    overflow-y: auto;
+    padding: 0.75rem 1rem;
+    font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+    font-size: 0.8rem;
+    line-height: 1.55;
+  }
+  .log-wrap .log-line { white-space: pre-wrap; word-break: break-all; }
+  .log-wrap .log-err  { color: var(--red); }
+  .log-wrap .log-warn { color: var(--yellow); }
+  .log-wrap .log-info { color: var(--text); }
+  .log-controls { display: flex; gap: 0.75rem; align-items: center; margin-bottom: 0.75rem; flex-wrap: wrap; }
+  .log-controls label { color: var(--muted); font-size: 0.85rem; display: flex; align-items: center; gap: 0.4rem; }
+
+  /* --- status grid --- */
+  .stat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 1rem; }
+  .stat-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 1rem;
+    text-align: center;
+  }
+  .stat-card .val { font-size: 1.4rem; font-weight: 700; color: var(--accent2); }
+  .stat-card .lbl { font-size: 0.78rem; color: var(--muted); margin-top: 0.3rem; text-transform: uppercase; letter-spacing: 0.06em; }
+
+  /* --- alert --- */
+  .alert {
+    padding: 0.7rem 1rem;
+    border-radius: var(--radius);
+    font-size: 0.88rem;
+    margin-bottom: 1rem;
+    display: none;
+  }
+  .alert.ok  { background: rgba(80,250,123,0.12); border: 1px solid var(--green); color: var(--green); display: block; }
+  .alert.err { background: rgba(255,85,85,0.12);  border: 1px solid var(--red);   color: var(--red);   display: block; }
+
+  /* --- footer --- */
+  footer { text-align: center; color: var(--muted); font-size: 0.78rem; padding: 1.5rem; }
+  footer a { color: var(--accent); text-decoration: none; }
+</style>
+</head>
+<body>
+<header>
+  <img id="logo" src="/logo" alt="ModernJVS">
+  <h1>Modern<span>JVS</span> <span style="color:var(--muted);font-weight:400;font-size:0.9rem">WebUI</span></h1>
+  <div class="status-badge">
+    <span class="dot" id="statusDot"></span>
+    <span id="statusText">Loading…</span>
+  </div>
+</header>
+
+<div class="container">
+  <div class="tabs">
+    <button class="tab active" onclick="showTab('dashboard')">Dashboard</button>
+    <button class="tab" onclick="showTab('config')">Configuration</button>
+    <button class="tab" onclick="showTab('monitor')">Monitor &amp; Logs</button>
+  </div>
+
+  <!-- ====== DASHBOARD ====== -->
+  <div id="panel-dashboard" class="panel active">
+    <div id="dashAlert" class="alert"></div>
+
+    <div class="card">
+      <h2>Service Control</h2>
+      <div class="control-row">
+        <button class="btn btn-start"   onclick="serviceAction('start')">▶ Start</button>
+        <button class="btn btn-stop"    onclick="serviceAction('stop')">■ Stop</button>
+        <button class="btn btn-restart" onclick="serviceAction('restart')">↺ Restart</button>
+        <button class="btn btn-refresh" onclick="refreshDashboard()">⟳ Refresh Status</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>System Overview</h2>
+      <div class="stat-grid" id="statGrid">
+        <div class="stat-card"><div class="val" id="svcState">—</div><div class="lbl">Service State</div></div>
+        <div class="stat-card"><div class="val" id="svcPid">—</div><div class="lbl">PID</div></div>
+        <div class="stat-card"><div class="val" id="svcUptime">—</div><div class="lbl">Active Since</div></div>
+        <div class="stat-card"><div class="val" id="currentIO">—</div><div class="lbl">Emulated I/O</div></div>
+        <div class="stat-card"><div class="val" id="currentGame">—</div><div class="lbl">Current Game</div></div>
+        <div class="stat-card"><div class="val" id="currentDevice">—</div><div class="lbl">Device Path</div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ====== CONFIG ====== -->
+  <div id="panel-config" class="panel">
+    <div id="cfgAlert" class="alert"></div>
+    <div class="card">
+      <h2>Game &amp; I/O Configuration</h2>
+      <div class="form-grid">
+        <div class="field">
+          <label>Emulated I/O Board</label>
+          <select id="cfgEmulate"></select>
+        </div>
+        <div class="field">
+          <label>Default Game</label>
+          <select id="cfgGame"></select>
+        </div>
+        <div class="field">
+          <label>Device Path</label>
+          <input type="text" id="cfgDevice" placeholder="/dev/ttyUSB0">
+        </div>
+        <div class="field">
+          <label>Sense Line Type (0/1/2)</label>
+          <select id="cfgSense">
+            <option value="0">0 – USB RS485, no sense line</option>
+            <option value="1">1 – USB RS485, with sense line</option>
+            <option value="2">2 – OpenJVS HAT</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Sense Line GPIO Pin</label>
+          <input type="number" id="cfgPin" min="1" max="40" placeholder="26">
+        </div>
+        <div class="field">
+          <label>Debug Mode (0/1/2)</label>
+          <select id="cfgDebug">
+            <option value="0">0 – Off</option>
+            <option value="1">1 – JVS outputs</option>
+            <option value="2">2 – Raw packets</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Auto Controller Detection</label>
+          <select id="cfgAutoCtrl">
+            <option value="1">Enabled</option>
+            <option value="0">Disabled</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Analog Deadzone – Player 1</label>
+          <input type="number" id="cfgDz1" step="0.01" min="0" max="0.5" placeholder="0.2">
+        </div>
+        <div class="field">
+          <label>Analog Deadzone – Player 2</label>
+          <input type="number" id="cfgDz2" step="0.01" min="0" max="0.5" placeholder="0.2">
+        </div>
+        <div class="field">
+          <label>Analog Deadzone – Player 3</label>
+          <input type="number" id="cfgDz3" step="0.01" min="0" max="0.5" placeholder="0.2">
+        </div>
+        <div class="field">
+          <label>Analog Deadzone – Player 4</label>
+          <input type="number" id="cfgDz4" step="0.01" min="0" max="0.5" placeholder="0.2">
+        </div>
+      </div>
+      <br>
+      <div class="control-row">
+        <button class="btn btn-save" onclick="saveConfig()">💾 Save Configuration</button>
+        <button class="btn btn-refresh" onclick="loadConfig()">⟳ Reload from Disk</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ====== MONITOR ====== -->
+  <div id="panel-monitor" class="panel">
+    <div class="card">
+      <h2>Live Log Monitor</h2>
+      <div class="log-controls">
+        <button class="btn btn-refresh" onclick="fetchLogs()">⟳ Refresh</button>
+        <label>
+          <input type="checkbox" id="autoRefresh" onchange="toggleAutoRefresh()"> Auto-refresh (5s)
+        </label>
+        <label>
+          Lines:
+          <select id="logLines" style="background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--text);padding:0.25rem 0.5rem;">
+            <option value="50">50</option>
+            <option value="100" selected>100</option>
+            <option value="200">200</option>
+            <option value="500">500</option>
+          </select>
+        </label>
+        <label>
+          <input type="checkbox" id="scrollBottom" checked> Scroll to bottom
+        </label>
+      </div>
+      <div class="log-wrap" id="logBox"></div>
+    </div>
+
+    <div class="card">
+      <h2>Recent JVS Activity</h2>
+      <div class="log-wrap" id="jvsBox" style="height:220px;"></div>
+    </div>
+  </div>
+</div>
+
+<footer>ModernJVS WebUI &mdash; <a href="https://github.com/dazzaXx/ModernJVS" target="_blank">github.com/dazzaXx/ModernJVS</a></footer>
+
+<script>
+// ---- Tab navigation ----
+function showTab(name) {
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.getElementById('panel-' + name).classList.add('active');
+  event.target.classList.add('active');
+  if (name === 'monitor') fetchLogs();
+  if (name === 'config') loadConfig();
+}
+
+// ---- API helpers ----
+async function api(path, opts) {
+  try {
+    const r = await fetch(path, opts);
+    return await r.json();
+  } catch(e) { return { error: String(e) }; }
+}
+
+function showAlert(id, msg, isErr) {
+  const el = document.getElementById(id);
+  el.textContent = msg;
+  el.className = 'alert ' + (isErr ? 'err' : 'ok');
+  setTimeout(() => { el.className = 'alert'; }, 4000);
+}
+
+// ---- Dashboard ----
+async function refreshDashboard() {
+  const d = await api('/api/status');
+  if (d.error) { showAlert('dashAlert', 'Error: ' + d.error, true); return; }
+
+  const dot  = document.getElementById('statusDot');
+  const txt  = document.getElementById('statusText');
+  const running = d.active_state === 'active';
+
+  dot.className = 'dot ' + (running ? 'running' : 'stopped');
+  txt.textContent = d.active_state || 'unknown';
+
+  document.getElementById('svcState').textContent  = d.active_state  || '—';
+  document.getElementById('svcPid').textContent    = d.main_pid      || '—';
+  document.getElementById('svcUptime').textContent = d.active_since  || '—';
+  document.getElementById('currentIO').textContent  = d.config?.emulate   || '—';
+  document.getElementById('currentGame').textContent= d.config?.game      || '—';
+  document.getElementById('currentDevice').textContent= d.config?.device  || '—';
+}
+
+async function serviceAction(action) {
+  const d = await api('/api/control', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({action})
+  });
+  if (d.error) { showAlert('dashAlert', 'Error: ' + d.error, true); }
+  else { showAlert('dashAlert', 'Service ' + action + ' successful.', false); }
+  setTimeout(refreshDashboard, 1200);
+}
+
+// ---- Config ----
+async function loadConfig() {
+  const [cfgData, iosData, gamesData] = await Promise.all([
+    api('/api/config'),
+    api('/api/ios'),
+    api('/api/games')
+  ]);
+
+  // Populate IO dropdown
+  const ioSel = document.getElementById('cfgEmulate');
+  ioSel.innerHTML = '';
+  (iosData.ios || []).forEach(io => {
+    const o = document.createElement('option');
+    o.value = io; o.textContent = io;
+    if (cfgData.emulate === io) o.selected = true;
+    ioSel.appendChild(o);
+  });
+
+  // Populate game dropdown
+  const gameSel = document.getElementById('cfgGame');
+  gameSel.innerHTML = '';
+  (gamesData.games || []).forEach(g => {
+    const o = document.createElement('option');
+    o.value = g; o.textContent = g;
+    if (cfgData.game === g) o.selected = true;
+    gameSel.appendChild(o);
+  });
+
+  document.getElementById('cfgDevice').value  = cfgData.device  || '/dev/ttyUSB0';
+  document.getElementById('cfgSense').value   = cfgData.sense_line_type  ?? '1';
+  document.getElementById('cfgPin').value     = cfgData.sense_line_pin   ?? '26';
+  document.getElementById('cfgDebug').value   = cfgData.debug_mode  ?? '0';
+  document.getElementById('cfgAutoCtrl').value = cfgData.auto_controller_detection ?? '1';
+  document.getElementById('cfgDz1').value = cfgData.deadzone_p1 ?? '0.2';
+  document.getElementById('cfgDz2').value = cfgData.deadzone_p2 ?? '0.2';
+  document.getElementById('cfgDz3').value = cfgData.deadzone_p3 ?? '0.2';
+  document.getElementById('cfgDz4').value = cfgData.deadzone_p4 ?? '0.2';
+}
+
+async function saveConfig() {
+  const payload = {
+    emulate:                    document.getElementById('cfgEmulate').value,
+    game:                       document.getElementById('cfgGame').value,
+    device:                     document.getElementById('cfgDevice').value,
+    sense_line_type:            document.getElementById('cfgSense').value,
+    sense_line_pin:             document.getElementById('cfgPin').value,
+    debug_mode:                 document.getElementById('cfgDebug').value,
+    auto_controller_detection:  document.getElementById('cfgAutoCtrl').value,
+    deadzone_p1:                document.getElementById('cfgDz1').value,
+    deadzone_p2:                document.getElementById('cfgDz2').value,
+    deadzone_p3:                document.getElementById('cfgDz3').value,
+    deadzone_p4:                document.getElementById('cfgDz4').value,
+  };
+  const d = await api('/api/config', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify(payload)
+  });
+  if (d.error) showAlert('cfgAlert', 'Error: ' + d.error, true);
+  else showAlert('cfgAlert', 'Configuration saved successfully. Restart the service to apply changes.', false);
+}
+
+// ---- Monitor ----
+let autoRefreshTimer = null;
+
+function toggleAutoRefresh() {
+  if (document.getElementById('autoRefresh').checked) {
+    autoRefreshTimer = setInterval(fetchLogs, 5000);
+  } else {
+    clearInterval(autoRefreshTimer);
+    autoRefreshTimer = null;
+  }
+}
+
+async function fetchLogs() {
+  const lines = document.getElementById('logLines').value;
+  const d = await api('/api/logs?lines=' + lines);
+  const box = document.getElementById('logBox');
+  if (d.error) { box.textContent = 'Error: ' + d.error; return; }
+
+  box.innerHTML = '';
+  (d.lines || []).forEach(line => {
+    const div = document.createElement('div');
+    div.className = 'log-line';
+    if (/error|critical|fail/i.test(line)) div.classList.add('log-err');
+    else if (/warning|warn/i.test(line))   div.classList.add('log-warn');
+    else div.classList.add('log-info');
+    div.textContent = line;
+    box.appendChild(div);
+  });
+
+  if (document.getElementById('scrollBottom').checked) {
+    box.scrollTop = box.scrollHeight;
+  }
+
+  // JVS activity – filter for JVS-specific lines
+  const jvsBox = document.getElementById('jvsBox');
+  const jvsLines = (d.lines || []).filter(l =>
+    /jvs|packet|checksum|cmd|emulat|address|sense|RS485/i.test(l));
+  jvsBox.innerHTML = '';
+  if (jvsLines.length === 0) {
+    const div = document.createElement('div');
+    div.className = 'log-line log-info';
+    div.textContent = 'No JVS activity in current log window.';
+    jvsBox.appendChild(div);
+  } else {
+    jvsLines.forEach(line => {
+      const div = document.createElement('div');
+      div.className = 'log-line';
+      if (/error|critical|fail/i.test(line)) div.classList.add('log-err');
+      else if (/warning|warn/i.test(line))   div.classList.add('log-warn');
+      else div.classList.add('log-info');
+      div.textContent = line;
+      jvsBox.appendChild(div);
+    });
+    jvsBox.scrollTop = jvsBox.scrollHeight;
+  }
+}
+
+// ---- Init ----
+refreshDashboard();
+setInterval(refreshDashboard, 10000);
+</script>
+</body>
+</html>
+"""
+
+# ---------------------------------------------------------------------------
+# Config helpers
+# ---------------------------------------------------------------------------
+
+def read_config():
+    """Parse the modernjvs config file into a dict."""
+    cfg = {}
+    try:
+        with open(CONFIG_PATH, "r") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                parts = line.split(None, 1)
+                if len(parts) == 2:
+                    cfg[parts[0]] = parts[1].strip()
+    except OSError:
+        pass
+    return cfg
+
+
+def write_config(new_values):
+    """
+    Write updated key=value pairs back into the config file.
+    Preserves comments and unknown lines; updates existing keys in-place.
+    Appends new keys at the end if not already present.
+    """
+    # Map from API key names to config file directive names
+    key_map = {
+        "emulate":                    "EMULATE",
+        "game":                       "DEFAULT_GAME",
+        "device":                     "DEVICE_PATH",
+        "sense_line_type":            "SENSE_LINE_TYPE",
+        "sense_line_pin":             "SENSE_LINE_PIN",
+        "debug_mode":                 "DEBUG_MODE",
+        "auto_controller_detection":  "AUTO_CONTROLLER_DETECTION",
+        "deadzone_p1":                "ANALOG_DEADZONE_PLAYER_1",
+        "deadzone_p2":                "ANALOG_DEADZONE_PLAYER_2",
+        "deadzone_p3":                "ANALOG_DEADZONE_PLAYER_3",
+        "deadzone_p4":                "ANALOG_DEADZONE_PLAYER_4",
+    }
+
+    # Build a dict of directive → new value
+    updates = {}
+    for api_key, directive in key_map.items():
+        if api_key in new_values:
+            updates[directive] = new_values[api_key]
+
+    try:
+        with open(CONFIG_PATH, "r") as f:
+            lines = f.readlines()
+    except OSError as e:
+        return False, str(e)
+
+    written = set()
+    new_lines = []
+    for line in lines:
+        stripped = line.strip()
+        if stripped and not stripped.startswith("#"):
+            parts = stripped.split(None, 1)
+            if parts and parts[0] in updates:
+                new_lines.append(f"{parts[0]} {updates[parts[0]]}\n")
+                written.add(parts[0])
+                continue
+        new_lines.append(line)
+
+    # Append any directives that weren't already in the file
+    for directive, value in updates.items():
+        if directive not in written:
+            new_lines.append(f"{directive} {value}\n")
+
+    try:
+        with open(CONFIG_PATH, "w") as f:
+            f.writelines(new_lines)
+    except OSError as e:
+        return False, str(e)
+
+    return True, "ok"
+
+
+def config_to_api(cfg):
+    """Convert raw directive dict to the API response shape."""
+    return {
+        "emulate":                    cfg.get("EMULATE",                    ""),
+        "game":                       cfg.get("DEFAULT_GAME",               ""),
+        "device":                     cfg.get("DEVICE_PATH",                ""),
+        "sense_line_type":            cfg.get("SENSE_LINE_TYPE",            "1"),
+        "sense_line_pin":             cfg.get("SENSE_LINE_PIN",             "26"),
+        "debug_mode":                 cfg.get("DEBUG_MODE",                 "0"),
+        "auto_controller_detection":  cfg.get("AUTO_CONTROLLER_DETECTION",  "1"),
+        "deadzone_p1":                cfg.get("ANALOG_DEADZONE_PLAYER_1",   "0.2"),
+        "deadzone_p2":                cfg.get("ANALOG_DEADZONE_PLAYER_2",   "0.2"),
+        "deadzone_p3":                cfg.get("ANALOG_DEADZONE_PLAYER_3",   "0.2"),
+        "deadzone_p4":                cfg.get("ANALOG_DEADZONE_PLAYER_4",   "0.2"),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Service helpers
+# ---------------------------------------------------------------------------
+
+def systemctl(*args):
+    """Run a systemctl command; return (success, output)."""
+    try:
+        result = subprocess.run(
+            ["systemctl"] + list(args),
+            capture_output=True, text=True, timeout=15
+        )
+        return result.returncode == 0, (result.stdout + result.stderr).strip()
+    except Exception as e:
+        return False, str(e)
+
+
+def get_service_status():
+    """Return a dict with service state information."""
+    ok, out = systemctl("show", SERVICE_NAME,
+                        "--property=ActiveState,MainPID,ActiveEnterTimestamp")
+    props = {}
+    for line in out.splitlines():
+        if "=" in line:
+            k, _, v = line.partition("=")
+            props[k.strip()] = v.strip()
+
+    cfg = config_to_api(read_config())
+    return {
+        "active_state":  props.get("ActiveState", "unknown"),
+        "main_pid":      props.get("MainPID", ""),
+        "active_since":  props.get("ActiveEnterTimestamp", ""),
+        "config":        cfg,
+    }
+
+
+def get_logs(lines=100):
+    """Return recent journalctl log lines for the service."""
+    try:
+        result = subprocess.run(
+            ["journalctl", "-u", SERVICE_NAME, "-n", str(int(lines)),
+             "--no-pager", "--output=short-iso"],
+            capture_output=True, text=True, timeout=15
+        )
+        return result.stdout.splitlines()
+    except Exception as e:
+        return [f"Error reading logs: {e}"]
+
+
+def list_dir(path):
+    """Return sorted list of plain files in a directory (no dotfiles)."""
+    try:
+        return sorted(
+            e for e in os.listdir(path)
+            if not e.startswith(".") and os.path.isfile(os.path.join(path, e))
+        )
+    except OSError:
+        return []
+
+
+# ---------------------------------------------------------------------------
+# Logo helper
+# ---------------------------------------------------------------------------
+
+def get_logo_bytes():
+    """Return PNG logo bytes, trying the installed path first then the repo path."""
+    candidates = [
+        LOGO_PATH,
+        "/usr/share/modernjvs/modernjvs2.png",
+        os.path.join(os.path.dirname(__file__), "..", "..", "docs", "modernjvs2.png"),
+    ]
+    for p in candidates:
+        try:
+            with open(os.path.realpath(p), "rb") as f:
+                return f.read()
+        except OSError:
+            pass
+    return None
+
+
+# ---------------------------------------------------------------------------
+# HTTP request handler
+# ---------------------------------------------------------------------------
+
+class WebUIHandler(http.server.BaseHTTPRequestHandler):
+    """Simple HTTP handler that serves the WebUI and its JSON API."""
+
+    def log_message(self, fmt, *args):  # silence default Apache-style log
+        pass
+
+    # ---- routing ----
+
+    def do_GET(self):
+        parsed = urllib.parse.urlparse(self.path)
+        path = parsed.path
+        query = urllib.parse.parse_qs(parsed.query)
+
+        if path == "/" or path == "/index.html":
+            self._send_html(HTML_PAGE)
+        elif path == "/logo":
+            self._serve_logo()
+        elif path == "/api/status":
+            self._json(get_service_status())
+        elif path == "/api/config":
+            self._json(config_to_api(read_config()))
+        elif path == "/api/logs":
+            lines = int(query.get("lines", ["100"])[0])
+            lines = max(10, min(lines, 1000))
+            self._json({"lines": get_logs(lines)})
+        elif path == "/api/ios":
+            self._json({"ios": list_dir(IOS_PATH)})
+        elif path == "/api/games":
+            self._json({"games": list_dir(GAMES_PATH)})
+        elif path == "/api/devices":
+            self._json({"devices": list_dir(DEVICES_PATH)})
+        else:
+            self._not_found()
+
+    def do_POST(self):
+        parsed = urllib.parse.urlparse(self.path)
+        path = parsed.path
+        body = self._read_body()
+
+        if path == "/api/config":
+            try:
+                data = json.loads(body) if body else {}
+            except json.JSONDecodeError:
+                self._json({"error": "Invalid JSON"}, HTTPStatus.BAD_REQUEST)
+                return
+            ok, msg = write_config(data)
+            if ok:
+                self._json({"ok": True})
+            else:
+                self._json({"error": msg}, HTTPStatus.INTERNAL_SERVER_ERROR)
+
+        elif path == "/api/control":
+            try:
+                data = json.loads(body) if body else {}
+            except json.JSONDecodeError:
+                self._json({"error": "Invalid JSON"}, HTTPStatus.BAD_REQUEST)
+                return
+            action = data.get("action", "")
+            if action not in ("start", "stop", "restart"):
+                self._json({"error": "Invalid action"}, HTTPStatus.BAD_REQUEST)
+                return
+            ok, msg = systemctl(action, SERVICE_NAME)
+            if ok:
+                self._json({"ok": True})
+            else:
+                self._json({"error": msg}, HTTPStatus.INTERNAL_SERVER_ERROR)
+
+        else:
+            self._not_found()
+
+    # ---- response helpers ----
+
+    def _read_body(self):
+        length = int(self.headers.get("Content-Length", 0))
+        return self.rfile.read(length).decode("utf-8") if length else ""
+
+    def _send_html(self, html):
+        data = html.encode("utf-8")
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", len(data))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def _json(self, obj, status=HTTPStatus.OK):
+        data = json.dumps(obj).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", len(data))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def _serve_logo(self):
+        logo = get_logo_bytes()
+        if logo is None:
+            self._not_found()
+            return
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", "image/png")
+        self.send_header("Content-Length", len(logo))
+        self.send_header("Cache-Control", "max-age=86400")
+        self.end_headers()
+        self.wfile.write(logo)
+
+    def _not_found(self):
+        self._json({"error": "Not found"}, HTTPStatus.NOT_FOUND)
+
+
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
+
+def main():
+    server = http.server.ThreadingHTTPServer(("0.0.0.0", WEBUI_PORT), WebUIHandler)
+    print(f"ModernJVS WebUI running on http://0.0.0.0:{WEBUI_PORT}")
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    server.server_close()
+
+
+if __name__ == "__main__":
+    main()

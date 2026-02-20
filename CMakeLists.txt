@@ -88,6 +88,24 @@ install(FILES
     DESTINATION "/etc/modules-load.d/"
 )
 
+install(PROGRAMS
+    ${CMAKE_SOURCE_DIR}/src/webui/modernjvs-webui
+    COMPONENT ${PROJECT_NAME}
+    DESTINATION "bin/"
+)
+
+install(FILES
+    ${CMAKE_SOURCE_DIR}/docs/modernjvs-webui.service
+    COMPONENT ${PROJECT_NAME}
+    DESTINATION "/etc/systemd/system/"
+)
+
+install(FILES
+    ${CMAKE_SOURCE_DIR}/docs/modernjvs2.png
+    COMPONENT ${PROJECT_NAME}
+    DESTINATION "/usr/share/modernjvs/"
+)
+
 # CPack configuration for DEB package generation
 set(CPACK_GENERATOR "DEB")
 set(CPACK_DEBIAN_PACKAGE_MAINTAINER "dazzaXx")

@@ -1,0 +1,13 @@
+[Unit]
+Description=ModernJVS WebUI
+After=network.target
+
+[Service]
+User=root
+Type=simple
+Restart=always
+RestartSec=5
+ExecStart=/usr/bin/python3 /usr/bin/modernjvs-webui
+
+[Install]
+WantedBy=multi-user.target
