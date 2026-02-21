@@ -715,6 +715,7 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
         <div class="stat-card"><div class="val" id="currentGame">—</div><div class="lbl">Current Game</div></div>
         <div class="stat-card"><div class="val" id="currentDevice">—</div><div class="lbl">Device Path</div></div>
       </div>
+      <div id="playerSlots"></div>
     </div>
 
     <div class="card">
@@ -1084,6 +1085,18 @@ async function refreshDashboard() {
   document.getElementById('currentIO').textContent   = d.config?.emulate  || '—';
   document.getElementById('currentGame').textContent = d.config?.game     || '—';
   document.getElementById('currentDevice').textContent = d.config?.device || '—';
+
+  const players = d.players || [];
+  const psEl = document.getElementById('playerSlots');
+  if (players.length > 0) {
+    psEl.innerHTML = '<div class="stat-grid" style="margin-top:0.75rem;">'
+      + players.map(p =>
+          `<div class="stat-card"><div class="val" style="font-size:0.85rem;word-break:break-all;">${_escHtml(p.profile)}</div><div class="lbl">Player ${p.player}</div></div>`
+        ).join('')
+      + '</div>';
+  } else {
+    psEl.innerHTML = '';
+  }
 }
 
 async function refreshSysinfo() {
@@ -2029,6 +2042,37 @@ def systemctl(*args):
         return False, str(e)
 
 
+def get_player_slots():
+    """Parse player slot assignments from the most recent service run's logs.
+
+    Scans the service log for ``Player N:`` lines emitted by initInputs()
+    and returns them as a list sorted by player number.  Only the most recent
+    service start (identified by the last 'ModernJVS Version' banner) is used
+    so that stale entries from a previous run are not shown.
+
+    Returns a list of dicts: [{"player": int, "profile": str}, ...]
+    """
+    logs = get_logs(200)
+    # Find index of the last service startup banner
+    start_idx = 0
+    for i in range(len(logs) - 1, -1, -1):
+        if "ModernJVS Version" in logs[i]:
+            start_idx = i
+            break
+
+    # Pattern matches both variants:
+    #   Player 1:                  nintendo-wii-remote (Wiimote+Nunchuk)
+    #   Player 1 (Fixed via config):  sony-dualshock4
+    _player_re = re.compile(r'Player\s+(\d+)(?:\s+\([^)]*\))?\s*:\s+(\S[^\n]*)')
+    players = {}
+    for line in logs[start_idx:]:
+        m = _player_re.search(line)
+        if m:
+            num = int(m.group(1))
+            players[num] = m.group(2).strip()
+    return [{"player": k, "profile": v} for k, v in sorted(players.items())]
+
+
 def get_service_status():
     """Return a dict with service state information."""
     ok, out = systemctl("show", SERVICE_NAME,
@@ -2045,6 +2089,7 @@ def get_service_status():
         "main_pid":      props.get("MainPID", ""),
         "active_since":  props.get("ActiveEnterTimestamp", ""),
         "config":        cfg,
+        "players":       get_player_slots(),
     }
 
 
