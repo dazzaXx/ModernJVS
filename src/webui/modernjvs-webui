@@ -52,6 +52,7 @@ _SETTINGS_DEFAULTS = {
     "theme":          "black",
     "compact":        False,
     "noAnim":         False,
+    "showSticks":     True,
     "bgScrimOpacity": 0.70,   # 0.0 = no overlay, 0.9 = near-black overlay
 }
 
@@ -972,6 +973,13 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
             <span>Disable all CSS transitions and animations</span>
           </div>
         </div>
+        <div class="settings-field">
+          <label>Corner Image</label>
+          <div class="settings-toggle">
+            <input type="checkbox" id="stShowSticks" checked>
+            <span>Show decorative Sticks image in the bottom-right corner</span>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -1338,6 +1346,9 @@ function applyAppearanceSettings(s) {
 
   // No animations
   document.body.classList.toggle('no-anim', !!s.noAnim);
+  // Show/hide the sticks corner image
+  const sticksEl = document.getElementById('sticks');
+  if (sticksEl) sticksEl.style.display = s.showSticks === false ? 'none' : '';
 
   // Background overlay (scrim) opacity
   const scrim = (typeof s.bgScrimOpacity === 'number') ? s.bgScrimOpacity : 0.70;
@@ -1492,6 +1503,7 @@ async function initAppearancePanel() {
   document.getElementById('stTheme').value      = d.theme     || 'black';
   document.getElementById('stCompact').checked  = !!d.compact;
   document.getElementById('stNoAnim').checked   = !!d.noAnim;
+  document.getElementById('stShowSticks').checked = d.showSticks !== false;
 
   // Scrim slider – live preview of opacity value
   const scrimVal = (typeof d.bgScrimOpacity === 'number') ? d.bgScrimOpacity : 0.70;
@@ -1528,6 +1540,7 @@ async function saveAppearanceSettings() {
     theme:          document.getElementById('stTheme').value,
     compact:        document.getElementById('stCompact').checked,
     noAnim:         document.getElementById('stNoAnim').checked,
+    showSticks:     document.getElementById('stShowSticks').checked,
     bgScrimOpacity: parseFloat(document.getElementById('stBgScrim').value),
   };
   const d = await api('/api/webui/settings', {
@@ -1543,7 +1556,7 @@ async function saveAppearanceSettings() {
 }
 
 async function resetAppearanceSettings() {
-  const defaults = {theme:'black', compact:false, noAnim:false,
+  const defaults = {theme:'black', compact:false, noAnim:false, showSticks:true,
                     bgScrimOpacity:0.70};
   await api('/api/webui/settings', {
     method: 'POST',
