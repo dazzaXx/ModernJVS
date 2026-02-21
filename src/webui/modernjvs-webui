@@ -397,8 +397,8 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
     --surface: #e0e0ea;
     --card:    #ffffff;
     --border:  #c4c4d4;
-    --accent:  #160002;
-    --accent2: #262626;
+    --accent:  #000000;
+    --accent2: #000000;
     --text:    #1a1a2e;
     --muted:   #55558a;
   }
@@ -526,7 +526,7 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
      Pure Dark / Dark use the original logo colours (no rotation). */
   [data-theme="dark"]      #logo { filter: none; }
   [data-theme="black"]     #logo { filter: none; }
-  [data-theme="light"]     #logo { filter: brightness(0.15); }
+  [data-theme="light"]     #logo { filter: brightness(0) saturate(0); }
   [data-theme="midnight"]  #logo { filter: hue-rotate(212deg) saturate(1.1); }
   [data-theme="dracula"]   #logo { filter: hue-rotate(268deg) saturate(1.2); }
   [data-theme="terminal"]  #logo { filter: hue-rotate(148deg) saturate(1.2); }
