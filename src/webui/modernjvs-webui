@@ -1198,6 +1198,11 @@ const THEME_NAMES = {
   terminal: 'Green Terminal',
 };
 
+// Default colour values — must match Python _SETTINGS_DEFAULTS
+const DEFAULT_ACCENT     = '#970011';
+const DEFAULT_TEXT_COLOR = '#e2e2f0';
+const DEFAULT_BG_COLOR   = '#000000';
+
 // Seconds to wait for the WebUI service to come back up after a restart
 const WEBUI_RESTART_WAIT_SECS = 8;
 
@@ -1208,7 +1213,7 @@ function applyAppearanceSettings(s) {
   root.setAttribute('data-theme', s.theme || 'black');
 
   // Accent colour (CSS custom property override on :root)
-  if (s.accent && s.accent !== '#970011') {
+  if (s.accent && s.accent !== DEFAULT_ACCENT) {
     root.style.setProperty('--accent',  s.accent);
     root.style.setProperty('--accent2', s.accent);  // same hue; theme CSS handles lightening
   } else {
@@ -1217,7 +1222,7 @@ function applyAppearanceSettings(s) {
   }
 
   // Text / font colour
-  if (s.textColor && s.textColor !== '#e2e2f0') {
+  if (s.textColor && s.textColor !== DEFAULT_TEXT_COLOR) {
     root.style.setProperty('--text', s.textColor);
   } else {
     root.style.removeProperty('--text');
@@ -1226,7 +1231,7 @@ function applyAppearanceSettings(s) {
   // Font is applied server-side via applyServerFont(); nothing to do here.
 
   // Background colour
-  if (s.bgColor && s.bgColor !== '#000000') {
+  if (s.bgColor && s.bgColor !== DEFAULT_BG_COLOR) {
     root.style.setProperty('--bg', s.bgColor);
     document.body.style.backgroundColor = s.bgColor;
   } else {
@@ -1391,9 +1396,9 @@ async function initAppearancePanel() {
 
   // Populate theme selector and colour pickers
   document.getElementById('stTheme').value      = d.theme     || 'black';
-  document.getElementById('stAccent').value     = d.accent    || '#970011';
-  document.getElementById('stTextColor').value  = d.textColor || '#e2e2f0';
-  document.getElementById('stBgColor').value    = d.bgColor   || '#000000';
+  document.getElementById('stAccent').value     = d.accent    || DEFAULT_ACCENT;
+  document.getElementById('stTextColor').value  = d.textColor || DEFAULT_TEXT_COLOR;
+  document.getElementById('stBgColor').value    = d.bgColor   || DEFAULT_BG_COLOR;
   document.getElementById('stCompact').checked  = !!d.compact;
   document.getElementById('stNoAnim').checked   = !!d.noAnim;
 
@@ -1450,8 +1455,8 @@ async function saveAppearanceSettings() {
 }
 
 async function resetAppearanceSettings() {
-  const defaults = {theme:'black', accent:'#970011', textColor:'#e2e2f0',
-                    bgColor:'#000000', compact:false, noAnim:false,
+  const defaults = {theme:'black', accent:DEFAULT_ACCENT, textColor:DEFAULT_TEXT_COLOR,
+                    bgColor:DEFAULT_BG_COLOR, compact:false, noAnim:false,
                     bgScrimOpacity:0.70};
   await api('/api/webui/settings', {
     method: 'POST',
