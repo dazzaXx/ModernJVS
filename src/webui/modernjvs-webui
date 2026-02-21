@@ -397,8 +397,8 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
     --surface: #e0e0ea;
     --card:    #ffffff;
     --border:  #c4c4d4;
-    --accent:  #970011;
-    --accent2: #bf0017;
+    --accent:  #160002;
+    --accent2: #262626;
     --text:    #1a1a2e;
     --muted:   #55558a;
   }
