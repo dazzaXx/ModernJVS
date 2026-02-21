@@ -1375,15 +1375,21 @@ async function loadBluetoothSection() {
   if (!s.bluez_available) {
     html = 'Bluetooth tools (BlueZ) are not installed. ' + setupBtn;
   } else if (s.rfkill_soft_blocked) {
+    const cfgTool = s.is_dietpi
+      ? '<code>sudo dietpi-config</code> (Network Options → Bluetooth)'
+      : '<code>sudo raspi-config</code>';
     html = 'Bluetooth is disabled (rfkill). To enable it, run: '
-      + '<code>sudo rfkill unblock bluetooth</code> or use <code>sudo raspi-config</code>.';
+      + '<code>sudo rfkill unblock bluetooth</code> or use ' + cfgTool + '.';
   } else if (s.hci_present && !s.bt_service_running) {
     html = 'A Bluetooth adapter is present but the Bluetooth service is not running. '
       + 'Start it with: <code>sudo systemctl enable --now bluetooth</code>';
   } else if (!s.hci_present) {
     if (s.is_pi5_or_later) {
+      const cfgTool5 = s.is_dietpi
+        ? '<code>sudo dietpi-config</code> (Network Options → Bluetooth)'
+        : '<code>sudo raspi-config</code>';
       html = 'No Bluetooth adapter detected on your Raspberry Pi 5. '
-        + 'Enable Bluetooth via <code>sudo raspi-config</code> or confirm the '
+        + 'Enable Bluetooth via ' + cfgTool5 + ' or confirm the '
         + '<code>bluetooth</code> service is running.';
     } else if (s.has_internal_bt && s.internal_bt_disabled) {
       html = 'Internal Bluetooth is disabled. Plug in a USB Bluetooth dongle to continue.';
@@ -2502,6 +2508,7 @@ def get_bluetooth_status():
       pi_gen          — integer Pi generation (0 = unknown/non-Pi or Pi Zero/1)
       has_internal_bt — True if this Pi model ships with an internal BT chip
       is_pi5_or_later — True for Pi 5+; these don't need the USB-dongle workaround
+      is_dietpi       — True when running on DietPi (uses dietpi-config, not raspi-config)
       hci_present     — True if at least one HCI Bluetooth adapter is visible
       bluez_available — True if bluetoothctl is on PATH
       bt_service_running — True if systemd bluetooth.service is active
@@ -2578,11 +2585,15 @@ def get_bluetooth_status():
         except OSError:
             continue
 
+    # ---- DietPi detection ----
+    is_dietpi = os.path.isfile("/etc/dietpi/.version")
+
     return {
         "pi_model":             pi_model,
         "pi_gen":               pi_gen,
         "has_internal_bt":      has_internal_bt,
         "is_pi5_or_later":      is_pi5_or_later,
+        "is_dietpi":            is_dietpi,
         "hci_present":          hci_present,
         "bluez_available":      bluez_available,
         "bt_service_running":   bt_service_running,
