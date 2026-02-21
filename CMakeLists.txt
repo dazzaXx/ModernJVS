@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.10)
 
 project(modernjvs
-        VERSION "5.7.0"
+        VERSION "5.8.0"
         LANGUAGES "C"
         DESCRIPTION "JVS I/O Emulator"
         HOMEPAGE_URL "https://github.com/dazzaXx/ModernJVS"
@@ -88,8 +88,42 @@ install(FILES
     DESTINATION "/etc/modules-load.d/"
 )
 
+# WebUI – Python3 local-network web interface (opt-out with -DENABLE_WEBUI=OFF)
+option(ENABLE_WEBUI "Include the WebUI server in the installation" ON)
+if(ENABLE_WEBUI)
+    message(STATUS "WebUI: enabled (use -DENABLE_WEBUI=OFF to exclude)")
+    install(PROGRAMS
+        ${CMAKE_SOURCE_DIR}/src/webui/modernjvs-webui
+        COMPONENT ${PROJECT_NAME}
+        DESTINATION "bin/"
+    )
+
+    install(FILES
+        ${CMAKE_SOURCE_DIR}/docs/modernjvs-webui.service
+        COMPONENT ${PROJECT_NAME}
+        DESTINATION "/etc/systemd/system/"
+    )
+
+    install(FILES
+        ${CMAKE_SOURCE_DIR}/docs/modernjvs2.png
+        ${CMAKE_SOURCE_DIR}/docs/Sticks.png
+        COMPONENT ${PROJECT_NAME}
+        DESTINATION "/usr/share/modernjvs/"
+    )
+else()
+    message(STATUS "WebUI: disabled")
+endif()
+
 # CPack configuration for DEB package generation
 set(CPACK_GENERATOR "DEB")
 set(CPACK_DEBIAN_PACKAGE_MAINTAINER "dazzaXx")
 set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
+
+# Include the postrm maintainer script so dpkg can clean up runtime files
+# (webui-settings.json, webui-bg, webui-bg.mime) that are created after
+# installation and are therefore not tracked by dpkg.
+set(CPACK_DEBIAN_PACKAGE_CONTROL_EXTRA
+    "${CMAKE_SOURCE_DIR}/debian/postrm"
+)
+
 include(CPack)

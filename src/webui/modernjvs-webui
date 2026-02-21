@@ -1,0 +1,2477 @@
+#!/usr/bin/env python3
+# ModernJVS WebUI
+# A local-network web interface for configuring and monitoring ModernJVS.
+# Requires Python 3.6+ (stdlib only, no pip dependencies).
+
+import http.server
+import glob as _glob
+import ipaddress
+import json
+import os
+import re
+import subprocess
+import threading
+import urllib.parse
+import base64
+from http import HTTPStatus
+
+WEBUI_PORT = 8080
+CONFIG_PATH = "/etc/modernjvs/config"
+IOS_PATH = "/etc/modernjvs/ios"
+GAMES_PATH = "/etc/modernjvs/games"
+DEVICES_PATH = "/etc/modernjvs/devices"
+LOGO_PATH   = "/usr/share/modernjvs/modernjvs2.png"
+STICKS_PATH = "/usr/share/modernjvs/Sticks.png"
+SERVICE_NAME = "modernjvs"
+WEBUI_SERVICE_NAME = "modernjvs-webui"
+
+# Background image upload limits
+MAX_UPLOAD_BYTES = 20 * 1024 * 1024         # 20 MB hard cap
+ALLOWED_IMAGE_MIMES = {
+    "image/jpeg", "image/png", "image/gif",
+    "image/webp", "image/svg+xml", "image/bmp",
+}
+MAX_SETTING_STRING_LENGTH = 64  # cap per string field in webui-settings.json
+MAX_FONT_UPLOAD_BYTES = 10 * 1024 * 1024   # 10 MB hard cap for font files
+ALLOWED_FONT_EXTS  = {".ttf", ".otf", ".woff", ".woff2"}
+FONT_EXT_TO_MIME   = {
+    ".ttf":   "font/ttf",
+    ".otf":   "font/otf",
+    ".woff":  "font/woff",
+    ".woff2": "font/woff2",
+}
+
+# Server-side WebUI settings persistence
+WEBUI_SETTINGS_PATH  = "/etc/modernjvs/webui-settings.json"
+WEBUI_BG_PATH        = "/etc/modernjvs/webui-bg"
+WEBUI_BG_MIME_PATH   = "/etc/modernjvs/webui-bg.mime"
+WEBUI_FONT_PATH      = "/etc/modernjvs/webui-font"
+WEBUI_FONT_NAME_PATH = "/etc/modernjvs/webui-font-name"
+
+_SETTINGS_DEFAULTS = {
+    "theme":          "black",
+    "compact":        False,
+    "noAnim":         False,
+    "showSticks":     True,
+    "bgScrimOpacity": 0.70,   # 0.0 = no overlay, 0.9 = near-black overlay
+}
+
+_settings_lock = threading.Lock()
+
+
+def read_webui_settings():
+    """Return the saved WebUI appearance settings dict (merged with defaults)."""
+    try:
+        with open(WEBUI_SETTINGS_PATH, "r") as f:
+            data = json.load(f)
+        # Only keep known keys to avoid polluting the response
+        return {k: data.get(k, v) for k, v in _SETTINGS_DEFAULTS.items()}
+    except (OSError, json.JSONDecodeError):
+        return dict(_SETTINGS_DEFAULTS)
+
+
+def write_webui_settings(settings):
+    """Persist WebUI appearance settings to disk. Returns (ok, msg)."""
+    # Only persist known keys; validate types to prevent corruption
+    cleaned = {}
+    for key, default in _SETTINGS_DEFAULTS.items():
+        val = settings.get(key, default)
+        # Coerce to the same type as the default
+        try:
+            if isinstance(default, bool):
+                cleaned[key] = bool(val)
+            elif isinstance(default, float):
+                # Clamp float settings to [0.0, 1.0] (covers bgScrimOpacity)
+                cleaned[key] = max(0.0, min(1.0, float(val)))
+            elif isinstance(default, str):
+                cleaned[key] = str(val)[:MAX_SETTING_STRING_LENGTH]
+            else:
+                cleaned[key] = val
+        except (TypeError, ValueError):
+            cleaned[key] = default
+    try:
+        with _settings_lock:
+            os.makedirs(os.path.dirname(WEBUI_SETTINGS_PATH), exist_ok=True)
+            with open(WEBUI_SETTINGS_PATH, "w") as f:
+                json.dump(cleaned, f, indent=2)
+        return True, "ok"
+    except OSError as e:
+        return False, str(e)
+
+# ---------------------------------------------------------------------------
+# Internet access protection – only allow private / local-network addresses.
+# This prevents the WebUI from being accessible from the public internet even
+# when the Raspberry Pi has an internet connection.
+# ---------------------------------------------------------------------------
+
+_PRIVATE_NETS = [
+    ipaddress.ip_network("127.0.0.0/8"),    # loopback
+    ipaddress.ip_network("10.0.0.0/8"),     # RFC 1918
+    ipaddress.ip_network("172.16.0.0/12"),  # RFC 1918
+    ipaddress.ip_network("192.168.0.0/16"), # RFC 1918
+    ipaddress.ip_network("169.254.0.0/16"), # link-local (RFC 3927)
+    ipaddress.ip_network("::1/128"),        # IPv6 loopback
+    ipaddress.ip_network("fc00::/7"),       # IPv6 unique local (ULA)
+    ipaddress.ip_network("fe80::/10"),      # IPv6 link-local
+]
+
+
+def is_private_ip(addr):
+    """Return True if addr is a private/local address that should be allowed.
+
+    Also handles IPv4-mapped IPv6 addresses (::ffff:x.x.x.x) transparently.
+    """
+    try:
+        ip = ipaddress.ip_address(addr)
+        # Unwrap IPv4-mapped IPv6 so the RFC-1918 nets match correctly
+        if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped:
+            ip = ip.ipv4_mapped
+        return any(ip in net for net in _PRIVATE_NETS)
+    except ValueError:
+        return False
+
+
+# Simple one-page HTML shown to callers from public IPs
+_ACCESS_DENIED_HTML = """\
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><title>Access Denied \u2013 ModernJVS WebUI</title>
+<style>
+body{background:#000000;color:#e2e2f0;font-family:system-ui,sans-serif;
+     display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0}
+.box{background:#1e1e2e;border:1px solid #2e2e42;border-radius:8px;
+     padding:2.5rem;max-width:500px;text-align:center}
+h1{color:#ff5555;margin-bottom:.75rem;font-size:1.4rem}
+p{color:#7878a0;line-height:1.6;margin:.5rem 0}
+code{color:#ff7e7e;font-family:monospace}
+</style></head>
+<body><div class="box">
+<h1>\U0001f512 Access Denied</h1>
+<p>The ModernJVS WebUI is only accessible from your <strong>local network</strong>.</p>
+<p>Your IP address <code>{client_ip}</code> is not a private network address.</p>
+<p>Connect from a device on the same LAN as the Raspberry Pi.</p>
+</div></body></html>
+"""
+
+# ---------------------------------------------------------------------------
+# HTML / CSS / JS – embedded so the server is a single file with no assets
+# ---------------------------------------------------------------------------
+_HTML_TEMPLATE = r"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ModernJVS WebUI</title>
+<style>
+  :root {
+    --bg:      #0d0d14;
+    --surface: #16161f;
+    --card:    #1e1e2e;
+    --border:  #2e2e42;
+    --accent:  #970011;
+    --accent2: #970011;
+    --text:    #e2e2f0;
+    --muted:   #7878a0;
+    --green:   #50fa7b;
+    --yellow:  #f1fa8c;
+    --red:     #ff5555;
+    --radius:  8px;
+    --font:    'Segoe UI', system-ui, sans-serif;
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: var(--font); min-height: 100vh; }
+
+  /* --- header --- */
+  header {
+    background: var(--surface);
+    border-bottom: 2px solid var(--accent);
+    padding: 0.75rem 2rem;
+    display: flex;
+    align-items: center;
+    gap: 1.5rem;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+  header img { height: 42px; }
+  header h1 { font-size: 1.4rem; color: var(--muted); font-weight: 400; letter-spacing: 0.05em; }
+  .status-badge {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.85rem;
+    color: var(--muted);
+  }
+  .dot {
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    background: var(--muted);
+    display: inline-block;
+  }
+  .dot.running { background: var(--green); box-shadow: 0 0 6px var(--green); }
+  .dot.stopped { background: var(--red); }
+
+  /* --- layout --- */
+  .container { max-width: 1100px; margin: 0 auto; padding: 1.5rem; position: relative; z-index: 2; }
+  footer { text-align: center; color: var(--muted); font-size: 0.78rem; padding: 1.5rem; position: relative; z-index: 2; }
+
+  /* --- tabs --- */
+  .tabs { display: flex; gap: 0.25rem; margin-bottom: 1.5rem; border-bottom: 2px solid var(--border); }
+  .tab {
+    padding: 0.6rem 1.25rem;
+    background: none;
+    border: none;
+    color: var(--muted);
+    cursor: pointer;
+    font-size: 0.95rem;
+    font-family: var(--font);
+    border-bottom: 2px solid transparent;
+    margin-bottom: -2px;
+    transition: color 0.15s, border-color 0.15s;
+  }
+  .tab:hover { color: var(--text); }
+  .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+  .panel { display: none; }
+  .panel.active { display: block; }
+
+  /* --- card --- */
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 1.25rem;
+    margin-bottom: 1.25rem;
+  }
+  .card h2 { font-size: 1rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 1rem; }
+
+  /* --- control row --- */
+  .control-row { display: flex; gap: 0.75rem; flex-wrap: wrap; align-items: center; }
+  .btn {
+    padding: 0.55rem 1.25rem;
+    border-radius: var(--radius);
+    border: none;
+    cursor: pointer;
+    font-family: var(--font);
+    font-size: 0.9rem;
+    font-weight: 600;
+    transition: opacity 0.15s, transform 0.1s;
+  }
+  .btn:active { transform: scale(0.97); }
+  .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+  .btn-start  { background: var(--green);  color: #0d0d14; }
+  .btn-stop   { background: var(--red);    color: #fff; }
+  .btn-restart{ background: var(--yellow); color: #0d0d14; }
+  .btn-save   { background: var(--accent); color: #fff; }
+  .btn-refresh{ background: var(--border); color: var(--text); }
+
+  /* --- form --- */
+  .form-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1rem; }
+  .field { display: flex; flex-direction: column; gap: 0.35rem; }
+  .field label { font-size: 0.82rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+  .field select, .field input[type="text"], .field input[type="number"] {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    color: var(--text);
+    padding: 0.5rem 0.75rem;
+    font-family: var(--font);
+    font-size: 0.9rem;
+    width: 100%;
+    transition: border-color 0.15s;
+  }
+  .field select:focus, .field input:focus { outline: none; border-color: var(--accent); }
+  .field select option { background: var(--surface); }
+
+  /* --- log terminal --- */
+  .log-wrap {
+    background: #0a0a10;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    height: 420px;
+    overflow-y: auto;
+    padding: 0.75rem 1rem;
+    font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+    font-size: 0.8rem;
+    line-height: 1.55;
+  }
+  .log-wrap .log-line { white-space: pre-wrap; word-break: break-all; }
+  .log-wrap .log-err  { color: var(--red); }
+  .log-wrap .log-warn { color: var(--yellow); }
+  .log-wrap .log-info { color: var(--text); }
+  .log-controls { display: flex; gap: 0.75rem; align-items: center; margin-bottom: 0.75rem; flex-wrap: wrap; }
+  .log-controls label { color: var(--muted); font-size: 0.85rem; display: flex; align-items: center; gap: 0.4rem; }
+
+  /* --- status grid --- */
+  .stat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 1rem; }
+  .stat-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 1rem;
+    text-align: center;
+  }
+  .stat-card .val { font-size: 1.4rem; font-weight: 700; color: var(--accent2); }
+  .stat-card .lbl { font-size: 0.78rem; color: var(--muted); margin-top: 0.3rem; text-transform: uppercase; letter-spacing: 0.06em; }
+
+  /* --- version badge in header --- */
+  .ver-badge {
+    display: none;
+    font-size: 0.72rem;
+    color: var(--muted);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0.2rem 0.5rem;
+    margin-left: 0.5rem;
+    vertical-align: middle;
+    white-space: nowrap;
+  }
+  .ver-badge.visible { display: inline-block; }
+
+  /* --- device table --- */
+  .device-table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+  .device-table th { text-align: left; color: var(--muted); font-weight: 600; padding: 0.4rem 0.6rem; border-bottom: 1px solid var(--border); font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.06em; }
+  .device-table td { padding: 0.4rem 0.6rem; border-bottom: 1px solid rgba(46,46,66,0.5); color: var(--text); }
+  .device-table tr:last-child td { border-bottom: none; }
+  .device-table tr:hover td { background: rgba(255,255,255,0.03); }
+  .device-table td code { color: var(--accent2); font-family: monospace; font-size: 0.82rem; }
+
+  /* --- usage / progress bars --- */
+  .usage-row { margin-bottom: 0.9rem; }
+  .usage-header { display: flex; justify-content: space-between; margin-bottom: 0.3rem; }
+  .usage-label { font-size: 0.82rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+  .usage-value { font-size: 0.82rem; color: var(--text); font-weight: 600; }
+  .progress { width: 100%; height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; }
+  .progress-bar { height: 100%; border-radius: 3px; background: var(--green); transition: width 0.5s ease, background 0.5s ease; }
+  .progress-bar.warm { background: var(--yellow); }
+  .progress-bar.hot  { background: var(--red); }
+  .sysinfo-footer { font-size: 0.78rem; color: var(--muted); margin-top: 0.25rem; }
+  .ip-info { font-size: 0.82rem; color: var(--muted); margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border); }
+  .ip-info span { color: var(--accent2); font-weight: 600; }
+
+  /* --- log filter bar --- */
+  .log-filter-bar { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
+  .log-filter-bar select, .log-filter-bar input[type="text"] {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: var(--text);
+    padding: 0.25rem 0.5rem;
+    font-family: var(--font);
+    font-size: 0.85rem;
+  }
+  .log-filter-bar input[type="text"] { width: 160px; }
+  .log-filter-bar input[type="text"]::placeholder { color: var(--muted); }
+  .btn-xs { padding: 0.25rem 0.6rem; font-size: 0.8rem; }
+
+  /* --- alert --- */
+  .alert {
+    padding: 0.7rem 1rem;
+    border-radius: var(--radius);
+    font-size: 0.88rem;
+    margin-bottom: 1rem;
+    display: none;
+  }
+  .alert.ok  { background: rgba(80,250,123,0.12); border: 1px solid var(--green); color: var(--green); display: block; }
+  .alert.err { background: rgba(255,85,85,0.12);  border: 1px solid var(--red);   color: var(--red);   display: block; }
+
+  /* --- footer --- */
+  footer a { color: var(--accent); text-decoration: none; }
+
+  /* ================================================================
+     THEMES – variable overrides applied via data-theme on <html>
+     ================================================================ */
+  /* dark is the default; defined explicitly so the selector pattern is consistent */
+  [data-theme="dark"] {
+    --bg:      #0d0d14;
+    --surface: #16161f;
+    --card:    #1e1e2e;
+    --border:  #2e2e42;
+    --accent:  #970011;
+    --accent2: #970011;
+    --text:    #e2e2f0;
+    --muted:   #7878a0;
+  }
+  [data-theme="light"] {
+    --bg:      #f0f0f5;
+    --surface: #e0e0ea;
+    --card:    #ffffff;
+    --border:  #c4c4d4;
+    --accent:  #000000;
+    --accent2: #000000;
+    --text:    #1a1a2e;
+    --muted:   #55558a;
+  }
+  [data-theme="midnight"] {
+    --bg:      #080c18;
+    --surface: #0d1528;
+    --card:    #111c38;
+    --border:  #1a2d54;
+    --accent:  #3b82f6;
+    --accent2: #60a5fa;
+    --text:    #c5d8f5;
+    --muted:   #4d6a9a;
+  }
+  [data-theme="dracula"] {
+    --bg:      #1e1f29;
+    --surface: #282a36;
+    --card:    #313442;
+    --border:  #44475a;
+    --text:    #f8f8f2;
+    --muted:   #6272a4;
+    --accent:  #bd93f9;
+    --accent2: #ff79c6;
+  }
+  [data-theme="terminal"] {
+    --bg:      #0a0f0a;
+    --surface: #0d150d;
+    --card:    #111c11;
+    --border:  #1a2e1a;
+    --text:    #a0f0a0;
+    --muted:   #4a8a4a;
+    --accent:  #50fa7b;
+    --accent2: #69ff47;
+  }
+  [data-theme="black"] {
+    --bg:      #000000;
+    --surface: #0a0a0a;
+    --card:    #111111;
+    --border:  #1f1f1f;
+    --text:    #e2e2f0;
+    --muted:   #888888;
+  }
+  /* ---- Additional colour themes ---- */
+  [data-theme="ocean"] {
+    --bg:      #020c18;
+    --surface: #051422;
+    --card:    #071c30;
+    --border:  #0c2e4a;
+    --accent:  #0ea5e9;
+    --accent2: #38bdf8;
+    --text:    #e0f4ff;
+    --muted:   #4a7e99;
+  }
+  [data-theme="sunset"] {
+    --bg:      #1a0800;
+    --surface: #261000;
+    --card:    #2d1400;
+    --border:  #4a2000;
+    --accent:  #f97316;
+    --accent2: #fb923c;
+    --text:    #fde8cc;
+    --muted:   #8a5a2a;
+  }
+  [data-theme="forest"] {
+    --bg:      #030d03;
+    --surface: #071507;
+    --card:    #091a09;
+    --border:  #0f2a10;
+    --accent:  #22c55e;
+    --accent2: #4ade80;
+    --text:    #d0f0d0;
+    --muted:   #3a7a45;
+  }
+  [data-theme="purple"] {
+    --bg:      #0d0018;
+    --surface: #130025;
+    --card:    #1a0030;
+    --border:  #2c004d;
+    --accent:  #a855f7;
+    --accent2: #c084fc;
+    --text:    #f0e0ff;
+    --muted:   #6e3f99;
+  }
+  [data-theme="neon"] {
+    --bg:      #00080d;
+    --surface: #001018;
+    --card:    #001820;
+    --border:  #002a38;
+    --accent:  #06b6d4;
+    --accent2: #22d3ee;
+    --text:    #cffafe;
+    --muted:   #2e7a8a;
+  }
+  [data-theme="rose"] {
+    --bg:      #1a0010;
+    --surface: #240018;
+    --card:    #2e0020;
+    --border:  #480038;
+    --accent:  #f43f5e;
+    --accent2: #fb7185;
+    --text:    #ffe0e8;
+    --muted:   #883a5a;
+  }
+  [data-theme="amber"] {
+    --bg:      #0d0600;
+    --surface: #180e00;
+    --card:    #1e1000;
+    --border:  #321a00;
+    --accent:  #f59e0b;
+    --accent2: #fbbf24;
+    --text:    #fef3c7;
+    --muted:   #7a5820;
+  }
+  [data-theme="solarized"] {
+    --bg:      #002b36;
+    --surface: #04323f;
+    --card:    #073642;
+    --border:  #0d4f5e;
+    --accent:  #2aa198;
+    --accent2: #859900;
+    --text:    #fdf6e3;
+    --muted:   #657b83;
+  }
+  /* ---- Logo colour tinting per theme ----
+     hue-rotate shifts all logo colours to complement each theme's accent.
+     Pure Dark / Dark use the original logo colours (no rotation). */
+  [data-theme="dark"]      #logo { filter: none; }
+  [data-theme="black"]     #logo { filter: none; }
+  [data-theme="light"]     #logo { filter: brightness(0) saturate(0); }
+  [data-theme="midnight"]  #logo { filter: hue-rotate(212deg) saturate(1.1); }
+  [data-theme="dracula"]   #logo { filter: hue-rotate(268deg) saturate(1.2); }
+  [data-theme="terminal"]  #logo { filter: hue-rotate(148deg) saturate(1.2); }
+  [data-theme="ocean"]     #logo { filter: hue-rotate(208deg) saturate(1.2); }
+  [data-theme="sunset"]    #logo { filter: hue-rotate(36deg)  saturate(1.2); }
+  [data-theme="forest"]    #logo { filter: hue-rotate(148deg) saturate(1.2); }
+  [data-theme="purple"]    #logo { filter: hue-rotate(278deg) saturate(1.2); }
+  [data-theme="neon"]      #logo { filter: hue-rotate(196deg) saturate(1.2); }
+  [data-theme="rose"]      #logo { filter: hue-rotate(4deg)   saturate(1.1); }
+  [data-theme="amber"]     #logo { filter: hue-rotate(50deg)  saturate(1.2); }
+  [data-theme="solarized"] #logo { filter: hue-rotate(192deg) saturate(0.9); }
+
+  /* ---- Sticks corner decoration ---- */
+  .sticks-corner {
+    position: fixed;
+    bottom: 0;
+    right: 0;
+    width: 200px;
+    opacity: 0.18;
+    pointer-events: none;
+    z-index: 0;
+  }
+  /* Sticks image: dominant hue ~20°, logo dominant hue ~350°, offset = +330°.
+     sticks_rot = (logo_rot + 330) % 360  so both reach the same output hue. */
+  [data-theme="dark"]      #sticks { filter: hue-rotate(330deg) saturate(1.1) brightness(0.75); }
+  [data-theme="black"]     #sticks { filter: hue-rotate(330deg) saturate(1.1) brightness(0.75); }
+  [data-theme="light"]     #sticks { filter: grayscale(1) brightness(0.5); }
+  [data-theme="midnight"]  #sticks { filter: hue-rotate(182deg) saturate(1.1); }
+  [data-theme="dracula"]   #sticks { filter: hue-rotate(238deg) saturate(1.2); }
+  [data-theme="terminal"]  #sticks { filter: hue-rotate(118deg) saturate(1.2); }
+  [data-theme="ocean"]     #sticks { filter: hue-rotate(178deg) saturate(1.2); }
+  [data-theme="sunset"]    #sticks { filter: hue-rotate(6deg)   saturate(1.2); }
+  [data-theme="forest"]    #sticks { filter: hue-rotate(118deg) saturate(1.2); }
+  [data-theme="purple"]    #sticks { filter: hue-rotate(248deg) saturate(1.2); }
+  [data-theme="neon"]      #sticks { filter: hue-rotate(166deg) saturate(1.2); }
+  [data-theme="rose"]      #sticks { filter: hue-rotate(334deg) saturate(1.1); }
+  [data-theme="amber"]     #sticks { filter: hue-rotate(20deg)  saturate(1.2); }
+  [data-theme="solarized"] #sticks { filter: hue-rotate(162deg) saturate(0.9); }
+
+  /* ---- compact mode ---- */
+  body.compact .card { padding: 0.85rem 1rem; }
+  body.compact .card h2 { font-size: 1rem; margin-bottom: 0.6rem; }
+  body.compact .stat-card { padding: 0.65rem 0.85rem; }
+  body.compact .stat-card .val { font-size: 1.3rem; }
+  body.compact .tabs { gap: 0.15rem; }
+  body.compact .tab { padding: 0.5rem 1rem; font-size: 0.82rem; }
+
+  /* ---- no-animations ---- */
+  body.no-anim *, body.no-anim *::before, body.no-anim *::after {
+    transition: none !important;
+    animation: none !important;
+  }
+
+  /* ---- background image scrim ----
+     When a background image is active, a semi-transparent dark overlay is
+     painted above the image (z-index:1) but below all content (z-index:2).
+     Opacity is controlled by --bg-scrim-opacity (set via JS from settings). */
+  :root { --bg-scrim-opacity: 0.70; }
+  body.has-bg-image::after {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, var(--bg-scrim-opacity));
+    z-index: 1;
+    pointer-events: none;
+  }
+
+  /* ---- settings panel ---- */
+  .settings-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 1.25rem;
+    margin-bottom: 1.5rem;
+  }
+  .settings-field { display: flex; flex-direction: column; gap: 0.35rem; }
+  .settings-field label { font-size: 0.82rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+  .settings-field select,
+  .settings-field input[type="text"] {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: var(--text);
+    padding: 0.4rem 0.6rem;
+    font-family: var(--font);
+    font-size: 0.88rem;
+  }
+  .settings-field input[type="color"] {
+    width: 100%;
+    height: 36px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--surface);
+    cursor: pointer;
+    padding: 2px 4px;
+  }
+  /* --- background image upload area --- */
+  .bg-upload-area {
+    border: 2px dashed var(--border);
+    border-radius: var(--radius);
+    padding: 1.2rem 1rem;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color 0.2s, background 0.2s;
+    position: relative;
+    overflow: hidden;
+  }
+  .bg-upload-area:hover, .bg-upload-area.dragover {
+    border-color: var(--accent);
+    background: rgba(255,255,255,0.03);
+  }
+  .bg-upload-area input[type="file"] {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    opacity: 0; cursor: pointer;
+  }
+  .bg-upload-icon { font-size: 1.8rem; margin-bottom: 0.3rem; }
+  .bg-upload-label { font-size: 0.85rem; color: var(--muted); }
+  .bg-preview {
+    margin-top: 0.75rem;
+    display: none;
+    align-items: center;
+    gap: 0.75rem;
+  }
+  .bg-preview.visible { display: flex; }
+  .bg-preview img {
+    width: 80px; height: 52px;
+    object-fit: cover;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+  }
+  .bg-preview-info { font-size: 0.82rem; color: var(--text); }
+  .settings-toggle { display: flex; align-items: center; gap: 0.6rem; margin-top: 0.15rem; }
+  .settings-toggle input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; }
+  .settings-toggle span { font-size: 0.88rem; color: var(--text); }
+  .settings-preview {
+    font-size: 0.78rem;
+    color: var(--muted);
+    margin-top: 0.5rem;
+    font-style: italic;
+  }
+</style>
+</head>
+<body>
+<header>
+  <img id="logo" src="__LOGO__" alt="ModernJVS">
+  <h1>WebUI<span class="ver-badge" id="verBadge"></span></h1>
+  <div class="status-badge">
+    <span class="dot" id="statusDot"></span>
+    <span id="statusText">Loading…</span>
+  </div>
+</header>
+
+<div class="container">
+  <div class="tabs">
+    <button class="tab active" onclick="showTab('dashboard', this)">Dashboard</button>
+    <button class="tab" onclick="showTab('config', this)">Configuration</button>
+    <button class="tab" onclick="showTab('monitor', this)">Monitor &amp; Logs</button>
+    <button class="tab" onclick="showTab('devices', this)">Devices</button>
+    <button class="tab" onclick="showTab('webui-settings', this)">&#9881; WebUI Settings</button>
+  </div>
+
+  <!-- ====== DASHBOARD ====== -->
+  <div id="panel-dashboard" class="panel active">
+    <div id="dashAlert" class="alert"></div>
+
+    <div class="card">
+      <h2>Service Control</h2>
+      <div class="control-row">
+        <button class="btn btn-start"   onclick="serviceAction('start')">▶ Start</button>
+        <button class="btn btn-stop"    onclick="serviceAction('stop')">■ Stop</button>
+        <button class="btn btn-restart" onclick="serviceAction('restart')">↺ Restart</button>
+        <button class="btn btn-refresh" onclick="refreshDashboard()">⟳ Refresh Status</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>System Overview</h2>
+      <div class="stat-grid" id="statGrid">
+        <div class="stat-card"><div class="val" id="svcState">—</div><div class="lbl">Service State</div></div>
+        <div class="stat-card"><div class="val" id="svcPid">—</div><div class="lbl">PID</div></div>
+        <div class="stat-card"><div class="val" id="svcUptime">—</div><div class="lbl">Active Since</div></div>
+        <div class="stat-card"><div class="val" id="currentIO">—</div><div class="lbl">Emulated I/O</div></div>
+        <div class="stat-card"><div class="val" id="currentGame">—</div><div class="lbl">Current Game</div></div>
+        <div class="stat-card"><div class="val" id="currentDevice">—</div><div class="lbl">Device Path</div></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Pi System Usage <button class="btn btn-refresh btn-xs" onclick="refreshSysinfo()" style="margin-left:0.5rem;vertical-align:middle;">⟳</button></h2>
+      <div class="usage-row">
+        <div class="usage-header">
+          <span class="usage-label">CPU Usage</span>
+          <span class="usage-value" id="siCpu">—</span>
+        </div>
+        <div class="progress"><div class="progress-bar" id="siCpuBar" style="width:0%"></div></div>
+      </div>
+      <div class="usage-row">
+        <div class="usage-header">
+          <span class="usage-label">Memory</span>
+          <span class="usage-value" id="siMem">—</span>
+        </div>
+        <div class="progress"><div class="progress-bar" id="siMemBar" style="width:0%"></div></div>
+      </div>
+      <div class="usage-row">
+        <div class="usage-header">
+          <span class="usage-label">CPU Temperature</span>
+          <span class="usage-value" id="siTemp">—</span>
+        </div>
+        <div class="progress"><div class="progress-bar" id="siTempBar" style="width:0%"></div></div>
+      </div>
+      <div class="usage-row">
+        <div class="usage-header">
+          <span class="usage-label">Disk Usage (/)</span>
+          <span class="usage-value" id="siDisk">—</span>
+        </div>
+        <div class="progress"><div class="progress-bar" id="siDiskBar" style="width:0%"></div></div>
+      </div>
+      <div class="sysinfo-footer">Load Average: <span id="siLoad">—</span></div>
+      <div class="ip-info">Access WebUI from other devices: <span id="siIP">—</span></div>
+    </div>
+  </div>
+
+  <!-- ====== CONFIG ====== -->
+  <div id="panel-config" class="panel">
+    <div id="cfgAlert" class="alert"></div>
+    <div class="card">
+      <h2>Game &amp; I/O Configuration</h2>
+      <div class="form-grid">
+        <div class="field">
+          <label>Emulated I/O Board</label>
+          <select id="cfgEmulate"></select>
+        </div>
+        <div class="field">
+          <label>Default Game</label>
+          <select id="cfgGame"></select>
+        </div>
+        <div class="field">
+          <label>Device Path</label>
+          <input type="text" id="cfgDevice" placeholder="/dev/ttyUSB0">
+        </div>
+        <div class="field">
+          <label>Sense Line Type (0/1/2)</label>
+          <select id="cfgSense">
+            <option value="0">0 – USB RS485, no sense line</option>
+            <option value="1">1 – USB RS485, with sense line</option>
+            <option value="2">2 – OpenJVS HAT</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Sense Line GPIO Pin</label>
+          <input type="number" id="cfgPin" min="1" max="40" placeholder="26">
+        </div>
+        <div class="field">
+          <label>Debug Mode (0/1/2)</label>
+          <select id="cfgDebug">
+            <option value="0">0 – Off</option>
+            <option value="1">1 – JVS outputs</option>
+            <option value="2">2 – Raw packets</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Auto Controller Detection</label>
+          <select id="cfgAutoCtrl">
+            <option value="1">Enabled</option>
+            <option value="0">Disabled</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Analog Deadzone – Player 1</label>
+          <input type="number" id="cfgDz1" step="0.01" min="0" max="0.5" placeholder="0.2">
+        </div>
+        <div class="field">
+          <label>Analog Deadzone – Player 2</label>
+          <input type="number" id="cfgDz2" step="0.01" min="0" max="0.5" placeholder="0.2">
+        </div>
+        <div class="field">
+          <label>Analog Deadzone – Player 3</label>
+          <input type="number" id="cfgDz3" step="0.01" min="0" max="0.5" placeholder="0.2">
+        </div>
+        <div class="field">
+          <label>Analog Deadzone – Player 4</label>
+          <input type="number" id="cfgDz4" step="0.01" min="0" max="0.5" placeholder="0.2">
+        </div>
+      </div>
+      <br>
+      <div class="control-row">
+        <button class="btn btn-save" onclick="saveConfig()">💾 Save Configuration</button>
+        <button class="btn btn-refresh" onclick="loadConfig()">⟳ Reload from Disk</button>
+        <button class="btn btn-danger" onclick="resetConfig()">↩ Reset to Defaults</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ====== MONITOR ====== -->
+  <div id="panel-monitor" class="panel">
+    <div class="card">
+      <h2>Live Log Monitor</h2>
+      <div class="log-controls">
+        <button class="btn btn-refresh" onclick="fetchLogs()">⟳ Refresh</button>
+        <button class="btn btn-refresh btn-xs" onclick="downloadLogs()" style="background:var(--border);">⬇ Download</button>
+        <label>
+          <input type="checkbox" id="autoRefresh" onchange="toggleAutoRefresh()"> Auto-refresh (5s)
+        </label>
+        <label>
+          Lines:
+          <select id="logLines" style="background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--text);padding:0.25rem 0.5rem;">
+            <option value="50">50</option>
+            <option value="100" selected>100</option>
+            <option value="200">200</option>
+            <option value="500">500</option>
+          </select>
+        </label>
+        <label>
+          <input type="checkbox" id="scrollBottom" checked> Scroll to bottom
+        </label>
+      </div>
+      <div class="log-wrap" id="logBox"></div>
+    </div>
+
+    <div class="card">
+      <h2>Log Filter</h2>
+      <div class="log-filter-bar" style="margin-bottom:0.75rem;">
+        <span style="font-size:0.82rem;color:var(--muted);">Filter:</span>
+        <select id="logFilter" onchange="applyJvsFilter()">
+          <option value="all">All Messages</option>
+          <option value="errors">Errors &amp; Critical</option>
+          <option value="warnings">Warnings</option>
+          <option value="jvs" selected>JVS Activity</option>
+          <option value="controllers">Controllers</option>
+        </select>
+        <input type="text" id="logSearch" placeholder="Search…" oninput="applyJvsFilter()">
+        <button class="btn btn-refresh btn-xs" onclick="clearLogFilter()">✕ Clear</button>
+      </div>
+      <div id="logFilterHint" style="display:none;font-size:0.8rem;color:var(--yellow);margin-bottom:0.5rem;padding:0.35rem 0.5rem;border-left:3px solid var(--yellow);background:rgba(255,200,0,0.06);">
+        ⚠ <strong>JVS Activity</strong> shows <code style="color:var(--accent2)">CMD_</code> debug messages —
+        these are only logged when <strong>Debug Mode</strong> is set to <strong>1</strong> or <strong>2</strong>
+        in the <a href="#" onclick="showTab('config',document.querySelector('[onclick*=showTab].tab'));return false;"
+          style="color:var(--accent)">Configuration</a> tab.
+      </div>
+      <div class="log-wrap" id="jvsBox" style="height:340px;"></div>
+    </div>
+  </div>
+
+  <!-- ====== DEVICES ====== -->
+  <div id="panel-devices" class="panel">
+    <div class="card">
+      <h2>Connected Input Devices <button class="btn btn-refresh btn-xs" onclick="loadDevices()" style="margin-left:0.5rem;vertical-align:middle;">⟳ Refresh</button></h2>
+      <p style="font-size:0.83rem;color:var(--muted);margin-bottom:1rem;">Shows all <code style="color:var(--accent2);font-family:monospace">/dev/input/event*</code> nodes currently present on the system.</p>
+      <table class="device-table">
+        <thead><tr><th>Event Node</th><th>Device Name</th><th>Status</th></tr></thead>
+        <tbody id="deviceTableBody"><tr><td colspan="3" style="color:var(--muted)">Loading…</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ====== APPEARANCE ====== -->
+  <div id="panel-webui-settings" class="panel">
+    <div class="card">
+      <h2>Theme</h2>
+      <div class="settings-grid">
+        <div class="settings-field">
+          <label>Colour Theme</label>
+          <select id="stTheme">
+            <option value="black">Pure Dark (default)</option>
+            <option value="dark">Dark</option>
+            <option value="light">Light</option>
+            <option value="midnight">Midnight Blue</option>
+            <option value="dracula">Dracula</option>
+            <option value="terminal">Green Terminal</option>
+            <option value="ocean">Ocean Deep</option>
+            <option value="sunset">Sunset</option>
+            <option value="forest">Forest</option>
+            <option value="purple">Purple Night</option>
+            <option value="neon">Neon Cyan</option>
+            <option value="rose">Rose</option>
+            <option value="amber">Amber</option>
+            <option value="solarized">Solarized Dark</option>
+          </select>
+          <div class="settings-preview">Base colour theme</div>
+        </div>
+        <div class="settings-field">
+          <label>Custom Font</label>
+          <div class="bg-upload-area" id="fontUploadArea">
+            <input type="file" id="stFontFile" accept=".ttf,.otf,.woff,.woff2" onchange="onFontFileChosen(this)">
+            <div class="bg-upload-icon">&#119070;</div>
+            <div class="bg-upload-label">Click or drag a font file here<br><span style="font-size:0.75rem">TTF, OTF, WOFF, WOFF2 · max 10 MB</span></div>
+          </div>
+          <div class="bg-preview" id="fontPreview">
+            <div>
+              <div class="bg-preview-info" id="fontPreviewName"></div>
+              <button class="btn btn-refresh btn-xs" style="margin-top:0.4rem;" onclick="clearFont()">✕ Clear Font</button>
+            </div>
+          </div>
+          <div class="settings-preview">Leave empty to use the default system font</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Background</h2>
+      <div class="settings-grid">
+        <div class="settings-field">
+          <label>Background Image</label>
+          <div class="bg-upload-area" id="bgUploadArea">
+            <input type="file" id="stBgFile" accept="image/*" onchange="onBgFileChosen(this)">
+            <div class="bg-upload-icon">&#128444;</div>
+            <div class="bg-upload-label">Click or drag an image here<br><span style="font-size:0.75rem">JPEG, PNG, GIF, WebP, SVG · max 20 MB</span></div>
+          </div>
+          <div class="bg-preview" id="bgPreview">
+            <img id="bgPreviewImg" src="" alt="preview">
+            <div>
+              <div class="bg-preview-info" id="bgPreviewName"></div>
+              <button class="btn btn-refresh btn-xs" style="margin-top:0.4rem;" onclick="clearBgImage()">✕ Clear Image</button>
+            </div>
+          </div>
+          <div class="settings-preview">Leave empty to use the theme background colour</div>
+        </div>
+        <div class="settings-field">
+          <label>Background Overlay Darkness</label>
+          <div style="display:flex;align-items:center;gap:0.75rem;">
+            <input type="range" id="stBgScrim" min="0" max="0.9" step="0.05" value="__BG_SCRIM_DEFAULT__" style="flex:1;">
+            <span id="stBgScrimVal" style="min-width:2.5rem;text-align:right;font-size:0.85rem;">45%</span>
+          </div>
+          <div class="settings-preview">Semi-transparent overlay to keep text readable over bright images (0 = none)</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Layout &amp; Behaviour</h2>
+      <div class="settings-grid">
+        <div class="settings-field">
+          <label>Display Density</label>
+          <div class="settings-toggle">
+            <input type="checkbox" id="stCompact">
+            <span>Compact mode (reduce card padding and spacing)</span>
+          </div>
+        </div>
+        <div class="settings-field">
+          <label>Animations</label>
+          <div class="settings-toggle">
+            <input type="checkbox" id="stNoAnim">
+            <span>Disable all CSS transitions and animations</span>
+          </div>
+        </div>
+        <div class="settings-field">
+          <label>Corner Image</label>
+          <div class="settings-toggle">
+            <input type="checkbox" id="stShowSticks" checked>
+            <span>Show decorative Sticks image in the bottom-right corner</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>WebUI Process</h2>
+      <div class="control-row">
+        <button class="btn btn-restart" onclick="restartWebUI()">↺ Restart WebUI</button>
+      </div>
+      <div id="webuiRestartMsg" style="display:none;margin-top:0.75rem;font-size:0.88rem;color:var(--muted)"></div>
+    </div>
+
+    <div class="control-row">
+      <button class="btn btn-save" onclick="saveAppearanceSettings()">&#128190; Save &amp; Apply</button>
+      <button class="btn btn-refresh" onclick="resetAppearanceSettings()">&#8635; Reset to Defaults</button>
+    </div>
+  </div>
+</div>
+
+<footer>ModernJVS WebUI &mdash; <a href="https://github.com/dazzaXx/ModernJVS" target="_blank">github.com/dazzaXx/ModernJVS</a></footer>
+
+<img id="sticks" src="__STICKS__" alt="" class="sticks-corner">
+
+<script>
+// ---- Constants ----
+// Temperature scale reference: Pi throttles at ~80 °C, absolute hardware max ~85 °C
+const MAX_TEMP_C = 85;
+
+// ---- Tab navigation ----
+function showTab(name, btn) {
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.getElementById('panel-' + name).classList.add('active');
+  btn.classList.add('active');
+  if (name === 'monitor') fetchLogs();
+  if (name === 'config') loadConfig();
+  if (name === 'devices') loadDevices();
+  if (name === 'webui-settings') initAppearancePanel();
+}
+
+// ---- API helpers ----
+async function api(path, opts) {
+  try {
+    const r = await fetch(path, opts);
+    return await r.json();
+  } catch(e) { return { error: String(e) }; }
+}
+
+function showAlert(id, msg, isErr) {
+  const el = document.getElementById(id);
+  el.textContent = msg;
+  el.className = 'alert ' + (isErr ? 'err' : 'ok');
+  setTimeout(() => { el.className = 'alert'; }, 4000);
+}
+
+// ---- Dashboard ----
+async function refreshDashboard() {
+  const d = await api('/api/status');
+  if (d.error) { showAlert('dashAlert', 'Error: ' + d.error, true); return; }
+
+  const dot  = document.getElementById('statusDot');
+  const txt  = document.getElementById('statusText');
+  const running = d.active_state === 'active';
+
+  dot.className = 'dot ' + (running ? 'running' : 'stopped');
+  txt.textContent = d.active_state || 'unknown';
+
+  document.getElementById('svcState').textContent    = d.active_state  || '—';
+  document.getElementById('svcPid').textContent      = d.main_pid      || '—';
+  document.getElementById('svcUptime').textContent   = d.active_since  || '—';
+  document.getElementById('currentIO').textContent   = d.config?.emulate  || '—';
+  document.getElementById('currentGame').textContent = d.config?.game     || '—';
+  document.getElementById('currentDevice').textContent = d.config?.device || '—';
+}
+
+async function refreshSysinfo() {
+  const d = await api('/api/sysinfo');
+  if (d.error) return;
+
+  // CPU
+  const cpuPct = d.cpu_pct ?? 0;
+  document.getElementById('siCpu').textContent = cpuPct.toFixed(1) + '%';
+  const cpuBar = document.getElementById('siCpuBar');
+  cpuBar.style.width = Math.min(100, cpuPct) + '%';
+  cpuBar.className = 'progress-bar' + (cpuPct > 80 ? ' hot' : cpuPct > 50 ? ' warm' : '');
+
+  // Memory
+  const memPct = d.mem_pct ?? 0;
+  document.getElementById('siMem').textContent =
+    (d.mem_used_mb ?? 0) + ' / ' + (d.mem_total_mb ?? 0) + ' MB (' + memPct.toFixed(0) + '%)';
+  const memBar = document.getElementById('siMemBar');
+  memBar.style.width = Math.min(100, memPct) + '%';
+  memBar.className = 'progress-bar' + (memPct > 80 ? ' hot' : memPct > 60 ? ' warm' : '');
+
+  // Temperature
+  const tempEl   = document.getElementById('siTemp');
+  const tempBar  = document.getElementById('siTempBar');
+  if (d.temp_c !== null && d.temp_c !== undefined) {
+    const t = d.temp_c;
+    tempEl.textContent = t.toFixed(1) + '\u00b0C';
+    const tempPct = Math.min(100, (t / MAX_TEMP_C) * 100);
+    tempBar.style.width = tempPct + '%';
+    tempBar.className = 'progress-bar' + (t > 70 ? ' hot' : t > 55 ? ' warm' : '');
+  } else {
+    tempEl.textContent = 'N/A';
+    tempBar.style.width = '0%';
+    tempBar.className = 'progress-bar';
+  }
+
+  // Disk
+  const diskPct = d.disk_pct ?? 0;
+  document.getElementById('siDisk').textContent =
+    (d.disk_used_gb ?? 0).toFixed(1) + ' / ' + (d.disk_total_gb ?? 0).toFixed(1) + ' GB (' + diskPct.toFixed(0) + '%)';
+  const diskBar = document.getElementById('siDiskBar');
+  diskBar.style.width = Math.min(100, diskPct) + '%';
+  diskBar.className = 'progress-bar' + (diskPct > 80 ? ' hot' : diskPct > 60 ? ' warm' : '');
+
+  // Load average & IP
+  document.getElementById('siLoad').textContent = d.load_avg || '—';
+  if (d.ip_addresses && d.ip_addresses.length) {
+    document.getElementById('siIP').textContent =
+      d.ip_addresses.map(ip => 'http://' + ip + ':8080').join('  |  ');
+  }
+}
+
+async function serviceAction(action) {
+  const d = await api('/api/control', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({action})
+  });
+  if (d.error) { showAlert('dashAlert', 'Error: ' + d.error, true); }
+  else { showAlert('dashAlert', 'Service ' + action + ' successful.', false); }
+  setTimeout(refreshDashboard, 1200);
+}
+
+// ---- Config ----
+async function loadConfig() {
+  const [cfgData, iosData, gamesData] = await Promise.all([
+    api('/api/config'),
+    api('/api/ios'),
+    api('/api/games')
+  ]);
+
+  const ioSel = document.getElementById('cfgEmulate');
+  ioSel.innerHTML = '';
+  (iosData.ios || []).forEach(io => {
+    const o = document.createElement('option');
+    o.value = io; o.textContent = io;
+    if (cfgData.emulate === io) o.selected = true;
+    ioSel.appendChild(o);
+  });
+
+  const gameSel = document.getElementById('cfgGame');
+  gameSel.innerHTML = '';
+  (gamesData.games || []).forEach(g => {
+    const o = document.createElement('option');
+    o.value = g; o.textContent = g;
+    if (cfgData.game === g) o.selected = true;
+    gameSel.appendChild(o);
+  });
+
+  document.getElementById('cfgDevice').value    = cfgData.device  || '/dev/ttyUSB0';
+  document.getElementById('cfgSense').value     = cfgData.sense_line_type  ?? '1';
+  document.getElementById('cfgPin').value       = cfgData.sense_line_pin   ?? '26';
+  document.getElementById('cfgDebug').value     = cfgData.debug_mode  ?? '0';
+  document.getElementById('cfgAutoCtrl').value  = cfgData.auto_controller_detection ?? '1';
+  document.getElementById('cfgDz1').value = cfgData.deadzone_p1 ?? '0.2';
+  document.getElementById('cfgDz2').value = cfgData.deadzone_p2 ?? '0.2';
+  document.getElementById('cfgDz3').value = cfgData.deadzone_p3 ?? '0.2';
+  document.getElementById('cfgDz4').value = cfgData.deadzone_p4 ?? '0.2';
+}
+
+async function saveConfig() {
+  const payload = {
+    emulate:                    document.getElementById('cfgEmulate').value,
+    game:                       document.getElementById('cfgGame').value,
+    device:                     document.getElementById('cfgDevice').value,
+    sense_line_type:            document.getElementById('cfgSense').value,
+    sense_line_pin:             document.getElementById('cfgPin').value,
+    debug_mode:                 document.getElementById('cfgDebug').value,
+    auto_controller_detection:  document.getElementById('cfgAutoCtrl').value,
+    deadzone_p1:                document.getElementById('cfgDz1').value,
+    deadzone_p2:                document.getElementById('cfgDz2').value,
+    deadzone_p3:                document.getElementById('cfgDz3').value,
+    deadzone_p4:                document.getElementById('cfgDz4').value,
+  };
+  const d = await api('/api/config', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify(payload)
+  });
+  if (d.error) showAlert('cfgAlert', 'Error: ' + d.error, true);
+  else showAlert('cfgAlert', 'Configuration saved. Restart the service to apply changes.', false);
+}
+
+function resetConfig() {
+  if (!confirm('Reset configuration fields to factory defaults?\n\nClick Save to write the changes to disk.')) return;
+  document.getElementById('cfgDevice').value   = '/dev/ttyUSB0';
+  document.getElementById('cfgSense').value    = '1';
+  document.getElementById('cfgPin').value      = '26';
+  document.getElementById('cfgDebug').value    = '0';
+  document.getElementById('cfgAutoCtrl').value = '1';
+  document.getElementById('cfgDz1').value = '0.2';
+  document.getElementById('cfgDz2').value = '0.2';
+  document.getElementById('cfgDz3').value = '0.2';
+  document.getElementById('cfgDz4').value = '0.2';
+  showAlert('cfgAlert', 'Fields reset to defaults. Click Save to write the configuration.', false);
+}
+
+// ---- Monitor ----
+let autoRefreshTimer = null;
+let rawLogLines = [];   // cached raw lines for client-side filtering
+
+function toggleAutoRefresh() {
+  if (document.getElementById('autoRefresh').checked) {
+    autoRefreshTimer = setInterval(fetchLogs, 5000);
+  } else {
+    clearInterval(autoRefreshTimer);
+    autoRefreshTimer = null;
+  }
+}
+
+async function fetchLogs() {
+  const lines = document.getElementById('logLines').value;
+  const d = await api('/api/logs?lines=' + lines);
+  const box = document.getElementById('logBox');
+  if (d.error) { box.textContent = 'Error: ' + d.error; return; }
+
+  rawLogLines = d.lines || [];
+
+  // Live log shows ALL lines unfiltered
+  renderLines(box, rawLogLines, 'No log entries.');
+
+  // Apply current filter to the Log Filter / JVS Activity pane
+  applyJvsFilter();
+}
+
+function applyJvsFilter() {
+  const filter = document.getElementById('logFilter').value;
+  const search = document.getElementById('logSearch').value.toLowerCase();
+
+  // Show the debug-level hint only when the JVS Activity filter is active
+  const hint = document.getElementById('logFilterHint');
+  if (hint) hint.style.display = (filter === 'jvs') ? 'block' : 'none';
+
+  let lines = rawLogLines;
+  let emptyMsg = 'No matching log entries.';
+  switch (filter) {
+    case 'errors':
+      lines = lines.filter(l => /error|critical|fail/i.test(l));
+      break;
+    case 'warnings':
+      lines = lines.filter(l => /warning|warn/i.test(l));
+      break;
+    case 'jvs':
+      // Only show CMD_ debug output — these are the actual JVS packet commands
+      lines = lines.filter(l => /CMD_/.test(l));
+      emptyMsg = 'No JVS activity found. CMD_ messages are only logged when Debug Mode is set to 1 or 2 in Configuration.';
+      break;
+    case 'controllers':
+      lines = lines.filter(l => /controller|input|device|player|joystick|gamepad|wiimote/i.test(l));
+      break;
+  }
+  if (search) {
+    lines = lines.filter(l => l.toLowerCase().includes(search));
+  }
+  renderLines(document.getElementById('jvsBox'), lines, emptyMsg);
+}
+
+function renderLines(box, lines, emptyMsg, alwaysScroll) {
+  box.innerHTML = '';
+  if (lines.length === 0) {
+    const div = document.createElement('div');
+    div.className = 'log-line log-info';
+    div.textContent = emptyMsg || 'No entries.';
+    box.appendChild(div);
+    return;
+  }
+  lines.forEach(line => {
+    const div = document.createElement('div');
+    div.className = 'log-line';
+    if (/error|critical|fail/i.test(line))   div.classList.add('log-err');
+    else if (/warning|warn/i.test(line))     div.classList.add('log-warn');
+    else                                      div.classList.add('log-info');
+    div.textContent = line;
+    box.appendChild(div);
+  });
+  if (alwaysScroll || document.getElementById('scrollBottom').checked) {
+    box.scrollTop = box.scrollHeight;
+  }
+}
+
+function clearLogFilter() {
+  document.getElementById('logSearch').value = '';
+  // 'jvs' is the default — mirrors the `selected` attribute on the HTML option
+  document.getElementById('logFilter').value = 'jvs';
+  applyJvsFilter();
+}
+
+// ---- Devices ----
+async function loadDevices() {
+  const d = await api('/api/input_devices');
+  const tbody = document.getElementById('deviceTableBody');
+  if (d.error) {
+    tbody.innerHTML = `<tr><td colspan="3" style="color:var(--red)">Error: ${d.error}</td></tr>`;
+    return;
+  }
+  const devs = d.devices || [];
+  if (devs.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="3" style="color:var(--muted)">No input devices found.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = devs.map(dev => {
+    const statusHtml = dev.ignored
+      ? '<span style="color:var(--yellow);font-size:0.8rem;">⚠ Ignored by ModernJVS</span>'
+      : '<span style="color:var(--green);font-size:0.8rem;">✓ Active</span>';
+    return `<tr><td><code>${dev.event}</code></td><td>${dev.name}</td><td>${statusHtml}</td></tr>`;
+  }).join('');
+}
+
+// ---- Log download ----
+function downloadLogs() {
+  const lines = document.getElementById('logLines').value;
+  const a = document.createElement('a');
+  a.href = '/api/logs/download?lines=' + lines;
+  a.download = 'modernjvs.log';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+}
+
+// ---- Appearance / Settings ----
+
+const THEME_NAMES = {
+  black:     'Pure Dark (default)',
+  dark:      'Dark',
+  light:     'Light',
+  midnight:  'Midnight Blue',
+  dracula:   'Dracula',
+  terminal:  'Green Terminal',
+  ocean:     'Ocean Deep',
+  sunset:    'Sunset',
+  forest:    'Forest',
+  purple:    'Purple Night',
+  neon:      'Neon Cyan',
+  rose:      'Rose',
+  amber:     'Amber',
+  solarized: 'Solarized Dark',
+};
+
+// Seconds to wait for the WebUI service to come back up after a restart
+const WEBUI_RESTART_WAIT_SECS = 8;
+
+function applyAppearanceSettings(s) {
+  const root = document.documentElement;
+
+  // Theme – always set an explicit data-theme value so selectors are consistent
+  root.setAttribute('data-theme', s.theme || 'black');
+
+  // Font is applied server-side via applyServerFont(); nothing to do here.
+
+  // Compact mode
+  document.body.classList.toggle('compact', !!s.compact);
+
+  // No animations
+  document.body.classList.toggle('no-anim', !!s.noAnim);
+  // Show/hide the sticks corner image
+  const sticksEl = document.getElementById('sticks');
+  if (sticksEl) sticksEl.style.display = s.showSticks === false ? 'none' : '';
+
+  // Background overlay (scrim) opacity
+  const scrim = (typeof s.bgScrimOpacity === 'number') ? s.bgScrimOpacity : 0.70;
+  document.documentElement.style.setProperty('--bg-scrim-opacity', scrim);
+}
+
+// Apply the server-stored background image (if any) to the page body.
+// Uses a cache-busting timestamp so a newly uploaded image is always visible.
+function applyServerBg() {
+  api('/api/bg/status').then(d => {
+    if (d.hasImage) {
+      document.body.style.backgroundImage = 'url(/api/bg?t=' + Date.now() + ')';
+      document.body.style.backgroundSize  = 'cover';
+      document.body.style.backgroundAttachment = 'fixed';
+      document.body.classList.add('has-bg-image');
+    } else {
+      document.body.style.backgroundImage = '';
+      document.body.style.backgroundSize  = '';
+      document.body.style.backgroundAttachment = '';
+      document.body.classList.remove('has-bg-image');
+    }
+  });
+}
+
+// ---- Background image preview helpers ----
+function _showBgPreview(src, label) {
+  document.getElementById('bgPreviewImg').src  = src;
+  document.getElementById('bgPreviewName').textContent = label;
+  document.getElementById('bgPreview').classList.add('visible');
+}
+
+function _hideBgPreview() {
+  document.getElementById('bgPreview').classList.remove('visible');
+  document.getElementById('bgPreviewImg').src = '';
+  document.getElementById('bgPreviewName').textContent = '';
+}
+
+// Called when the user picks a file via the upload widget.
+async function onBgFileChosen(input) {
+  const file = input.files && input.files[0];
+  if (!file) return;
+  if (!file.type.startsWith('image/')) {
+    alert('Only image files can be uploaded as a background.');
+    input.value = '';
+    return;
+  }
+  if (file.size > 20 * 1024 * 1024) {
+    alert('Image is too large. Maximum size is 20 MB.');
+    input.value = '';
+    return;
+  }
+  const res = await fetch('/api/bg/upload', {
+    method: 'POST',
+    headers: {'Content-Type': file.type},
+    body: file,
+  });
+  const d = await res.json();
+  if (d.error) {
+    alert('Upload failed: ' + d.error);
+    return;
+  }
+  // Show thumbnail preview using a temporary object URL (no localStorage needed)
+  const previewUrl = URL.createObjectURL(file);
+  _showBgPreview(previewUrl, file.name + ' (' + (file.size / 1024).toFixed(0) + ' KB)');
+  applyServerBg();
+}
+
+async function clearBgImage() {
+  const d = await api('/api/bg/clear', {method: 'POST'});
+  if (d.error) { alert('Could not clear image: ' + d.error); return; }
+  _hideBgPreview();
+  document.body.style.backgroundImage = '';
+  document.body.style.backgroundSize  = '';
+  document.body.style.backgroundAttachment = '';
+  // Reset file input so the same file can be re-selected if needed
+  const inp = document.getElementById('stBgFile');
+  if (inp) inp.value = '';
+}
+
+// ---- Custom font helpers ----
+function applyServerFont() {
+  api('/api/font/status').then(d => {
+    const root = document.documentElement;
+    let styleEl = document.getElementById('customFontStyle');
+    if (d.hasFont) {
+      if (!styleEl) {
+        styleEl = document.createElement('style');
+        styleEl.id = 'customFontStyle';
+        document.head.appendChild(styleEl);
+      }
+      styleEl.textContent =
+        "@font-face { font-family: 'CustomFont'; src: url('/api/font?t=" + Date.now() + "'); }";
+      root.style.setProperty('--font', "'CustomFont', system-ui, sans-serif");
+    } else {
+      if (styleEl) styleEl.remove();
+      root.style.removeProperty('--font');
+    }
+  });
+}
+
+async function onFontFileChosen(input) {
+  const file = input.files && input.files[0];
+  if (!file) return;
+  const ext = file.name.split('.').pop().toLowerCase();
+  if (!['ttf', 'otf', 'woff', 'woff2'].includes(ext)) {
+    alert('Only TTF, OTF, WOFF, or WOFF2 font files can be uploaded.');
+    input.value = '';
+    return;
+  }
+  if (file.size > 10 * 1024 * 1024) {
+    alert('Font file is too large. Maximum size is 10 MB.');
+    input.value = '';
+    return;
+  }
+  const res = await fetch('/api/font/upload', {
+    method: 'POST',
+    headers: {'Content-Type': file.type || 'application/octet-stream',
+               'X-File-Name': file.name},
+    body: file,
+  });
+  const d = await res.json();
+  if (d.error) { alert('Upload failed: ' + d.error); return; }
+  _showFontPreview(file.name + ' (' + (file.size / 1024).toFixed(0) + ' KB)');
+  applyServerFont();
+}
+
+async function clearFont() {
+  const d = await api('/api/font/clear', {method: 'POST'});
+  if (d.error) { alert('Could not clear font: ' + d.error); return; }
+  _hideFontPreview();
+  applyServerFont();
+  const inp = document.getElementById('stFontFile');
+  if (inp) inp.value = '';
+}
+
+function _showFontPreview(label) {
+  document.getElementById('fontPreviewName').textContent = label;
+  document.getElementById('fontPreview').classList.add('visible');
+}
+
+function _hideFontPreview() {
+  document.getElementById('fontPreview').classList.remove('visible');
+  document.getElementById('fontPreviewName').textContent = '';
+}
+
+
+async function initAppearancePanel() {
+  const d = await api('/api/webui/settings');
+  if (d.error) return;
+
+  // Populate theme selector
+  document.getElementById('stTheme').value      = d.theme     || 'black';
+  document.getElementById('stCompact').checked  = !!d.compact;
+  document.getElementById('stNoAnim').checked   = !!d.noAnim;
+  document.getElementById('stShowSticks').checked = d.showSticks !== false;
+
+  // Scrim slider – live preview of opacity value
+  const scrimVal = (typeof d.bgScrimOpacity === 'number') ? d.bgScrimOpacity : 0.70;
+  const scrimEl  = document.getElementById('stBgScrim');
+  const scrimLbl = document.getElementById('stBgScrimVal');
+  scrimEl.value  = scrimVal;
+  scrimLbl.textContent = Math.round(scrimVal * 100) + '%';
+  scrimEl.oninput = () => {
+    const v = parseFloat(scrimEl.value);
+    scrimLbl.textContent = Math.round(v * 100) + '%';
+    document.documentElement.style.setProperty('--bg-scrim-opacity', v);
+  };
+
+  // Show thumbnail if a background image is stored on the server
+  const bg = await api('/api/bg/status');
+  if (bg.hasImage) {
+    _showBgPreview('/api/bg?t=' + Date.now(), 'Server background image (' +
+      (bg.size / 1024).toFixed(0) + ' KB)');
+  } else {
+    _hideBgPreview();
+  }
+
+  // Show font preview if a custom font is stored on the server
+  const font = await api('/api/font/status');
+  if (font.hasFont) {
+    _showFontPreview(font.name + ' (' + (font.size / 1024).toFixed(0) + ' KB)');
+  } else {
+    _hideFontPreview();
+  }
+}
+
+async function saveAppearanceSettings() {
+  const s = {
+    theme:          document.getElementById('stTheme').value,
+    compact:        document.getElementById('stCompact').checked,
+    noAnim:         document.getElementById('stNoAnim').checked,
+    showSticks:     document.getElementById('stShowSticks').checked,
+    bgScrimOpacity: parseFloat(document.getElementById('stBgScrim').value),
+  };
+  const d = await api('/api/webui/settings', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(s),
+  });
+  if (d.error) {
+    alert('Failed to save settings: ' + d.error);
+    return;
+  }
+  applyAppearanceSettings(s);
+}
+
+async function resetAppearanceSettings() {
+  const defaults = {theme:'black', compact:false, noAnim:false, showSticks:true,
+                    bgScrimOpacity:0.70};
+  await api('/api/webui/settings', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(defaults),
+  });
+  await clearBgImage();
+  await clearFont();
+  applyAppearanceSettings(defaults);
+  initAppearancePanel();
+}
+
+// ---- Restart WebUI ----
+function restartWebUI() {
+  const msg = document.getElementById('webuiRestartMsg');
+  msg.style.display = 'block';
+  // Fire-and-forget: the server schedules the restart after flushing the
+  // response, but it may still die before we receive it.  Either way, start
+  // the countdown immediately so the page reloads once the service is back up.
+  fetch('/api/webui/restart', {method: 'POST'}).catch(() => {});
+  let secs = WEBUI_RESTART_WAIT_SECS;
+  const tick = () => {
+    msg.textContent = 'WebUI restarting — reconnecting in ' + secs + 's…';
+    if (secs-- > 0) { setTimeout(tick, 1000); }
+    else { window.location.reload(); }
+  };
+  tick();
+}
+
+// ---- Init ----
+// Fetch appearance settings from the server and apply them before first render.
+// Falls back to sensible defaults if the server hasn't stored any yet.
+api('/api/webui/settings').then(s => {
+  applyAppearanceSettings(s.error ? {} : s);
+});
+applyServerBg();
+applyServerFont();
+refreshDashboard();
+refreshSysinfo();
+setInterval(refreshDashboard, 10000);
+setInterval(refreshSysinfo, 5000);
+
+// Fetch version once and show in header badge only when available
+api('/api/version').then(d => {
+  if (d.version && d.version !== 'unknown') {
+    const badge = document.getElementById('verBadge');
+    badge.textContent = 'v' + d.version;
+    badge.classList.add('visible');
+  }
+});
+</script>
+</body>
+</html>
+"""
+
+# ---------------------------------------------------------------------------
+# Logo → HTML page builder
+# ---------------------------------------------------------------------------
+
+def _logo_data_uri():
+    """Return the logo as a base64 data URI, or '/logo' as a fallback URL.
+
+    Trying the base64 approach first ensures the logo always appears in the
+    browser without a separate HTTP round-trip, and works whether the WebUI
+    script is run directly from the repository or via the installed package.
+    """
+    data = get_logo_bytes()
+    if data:
+        return "data:image/png;base64," + base64.b64encode(data).decode()
+    return "/logo"
+
+
+def _sticks_data_uri():
+    """Return the Sticks image as a base64 data URI, or '/sticks' as fallback."""
+    data = get_sticks_bytes()
+    if data:
+        return "data:image/png;base64," + base64.b64encode(data).decode()
+    return "/sticks"
+
+
+def _build_html_page():
+    """Build the final HTML page, embedding the logo as a base64 data URI."""
+    return (
+        _HTML_TEMPLATE
+        .replace("__LOGO__",           _logo_data_uri())
+        .replace("__STICKS__",         _sticks_data_uri())
+        .replace("__BG_SCRIM_DEFAULT__", str(_SETTINGS_DEFAULTS["bgScrimOpacity"]))
+    )
+
+
+# HTML_PAGE is built after get_logo_bytes() is defined (see below).
+
+# ---------------------------------------------------------------------------
+# Config helpers
+# ---------------------------------------------------------------------------
+
+def read_config():
+    """Parse the modernjvs config file into a dict."""
+    cfg = {}
+    try:
+        with open(CONFIG_PATH, "r") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                # split on any whitespace, producing at most [directive, value]
+                parts = line.split(None, 1)
+                if len(parts) == 2:
+                    cfg[parts[0]] = parts[1].strip()
+    except OSError:
+        pass
+    return cfg
+
+
+def write_config(new_values):
+    """
+    Write updated key=value pairs back into the config file.
+    Preserves comments and unknown lines; updates existing keys in-place.
+    Appends new keys at the end if not already present.
+    """
+    # Map from API key names to config file directive names
+    key_map = {
+        "emulate":                    "EMULATE",
+        "game":                       "DEFAULT_GAME",
+        "device":                     "DEVICE_PATH",
+        "sense_line_type":            "SENSE_LINE_TYPE",
+        "sense_line_pin":             "SENSE_LINE_PIN",
+        "debug_mode":                 "DEBUG_MODE",
+        "auto_controller_detection":  "AUTO_CONTROLLER_DETECTION",
+        "deadzone_p1":                "ANALOG_DEADZONE_PLAYER_1",
+        "deadzone_p2":                "ANALOG_DEADZONE_PLAYER_2",
+        "deadzone_p3":                "ANALOG_DEADZONE_PLAYER_3",
+        "deadzone_p4":                "ANALOG_DEADZONE_PLAYER_4",
+    }
+
+    # Build a dict of directive → new value
+    updates = {}
+    for api_key, directive in key_map.items():
+        if api_key in new_values:
+            updates[directive] = new_values[api_key]
+
+    try:
+        with open(CONFIG_PATH, "r") as f:
+            lines = f.readlines()
+    except OSError as e:
+        return False, str(e)
+
+    written = set()
+    new_lines = []
+    for line in lines:
+        stripped = line.strip()
+        if stripped and not stripped.startswith("#"):
+            # split on any whitespace, producing at most [directive, value]
+            parts = stripped.split(None, 1)
+            if parts and parts[0] in updates:
+                new_lines.append(f"{parts[0]} {updates[parts[0]]}\n")
+                written.add(parts[0])
+                continue
+        new_lines.append(line)
+
+    # Append any directives that weren't already in the file
+    for directive, value in updates.items():
+        if directive not in written:
+            new_lines.append(f"{directive} {value}\n")
+
+    try:
+        with open(CONFIG_PATH, "w") as f:
+            f.writelines(new_lines)
+    except OSError as e:
+        return False, str(e)
+
+    return True, "ok"
+
+
+def config_to_api(cfg):
+    """Convert raw directive dict to the API response shape."""
+    return {
+        "emulate":                    cfg.get("EMULATE",                    ""),
+        "game":                       cfg.get("DEFAULT_GAME",               ""),
+        "device":                     cfg.get("DEVICE_PATH",                ""),
+        "sense_line_type":            cfg.get("SENSE_LINE_TYPE",            "1"),
+        "sense_line_pin":             cfg.get("SENSE_LINE_PIN",             "26"),
+        "debug_mode":                 cfg.get("DEBUG_MODE",                 "0"),
+        "auto_controller_detection":  cfg.get("AUTO_CONTROLLER_DETECTION",  "1"),
+        "deadzone_p1":                cfg.get("ANALOG_DEADZONE_PLAYER_1",   "0.2"),
+        "deadzone_p2":                cfg.get("ANALOG_DEADZONE_PLAYER_2",   "0.2"),
+        "deadzone_p3":                cfg.get("ANALOG_DEADZONE_PLAYER_3",   "0.2"),
+        "deadzone_p4":                cfg.get("ANALOG_DEADZONE_PLAYER_4",   "0.2"),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Service helpers
+# ---------------------------------------------------------------------------
+
+def systemctl(*args):
+    """Run a systemctl command; return (success, output)."""
+    try:
+        result = subprocess.run(
+            ["systemctl"] + list(args),
+            capture_output=True, text=True, timeout=15
+        )
+        return result.returncode == 0, (result.stdout + result.stderr).strip()
+    except Exception as e:
+        return False, str(e)
+
+
+def get_service_status():
+    """Return a dict with service state information."""
+    ok, out = systemctl("show", SERVICE_NAME,
+                        "--property=ActiveState,MainPID,ActiveEnterTimestamp")
+    props = {}
+    for line in out.splitlines():
+        if "=" in line:
+            k, _, v = line.partition("=")
+            props[k.strip()] = v.strip()
+
+    cfg = config_to_api(read_config())
+    return {
+        "active_state":  props.get("ActiveState", "unknown"),
+        "main_pid":      props.get("MainPID", ""),
+        "active_since":  props.get("ActiveEnterTimestamp", ""),
+        "config":        cfg,
+    }
+
+
+def get_logs(lines=100):
+    """Return recent log lines for the modernjvs service.
+
+    Tries journalctl first (works on Raspberry Pi OS and DietPi with journald).
+    Falls back to grepping syslog files on systems without a persistent journal
+    (e.g. DietPi configured with volatile-only journald or syslog-only logging).
+    """
+    lines_count = int(lines)
+    lines_str = str(lines_count)
+
+    # Primary: journalctl (systemd journal – works on RPiOS and most DietPi setups)
+    try:
+        result = subprocess.run(
+            ["journalctl", "-u", SERVICE_NAME, "-n", lines_str,
+             "--no-pager", "--output=short-iso"],
+            capture_output=True, text=True, timeout=15
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.splitlines()
+    except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
+        pass
+
+    # Fallback: grep system syslog files (DietPi with syslog / no journald persistence)
+    syslog_paths = [
+        "/var/log/syslog",
+        "/var/log/daemon.log",
+        "/var/log/messages",
+    ]
+    for path in syslog_paths:
+        try:
+            result = subprocess.run(
+                ["grep", "-i", SERVICE_NAME, path],
+                capture_output=True, text=True, timeout=10
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                log_lines = result.stdout.splitlines()
+                return log_lines[-lines_count:]
+        except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
+            continue
+
+    return [f"No log source found. Run:  journalctl -u {SERVICE_NAME}  to check manually."]
+
+
+# Module-level CPU sampling state for delta calculation between API calls
+_cpu_prev = None   # (total_jiffies, idle_jiffies)
+
+
+def get_sysinfo():
+    """Return system resource stats using /proc and /sys (no external deps).
+
+    Works on Raspberry Pi OS, DietPi, and any Linux with standard /proc/sys.
+    """
+    global _cpu_prev
+
+    # --- CPU usage (delta between consecutive calls) ---
+    cpu_pct = 0.0
+    try:
+        with open("/proc/stat") as f:
+            line = f.readline()
+        fields = [int(x) for x in line.split()[1:]]
+        # fields: user nice system idle iowait irq softirq steal guest guest_nice
+        idle  = fields[3] + (fields[4] if len(fields) > 4 else 0)  # idle + iowait
+        total = sum(fields)
+        if _cpu_prev is not None:
+            prev_total, prev_idle = _cpu_prev
+            dt = total - prev_total
+            di = idle - prev_idle
+            if dt > 0:
+                cpu_pct = round(max(0.0, min(100.0, 100.0 * (1.0 - di / dt))), 1)
+        _cpu_prev = (total, idle)
+    except Exception:
+        pass
+
+    # --- Memory ---
+    mem_used_mb = mem_total_mb = 0
+    mem_pct = 0.0
+    try:
+        meminfo = {}
+        with open("/proc/meminfo") as f:
+            for line in f:
+                parts = line.split()
+                if len(parts) >= 2:
+                    meminfo[parts[0].rstrip(":")] = int(parts[1])
+        mem_total_kb     = meminfo.get("MemTotal", 0)
+        mem_available_kb = meminfo.get("MemAvailable", meminfo.get("MemFree", 0))
+        mem_used_mb  = (mem_total_kb - mem_available_kb) // 1024
+        mem_total_mb = mem_total_kb // 1024
+        if mem_total_kb > 0:
+            mem_pct = round(100.0 * (mem_total_kb - mem_available_kb) / mem_total_kb, 1)
+    except Exception:
+        pass
+
+    # --- CPU temperature (Raspberry Pi & DietPi use thermal_zone0) ---
+    temp_c = None
+    for tz_path in (
+        "/sys/class/thermal/thermal_zone0/temp",
+        "/sys/class/thermal/thermal_zone1/temp",
+    ):
+        try:
+            with open(tz_path) as f:
+                temp_c = round(int(f.read().strip()) / 1000.0, 1)
+            break
+        except Exception:
+            continue
+
+    # --- Disk usage (root filesystem) ---
+    disk_used_gb = disk_total_gb = 0.0
+    disk_pct = 0.0
+    try:
+        st = os.statvfs("/")
+        disk_total = st.f_blocks * st.f_frsize
+        disk_free  = st.f_bavail * st.f_frsize
+        disk_used  = disk_total - disk_free
+        disk_total_gb = round(disk_total / 1e9, 1)
+        disk_used_gb  = round(disk_used  / 1e9, 1)
+        if disk_total > 0:
+            disk_pct = round(100.0 * disk_used / disk_total, 1)
+    except Exception:
+        pass
+
+    # --- Load average ---
+    load_avg = ""
+    try:
+        with open("/proc/loadavg") as f:
+            parts = f.read().split()
+            load_avg = " ".join(parts[:3])
+    except Exception:
+        pass
+
+    # --- Local IP addresses (LAN IPs only, no loopback) ---
+    ip_addresses = []
+    try:
+        result = subprocess.run(
+            ["hostname", "-I"],
+            capture_output=True, text=True, timeout=5
+        )
+        if result.returncode == 0:
+            ip_addresses = [
+                ip for ip in result.stdout.split()
+                if not ip.startswith("127.") and not ip.startswith("::1")
+                and ":" not in ip               # skip IPv6
+            ]
+    except Exception:
+        pass
+
+    return {
+        "cpu_pct":      cpu_pct,
+        "mem_used_mb":  mem_used_mb,
+        "mem_total_mb": mem_total_mb,
+        "mem_pct":      mem_pct,
+        "temp_c":       temp_c,
+        "disk_used_gb": disk_used_gb,
+        "disk_total_gb":disk_total_gb,
+        "disk_pct":     disk_pct,
+        "load_avg":     load_avg,
+        "ip_addresses": ip_addresses,
+    }
+
+
+def list_dir(path):
+    """Return sorted list of plain files in a directory (no dotfiles)."""
+    try:
+        return sorted(
+            e for e in os.listdir(path)
+            if not e.startswith(".") and os.path.isfile(os.path.join(path, e))
+        )
+    except OSError:
+        return []
+
+
+# ---------------------------------------------------------------------------
+# Logo helper
+# ---------------------------------------------------------------------------
+
+def get_logo_bytes():
+    """Return PNG logo bytes, checking the installed path and the repo docs path.
+
+    The installed path (/usr/share/modernjvs/) is tried first.  When running
+    directly from the source repository (e.g. during development) the script
+    falls back to docs/modernjvs2.png two directory levels above this file.
+    """
+    # Resolve the script's real location so the fallback works even when the
+    # script is run via a symlink or from a different working directory.
+    # Expected layout: src/webui/modernjvs-webui  →  ../../docs/modernjvs2.png
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    candidates = [
+        LOGO_PATH,
+        "/usr/share/modernjvs/modernjvs2.png",
+        os.path.join(script_dir, "..", "..", "docs", "modernjvs2.png"),
+    ]
+    for p in candidates:
+        try:
+            with open(os.path.normpath(p), "rb") as f:
+                return f.read()
+        except OSError:
+            pass
+    return None
+
+
+def get_sticks_bytes():
+    """Return PNG Sticks image bytes, checking the installed path and the repo docs path."""
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    candidates = [
+        STICKS_PATH,
+        "/usr/share/modernjvs/Sticks.png",
+        os.path.join(script_dir, "..", "..", "docs", "Sticks.png"),
+    ]
+    for p in candidates:
+        try:
+            with open(os.path.normpath(p), "rb") as f:
+                return f.read()
+        except OSError:
+            pass
+    return None
+
+
+# Build HTML_PAGE now that get_logo_bytes() / get_sticks_bytes() are defined.
+# Done once at module load so every request serves the same cached bytes.
+HTML_PAGE = _build_html_page()
+
+
+# ---------------------------------------------------------------------------
+# Version helper
+# ---------------------------------------------------------------------------
+
+def get_version():
+    """Return the installed ModernJVS binary version string."""
+    try:
+        result = subprocess.run(
+            ["modernjvs", "--version"],
+            capture_output=True, text=True, timeout=5
+        )
+        ver = (result.stdout + result.stderr).strip()
+        if ver:
+            return ver
+    except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
+        pass
+    return "unknown"
+
+
+# ---------------------------------------------------------------------------
+# Connected input devices helper
+# ---------------------------------------------------------------------------
+
+# Mirrors FILTERED_DEVICE_PATTERNS in src/controller/input.c (lines 46-71).
+# If you add or remove patterns in that C array, update this list to match.
+# The C source is the authoritative definition; this list is a read-only copy
+# used only to annotate the Devices tab in the WebUI.
+_FILTERED_DEVICE_PATTERNS = [
+    # Audio/HDMI devices
+    "vc4-hdmi", "HDMI", "hdmi", "headphone", "Headphone",
+    # Sound devices
+    "snd_bcm2835", "snd_hda", "snd_usb", "pcspkr", "PC Speaker",
+    # Power management
+    "Power Button", "power-button", "Sleep Button", "Lid Switch", "pwr_button",
+    # Video/Camera devices
+    "Video Bus",
+]
+
+
+def _is_filtered_device(name):
+    """Return True if the device name matches any filtered pattern."""
+    return any(pat in name for pat in _FILTERED_DEVICE_PATTERNS)
+
+
+def get_input_devices():
+    """Return list of connected /dev/input/event* devices with sysfs names.
+
+    Each entry has: event, name, path, ignored.
+    ignored=True means ModernJVS will skip this device (it matches a filter
+    pattern in FILTERED_DEVICE_PATTERNS).
+    """
+    devices = []
+    try:
+        for event_path in sorted(_glob.glob("/dev/input/event*")):
+            event_name = os.path.basename(event_path)
+            name = event_name  # fallback if sysfs name not available
+            sysfs_name_path = f"/sys/class/input/{event_name}/device/name"
+            try:
+                with open(sysfs_name_path) as f:
+                    name = f.read().strip()
+            except OSError:
+                pass
+            devices.append({
+                "event":   event_name,
+                "name":    name,
+                "path":    event_path,
+                "ignored": _is_filtered_device(name),
+            })
+    except OSError:
+        pass
+    return devices
+
+
+class WebUIHandler(http.server.BaseHTTPRequestHandler):
+    """Simple HTTP handler that serves the WebUI and its JSON API."""
+
+    def log_message(self, fmt, *args):  # silence default Apache-style log
+        pass
+
+    # ---- access control ----
+
+    def _check_client_ip(self):
+        """Return True if the client is on a private/local network.
+
+        Returns False and sends a 403 HTML page if the client IP is public,
+        preventing internet exposure even when the Pi has an internet connection.
+        """
+        client_ip = self.client_address[0]
+        if not is_private_ip(client_ip):
+            self._access_denied(client_ip)
+            return False
+        return True
+
+    def _access_denied(self, client_ip):
+        html = _ACCESS_DENIED_HTML.format(client_ip=client_ip)
+        data = html.encode("utf-8")
+        self.send_response(HTTPStatus.FORBIDDEN)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", len(data))
+        self.end_headers()
+        self.wfile.write(data)
+
+    # ---- routing ----
+
+    def do_GET(self):
+        if not self._check_client_ip():
+            return
+
+        parsed = urllib.parse.urlparse(self.path)
+        path = parsed.path
+        query = urllib.parse.parse_qs(parsed.query)
+
+        if path == "/" or path == "/index.html":
+            self._send_html(HTML_PAGE)
+        elif path == "/logo":
+            self._serve_logo()
+        elif path == "/sticks":
+            self._serve_sticks()
+        elif path == "/api/status":
+            self._json(get_service_status())
+        elif path == "/api/config":
+            self._json(config_to_api(read_config()))
+        elif path == "/api/sysinfo":
+            self._json(get_sysinfo())
+        elif path == "/api/logs":
+            try:
+                lines = int(query.get("lines", ["100"])[0])
+            except (ValueError, IndexError):
+                lines = 100
+            lines = max(10, min(lines, 1000))
+            self._json({"lines": get_logs(lines)})
+        elif path == "/api/logs/download":
+            try:
+                lines = int(query.get("lines", ["500"])[0])
+            except (ValueError, IndexError):
+                lines = 500
+            lines = max(10, min(lines, 5000))
+            text = "\n".join(get_logs(lines))
+            data = text.encode("utf-8")
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.send_header("Content-Disposition",
+                             f'attachment; filename="{SERVICE_NAME}.log"')
+            self.send_header("Content-Length", len(data))
+            self.end_headers()
+            self.wfile.write(data)
+        elif path == "/api/ios":
+            self._json({"ios": list_dir(IOS_PATH)})
+        elif path == "/api/games":
+            self._json({"games": list_dir(GAMES_PATH)})
+        elif path == "/api/devices":
+            self._json({"devices": list_dir(DEVICES_PATH)})
+        elif path == "/api/input_devices":
+            self._json({"devices": get_input_devices()})
+        elif path == "/api/version":
+            self._json({"version": get_version()})
+        elif path == "/api/webui/settings":
+            self._json(read_webui_settings())
+        elif path == "/api/bg":
+            self._serve_bg()
+        elif path == "/api/bg/status":
+            size = os.path.getsize(WEBUI_BG_PATH) if os.path.isfile(WEBUI_BG_PATH) else 0
+            has = size > 0
+            mime = ""
+            if has:
+                try:
+                    with open(WEBUI_BG_MIME_PATH) as f:
+                        mime = f.read().strip()
+                except OSError:
+                    mime = "image/jpeg"
+            self._json({"hasImage": has, "size": size, "mime": mime})
+        elif path == "/api/font":
+            self._serve_font()
+        elif path == "/api/font/status":
+            has = os.path.isfile(WEBUI_FONT_PATH)
+            name = ""
+            size = 0
+            if has:
+                size = os.path.getsize(WEBUI_FONT_PATH)
+                try:
+                    with open(WEBUI_FONT_NAME_PATH) as f:
+                        name = f.read().strip()
+                except OSError:
+                    name = "custom-font"
+            self._json({"hasFont": has, "name": name, "size": size})
+        else:
+            self._not_found()
+
+    def do_POST(self):
+        if not self._check_client_ip():
+            return
+
+        parsed = urllib.parse.urlparse(self.path)
+        path = parsed.path
+
+        # Binary upload must be routed BEFORE _read_body() to avoid
+        # attempting to UTF-8 decode raw image bytes.
+        if path == "/api/bg/upload":
+            self._handle_bg_upload()
+            return
+        if path == "/api/font/upload":
+            self._handle_font_upload()
+            return
+
+        body = self._read_body()
+
+        if path == "/api/config":
+            try:
+                data = json.loads(body) if body else {}
+            except json.JSONDecodeError:
+                self._json({"error": "Invalid JSON"}, HTTPStatus.BAD_REQUEST)
+                return
+            ok, msg = write_config(data)
+            if ok:
+                self._json({"ok": True})
+            else:
+                self._json({"error": msg}, HTTPStatus.INTERNAL_SERVER_ERROR)
+
+        elif path == "/api/control":
+            try:
+                data = json.loads(body) if body else {}
+            except json.JSONDecodeError:
+                self._json({"error": "Invalid JSON"}, HTTPStatus.BAD_REQUEST)
+                return
+            action = data.get("action", "")
+            if action not in ("start", "stop", "restart"):
+                self._json({"error": "Invalid action"}, HTTPStatus.BAD_REQUEST)
+                return
+            ok, msg = systemctl(action, SERVICE_NAME)
+            if ok:
+                self._json({"ok": True})
+            else:
+                self._json({"error": msg}, HTTPStatus.INTERNAL_SERVER_ERROR)
+
+        elif path == "/api/webui/restart":
+            # Send the response BEFORE restarting — systemctl kills this
+            # process immediately, so schedule it on a short timer so the
+            # HTTP response can be flushed first.
+            def _do_restart():
+                ok, msg = systemctl("restart", WEBUI_SERVICE_NAME)
+                if not ok:
+                    print(f"[webui] WARNING: WebUI restart failed: {msg}", flush=True)
+            threading.Timer(0.5, _do_restart).start()
+            self._json({"ok": True})
+
+        elif path == "/api/webui/settings":
+            try:
+                data = json.loads(body) if body else {}
+            except json.JSONDecodeError:
+                self._json({"error": "Invalid JSON"}, HTTPStatus.BAD_REQUEST)
+                return
+            ok, msg = write_webui_settings(data)
+            if ok:
+                self._json({"ok": True})
+            else:
+                self._json({"error": msg}, HTTPStatus.INTERNAL_SERVER_ERROR)
+
+        elif path == "/api/bg/clear":
+            try:
+                for p in (WEBUI_BG_PATH, WEBUI_BG_MIME_PATH):
+                    try:
+                        os.remove(p)
+                    except FileNotFoundError:
+                        pass
+                self._json({"ok": True})
+            except OSError as e:
+                self._json({"error": str(e)}, HTTPStatus.INTERNAL_SERVER_ERROR)
+
+        elif path == "/api/font/clear":
+            try:
+                for p in (WEBUI_FONT_PATH, WEBUI_FONT_NAME_PATH):
+                    try:
+                        os.remove(p)
+                    except FileNotFoundError:
+                        pass
+                self._json({"ok": True})
+            except OSError as e:
+                self._json({"error": str(e)}, HTTPStatus.INTERNAL_SERVER_ERROR)
+
+        else:
+            self._not_found()
+
+    # ---- response helpers ----
+
+    def _read_body(self):
+        length = int(self.headers.get("Content-Length", 0))
+        return self.rfile.read(length).decode("utf-8") if length else ""
+
+    def _read_raw_body(self):
+        """Read the raw request body as bytes (for binary uploads)."""
+        length = int(self.headers.get("Content-Length", 0))
+        return self.rfile.read(length) if length else b""
+
+    def _handle_bg_upload(self):
+        """Accept a background image upload and persist it to disk."""
+        content_type = self.headers.get("Content-Type", "").split(";")[0].strip().lower()
+        if content_type not in ALLOWED_IMAGE_MIMES:
+            self._json({"error": "Only image files are accepted."}, HTTPStatus.BAD_REQUEST)
+            return
+        content_length = int(self.headers.get("Content-Length", 0))
+        if content_length > MAX_UPLOAD_BYTES:
+            self._json(
+                {"error": f"File too large. Maximum size is {MAX_UPLOAD_BYTES // (1024*1024)} MB."},
+                HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
+            )
+            return
+        raw = self.rfile.read(content_length) if content_length else b""
+        if not raw:
+            self._json({"error": "Empty upload."}, HTTPStatus.BAD_REQUEST)
+            return
+        try:
+            os.makedirs(os.path.dirname(WEBUI_BG_PATH), exist_ok=True)
+            with open(WEBUI_BG_PATH, "wb") as f:
+                f.write(raw)
+            with open(WEBUI_BG_MIME_PATH, "w") as f:
+                f.write(content_type)
+            self._json({"ok": True, "size": len(raw), "mime": content_type})
+        except OSError as e:
+            self._json({"error": str(e)}, HTTPStatus.INTERNAL_SERVER_ERROR)
+
+    def _serve_bg(self):
+        """Serve the stored background image file."""
+        if not os.path.isfile(WEBUI_BG_PATH):
+            self._not_found()
+            return
+        try:
+            mime = "image/jpeg"
+            try:
+                with open(WEBUI_BG_MIME_PATH) as f:
+                    mime = f.read().strip()
+            except OSError:
+                pass
+            with open(WEBUI_BG_PATH, "rb") as f:
+                data = f.read()
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", mime)
+            self.send_header("Content-Length", len(data))
+            # No long-term cache – clients should see cleared images promptly
+            self.send_header("Cache-Control", "no-cache")
+            self.end_headers()
+            self.wfile.write(data)
+        except OSError:
+            self._not_found()
+
+    def _handle_font_upload(self):
+        """Accept a font file upload (.ttf/.otf/.woff/.woff2) and persist it to disk."""
+        # Validate by filename extension sent in X-File-Name header.
+        # Use X-File-Name as the primary gate; fall back to content-type when absent.
+        raw_name = self.headers.get("X-File-Name", "")
+        # Sanitize: strip path separators and limit to safe filename characters
+        safe_name = re.sub(r'[^A-Za-z0-9._\- ]', '', os.path.basename(raw_name))[:64]
+        ext = os.path.splitext(safe_name.lower())[1]
+        content_type = self.headers.get("Content-Type", "").split(";")[0].strip().lower()
+        # If a name was provided, the extension must be in the allowed set.
+        # If no name was provided, require a known font content-type.
+        if safe_name:
+            valid = ext in ALLOWED_FONT_EXTS
+        else:
+            valid = content_type in FONT_EXT_TO_MIME.values()
+        if not valid:
+            self._json({"error": "Only TTF, OTF, WOFF, or WOFF2 font files are accepted."},
+                       HTTPStatus.BAD_REQUEST)
+            return
+        content_length = int(self.headers.get("Content-Length", 0))
+        if content_length > MAX_FONT_UPLOAD_BYTES:
+            self._json(
+                {"error": f"File too large. Maximum size is {MAX_FONT_UPLOAD_BYTES // (1024 * 1024)} MB."},
+                HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
+            )
+            return
+        raw = self.rfile.read(content_length) if content_length else b""
+        if not raw:
+            self._json({"error": "Empty upload."}, HTTPStatus.BAD_REQUEST)
+            return
+        try:
+            os.makedirs(os.path.dirname(WEBUI_FONT_PATH), exist_ok=True)
+            with open(WEBUI_FONT_PATH, "wb") as f:
+                f.write(raw)
+            display_name = safe_name if safe_name else ("custom-font" + ext)
+            with open(WEBUI_FONT_NAME_PATH, "w") as f:
+                f.write(display_name)
+            mime = FONT_EXT_TO_MIME.get(ext, "font/ttf")
+            self._json({"ok": True, "size": len(raw), "name": display_name, "mime": mime})
+        except OSError as e:
+            self._json({"error": str(e)}, HTTPStatus.INTERNAL_SERVER_ERROR)
+
+    def _serve_font(self):
+        """Serve the stored custom font file."""
+        if not os.path.isfile(WEBUI_FONT_PATH):
+            self._not_found()
+            return
+        try:
+            name = ""
+            try:
+                with open(WEBUI_FONT_NAME_PATH) as f:
+                    name = f.read().strip()
+            except OSError:
+                pass
+            ext = os.path.splitext(name.lower())[1] if name else ""
+            mime = FONT_EXT_TO_MIME.get(ext, "font/ttf")
+            with open(WEBUI_FONT_PATH, "rb") as f:
+                data = f.read()
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", mime)
+            self.send_header("Content-Length", len(data))
+            self.send_header("Cache-Control", "no-cache")
+            self.end_headers()
+            self.wfile.write(data)
+        except OSError:
+            self._not_found()
+
+    def _send_html(self, html):
+        data = html.encode("utf-8")
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", len(data))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def _json(self, obj, status=HTTPStatus.OK):
+        data = json.dumps(obj).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", len(data))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def _serve_logo(self):
+        logo = get_logo_bytes()
+        if logo is None:
+            self._not_found()
+            return
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", "image/png")
+        self.send_header("Content-Length", len(logo))
+        self.send_header("Cache-Control", "max-age=86400")
+        self.end_headers()
+        self.wfile.write(logo)
+
+    def _serve_sticks(self):
+        sticks = get_sticks_bytes()
+        if sticks is None:
+            self._not_found()
+            return
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", "image/png")
+        self.send_header("Content-Length", len(sticks))
+        self.send_header("Cache-Control", "max-age=86400")
+        self.end_headers()
+        self.wfile.write(sticks)
+
+    def _not_found(self):
+        self._json({"error": "Not found"}, HTTPStatus.NOT_FOUND)
+
+
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
+
+def main():
+    server = http.server.ThreadingHTTPServer(("0.0.0.0", WEBUI_PORT), WebUIHandler)
+    print(f"ModernJVS WebUI running on http://0.0.0.0:{WEBUI_PORT}")
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    server.server_close()
+
+
+if __name__ == "__main__":
+    main()
