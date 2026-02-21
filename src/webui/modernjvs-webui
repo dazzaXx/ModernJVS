@@ -20,7 +20,8 @@ CONFIG_PATH = "/etc/modernjvs/config"
 IOS_PATH = "/etc/modernjvs/ios"
 GAMES_PATH = "/etc/modernjvs/games"
 DEVICES_PATH = "/etc/modernjvs/devices"
-LOGO_PATH = "/usr/share/modernjvs/modernjvs2.png"
+LOGO_PATH   = "/usr/share/modernjvs/modernjvs2.png"
+STICKS_PATH = "/usr/share/modernjvs/Sticks.png"
 SERVICE_NAME = "modernjvs"
 WEBUI_SERVICE_NAME = "modernjvs-webui"
 
@@ -539,6 +540,32 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
   [data-theme="amber"]     #logo { filter: hue-rotate(50deg)  saturate(1.2); }
   [data-theme="solarized"] #logo { filter: hue-rotate(192deg) saturate(0.9); }
 
+  /* ---- Sticks corner decoration ---- */
+  .sticks-corner {
+    position: fixed;
+    bottom: 0;
+    right: 0;
+    width: 200px;
+    opacity: 0.18;
+    pointer-events: none;
+    z-index: 0;
+  }
+  /* Same hue-rotate values as the logo so both tint together */
+  [data-theme="dark"]      #sticks { filter: none; }
+  [data-theme="black"]     #sticks { filter: none; }
+  [data-theme="light"]     #sticks { filter: brightness(0) saturate(0); }
+  [data-theme="midnight"]  #sticks { filter: hue-rotate(212deg) saturate(1.1); }
+  [data-theme="dracula"]   #sticks { filter: hue-rotate(268deg) saturate(1.2); }
+  [data-theme="terminal"]  #sticks { filter: hue-rotate(148deg) saturate(1.2); }
+  [data-theme="ocean"]     #sticks { filter: hue-rotate(208deg) saturate(1.2); }
+  [data-theme="sunset"]    #sticks { filter: hue-rotate(36deg)  saturate(1.2); }
+  [data-theme="forest"]    #sticks { filter: hue-rotate(148deg) saturate(1.2); }
+  [data-theme="purple"]    #sticks { filter: hue-rotate(278deg) saturate(1.2); }
+  [data-theme="neon"]      #sticks { filter: hue-rotate(196deg) saturate(1.2); }
+  [data-theme="rose"]      #sticks { filter: hue-rotate(4deg)   saturate(1.1); }
+  [data-theme="amber"]     #sticks { filter: hue-rotate(50deg)  saturate(1.2); }
+  [data-theme="solarized"] #sticks { filter: hue-rotate(192deg) saturate(0.9); }
+
   /* ---- compact mode ---- */
   body.compact .card { padding: 0.85rem 1rem; }
   body.compact .card h2 { font-size: 1rem; margin-bottom: 0.6rem; }
@@ -963,6 +990,8 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
 </div>
 
 <footer>ModernJVS WebUI &mdash; <a href="https://github.com/dazzaXx/ModernJVS" target="_blank">github.com/dazzaXx/ModernJVS</a></footer>
+
+<img id="sticks" src="__STICKS__" alt="" class="sticks-corner">
 
 <script>
 // ---- Constants ----
@@ -1586,11 +1615,20 @@ def _logo_data_uri():
     return "/logo"
 
 
+def _sticks_data_uri():
+    """Return the Sticks image as a base64 data URI, or '/sticks' as fallback."""
+    data = get_sticks_bytes()
+    if data:
+        return "data:image/png;base64," + base64.b64encode(data).decode()
+    return "/sticks"
+
+
 def _build_html_page():
     """Build the final HTML page, embedding the logo as a base64 data URI."""
     return (
         _HTML_TEMPLATE
-        .replace("__LOGO__", _logo_data_uri())
+        .replace("__LOGO__",           _logo_data_uri())
+        .replace("__STICKS__",         _sticks_data_uri())
         .replace("__BG_SCRIM_DEFAULT__", str(_SETTINGS_DEFAULTS["bgScrimOpacity"]))
     )
 
@@ -1930,7 +1968,24 @@ def get_logo_bytes():
     return None
 
 
-# Build HTML_PAGE now that get_logo_bytes() is defined.
+def get_sticks_bytes():
+    """Return PNG Sticks image bytes, checking the installed path and the repo docs path."""
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    candidates = [
+        STICKS_PATH,
+        "/usr/share/modernjvs/Sticks.png",
+        os.path.join(script_dir, "..", "..", "docs", "Sticks.png"),
+    ]
+    for p in candidates:
+        try:
+            with open(os.path.normpath(p), "rb") as f:
+                return f.read()
+        except OSError:
+            pass
+    return None
+
+
+# Build HTML_PAGE now that get_logo_bytes() / get_sticks_bytes() are defined.
 # Done once at module load so every request serves the same cached bytes.
 HTML_PAGE = _build_html_page()
 
@@ -2051,6 +2106,8 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
             self._send_html(HTML_PAGE)
         elif path == "/logo":
             self._serve_logo()
+        elif path == "/sticks":
+            self._serve_sticks()
         elif path == "/api/status":
             self._json(get_service_status())
         elif path == "/api/config":
@@ -2371,6 +2428,18 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "max-age=86400")
         self.end_headers()
         self.wfile.write(logo)
+
+    def _serve_sticks(self):
+        sticks = get_sticks_bytes()
+        if sticks is None:
+            self._not_found()
+            return
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", "image/png")
+        self.send_header("Content-Length", len(sticks))
+        self.send_header("Cache-Control", "max-age=86400")
+        self.end_headers()
+        self.wfile.write(sticks)
 
     def _not_found(self):
         self._json({"error": "Not found"}, HTTPStatus.NOT_FOUND)
