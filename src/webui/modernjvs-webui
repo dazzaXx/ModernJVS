@@ -1376,7 +1376,7 @@ async function loadBluetoothSection() {
     html = 'Bluetooth tools (BlueZ) are not installed. ' + setupBtn;
   } else if (s.rfkill_soft_blocked) {
     const cfgTool = s.is_dietpi
-      ? '<code>sudo dietpi-config</code> (Network Options → Bluetooth)'
+      ? '<code>sudo dietpi-config</code> (Advanced Options → Bluetooth)'
       : '<code>sudo raspi-config</code>';
     html = 'Bluetooth is disabled (rfkill). To enable it, run: '
       + '<code>sudo rfkill unblock bluetooth</code> or use ' + cfgTool + '.';
@@ -1386,7 +1386,7 @@ async function loadBluetoothSection() {
   } else if (!s.hci_present) {
     if (s.is_pi5_or_later) {
       const cfgTool5 = s.is_dietpi
-        ? '<code>sudo dietpi-config</code> (Network Options → Bluetooth)'
+        ? '<code>sudo dietpi-config</code> (Advanced Options → Bluetooth)'
         : '<code>sudo raspi-config</code>';
       html = 'No Bluetooth adapter detected on your Raspberry Pi 5. '
         + 'Enable Bluetooth via ' + cfgTool5 + ' or confirm the '
