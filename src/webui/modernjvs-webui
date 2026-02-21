@@ -552,9 +552,9 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
   }
   /* Sticks image: dominant hue ~20°, logo dominant hue ~350°, offset = +330°.
      sticks_rot = (logo_rot + 330) % 360  so both reach the same output hue. */
-  [data-theme="dark"]      #sticks { filter: none; }
-  [data-theme="black"]     #sticks { filter: none; }
-  [data-theme="light"]     #sticks { filter: brightness(0) saturate(0); }
+  [data-theme="dark"]      #sticks { filter: hue-rotate(330deg) saturate(1.1) brightness(0.75); }
+  [data-theme="black"]     #sticks { filter: hue-rotate(330deg) saturate(1.1) brightness(0.75); }
+  [data-theme="light"]     #sticks { filter: grayscale(1) brightness(0.5); }
   [data-theme="midnight"]  #sticks { filter: hue-rotate(182deg) saturate(1.1); }
   [data-theme="dracula"]   #sticks { filter: hue-rotate(238deg) saturate(1.2); }
   [data-theme="terminal"]  #sticks { filter: hue-rotate(118deg) saturate(1.2); }
