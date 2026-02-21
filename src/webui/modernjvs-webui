@@ -9,6 +9,7 @@ import ipaddress
 import json
 import os
 import re
+import shutil
 import subprocess
 import threading
 import time
@@ -884,17 +885,20 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
     </div>
 
     <div class="card" style="margin-top:1rem;">
-      <h2>Bluetooth Controllers <button class="btn btn-refresh btn-xs" onclick="loadBluetoothPaired()" style="margin-left:0.5rem;vertical-align:middle;">⟳ Refresh</button></h2>
+      <h2>Bluetooth Controllers <button class="btn btn-refresh btn-xs" onclick="loadBluetoothSection()" style="margin-left:0.5rem;vertical-align:middle;">⟳ Refresh</button></h2>
       <p style="font-size:0.83rem;color:var(--muted);margin-bottom:1rem;">Add and remove Bluetooth controllers such as Wii Remotes.</p>
       <div id="btAlert" class="alert"></div>
+      <div id="btStatusBanner" class="alert" style="display:none;"></div>
 
-      <h3 style="font-size:0.85rem;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:0.5rem;">Paired Devices</h3>
-      <table class="device-table">
-        <thead><tr><th>Device Name</th><th>MAC Address</th><th>Status</th><th></th></tr></thead>
-        <tbody id="btPairedBody"><tr><td colspan="4" style="color:var(--muted)">Loading…</td></tr></tbody>
-      </table>
+      <div id="btPairedSection">
+        <h3 style="font-size:0.85rem;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:0.5rem;">Paired Devices</h3>
+        <table class="device-table">
+          <thead><tr><th>Device Name</th><th>MAC Address</th><th>Status</th><th></th></tr></thead>
+          <tbody id="btPairedBody"><tr><td colspan="4" style="color:var(--muted)">Loading…</td></tr></tbody>
+        </table>
+      </div>
 
-      <div style="margin-top:1.25rem;padding-top:1rem;border-top:1px solid var(--border);">
+      <div id="btScanSection" style="margin-top:1.25rem;padding-top:1rem;border-top:1px solid var(--border);">
         <h3 style="font-size:0.85rem;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:0.5rem;">Add Bluetooth Controller</h3>
         <p style="font-size:0.82rem;color:var(--muted);margin-bottom:0.75rem;">
           For Wii Remotes: press the red <strong>SYNC</strong> button inside the battery compartment, or hold <strong>1+2</strong> until the lights flash, then click Scan.
@@ -1043,7 +1047,7 @@ function showTab(name, btn) {
   btn.classList.add('active');
   if (name === 'monitor') fetchLogs();
   if (name === 'config') loadConfig();
-  if (name === 'devices') { loadDevices(); loadBluetoothPaired(); }
+  if (name === 'devices') { loadDevices(); loadBluetoothSection(); }
   if (name === 'webui-settings') initAppearancePanel();
 }
 
@@ -1331,6 +1335,112 @@ async function loadDevices() {
 // ---- Bluetooth Controllers ----
 function _escHtml(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+async function loadBluetoothSection() {
+  const banner    = document.getElementById('btStatusBanner');
+  const paired    = document.getElementById('btPairedSection');
+  const scanSect  = document.getElementById('btScanSection');
+
+  // Reset banner and show normal sections initially
+  banner.style.display = 'none';
+  banner.innerHTML = '';
+  paired.style.display = '';
+  scanSect.style.display = '';
+
+  const s = await api('/api/bluetooth/status');
+
+  // If the status API itself errored (server-side exception), show raw error
+  if (s.error) {
+    banner.innerHTML = '&#x26A0; Bluetooth status check failed: ' + _escHtml(s.error);
+    banner.className = 'alert err';
+    banner.style.display = 'block';
+    paired.style.display = 'none';
+    scanSect.style.display = 'none';
+    return;
+  }
+
+  const usable = s.hci_present && s.bluez_available && s.bt_service_running && !s.rfkill_soft_blocked;
+
+  if (usable) {
+    await loadBluetoothPaired();
+    return;
+  }
+
+  // Build an appropriate diagnostic banner
+  let html = '';
+  let isErr = true;
+  const setupBtn = '<button class="btn btn-xs" style="margin-left:0.5rem;vertical-align:middle;" onclick="btSetupUsb()">&#x1F527; Setup USB Bluetooth</button>';
+
+  if (!s.bluez_available) {
+    html = 'Bluetooth tools (BlueZ) are not installed. ' + setupBtn;
+  } else if (s.rfkill_soft_blocked) {
+    html = 'Bluetooth is disabled (rfkill). To enable it, run: '
+      + '<code>sudo rfkill unblock bluetooth</code> or use <code>sudo raspi-config</code>.';
+  } else if (s.hci_present && !s.bt_service_running) {
+    html = 'A Bluetooth adapter is present but the Bluetooth service is not running. '
+      + 'Start it with: <code>sudo systemctl enable --now bluetooth</code>';
+  } else if (!s.hci_present) {
+    if (s.is_pi5_or_later) {
+      html = 'No Bluetooth adapter detected on your Raspberry Pi 5. '
+        + 'Enable Bluetooth via <code>sudo raspi-config</code> or confirm the '
+        + '<code>bluetooth</code> service is running.';
+    } else if (s.has_internal_bt && s.internal_bt_disabled) {
+      html = 'Internal Bluetooth is disabled. Plug in a USB Bluetooth dongle to continue.';
+      isErr = false;
+    } else if (s.has_internal_bt) {
+      // Pi 3/4 — internal BT present but not yet disabled; recommend USB dongle
+      const model = s.pi_model ? ' (' + _escHtml(s.pi_model) + ')' : '';
+      html = 'Your Raspberry Pi' + model + '\'s internal Bluetooth shares a UART with '
+        + 'the JVS serial port, which can cause conflicts. For best results, disable the '
+        + 'internal adapter and use a USB Bluetooth dongle instead. ' + setupBtn;
+    } else if (s.pi_model) {
+      // Pi 1/2/Zero — no internal BT
+      html = 'This Raspberry Pi model has no built-in Bluetooth. '
+        + 'Connect a USB Bluetooth dongle. ' + setupBtn;
+    } else {
+      html = 'No Bluetooth adapter detected. Connect a Bluetooth adapter.';
+    }
+  } else {
+    html = 'Bluetooth is not available. Check that an adapter is connected and the '
+      + '<code>bluetooth</code> service is running.';
+  }
+
+  banner.innerHTML = html;
+  banner.className = 'alert ' + (isErr ? 'err' : 'ok');
+  banner.style.display = 'block';
+  paired.style.display = 'none';
+  scanSect.style.display = 'none';
+}
+
+async function btSetupUsb() {
+  const btAlert = document.getElementById('btAlert');
+  btAlert.innerText = '⏳ Setting up Bluetooth… this may take a minute or two.';
+  btAlert.className = 'alert ok';
+
+  // Disable all setup buttons while running
+  document.querySelectorAll('[onclick="btSetupUsb()"]').forEach(b => { b.disabled = true; });
+
+  const d = await api('/api/bluetooth/setup_usb', {method: 'POST'});
+
+  document.querySelectorAll('[onclick="btSetupUsb()"]').forEach(b => { b.disabled = false; });
+
+  if (d.error) {
+    btAlert.innerText = '✗ Setup failed: ' + d.error;
+    btAlert.className = 'alert err';
+    return;
+  }
+
+  const lines = (d.output || []).join('\n');
+  if (d.reboot_needed) {
+    btAlert.innerText = '✓ Setup complete. A reboot is required for the changes to take effect.\n'
+      + 'Run: sudo reboot\n\n' + lines;
+  } else {
+    btAlert.innerText = '✓ Setup complete.\n\n' + lines;
+    // Re-check status now that packages are installed
+    setTimeout(() => loadBluetoothSection(), 1500);
+  }
+  btAlert.style.whiteSpace = 'pre-wrap';
 }
 
 async function loadBluetoothPaired() {
@@ -2384,6 +2494,193 @@ def bluetooth_remove(mac):
         return {"error": str(e)}
 
 
+def get_bluetooth_status():
+    """Return a dict describing the Bluetooth environment on this host.
+
+    Fields:
+      pi_model        — raw model string from /proc/device-tree/model (may be "")
+      pi_gen          — integer Pi generation (0 = unknown/non-Pi or Pi Zero/1)
+      has_internal_bt — True if this Pi model ships with an internal BT chip
+      is_pi5_or_later — True for Pi 5+; these don't need the USB-dongle workaround
+      hci_present     — True if at least one HCI Bluetooth adapter is visible
+      bluez_available — True if bluetoothctl is on PATH
+      bt_service_running — True if systemd bluetooth.service is active
+      rfkill_soft_blocked — True if BT is soft-blocked by rfkill
+      internal_bt_disabled — True if dtoverlay=disable-bt is in the boot config
+    """
+    # ---- Raspberry Pi model detection ----
+    pi_model = ""
+    try:
+        with open("/proc/device-tree/model", "r", encoding="utf-8", errors="replace") as f:
+            pi_model = f.read().strip().rstrip("\x00")
+    except OSError:
+        pass
+
+    pi_gen = 0
+    has_internal_bt = False
+    is_pi5_or_later = False
+
+    if pi_model:
+        m_gen = re.search(r"raspberry pi (\d+)", pi_model, re.IGNORECASE)
+        if m_gen:
+            pi_gen = int(m_gen.group(1))
+            has_internal_bt = pi_gen >= 3
+            is_pi5_or_later = pi_gen >= 5
+        elif re.search(r"raspberry pi zero.*w", pi_model, re.IGNORECASE):
+            # Zero W and Zero 2 W have internal BT
+            has_internal_bt = True
+
+    # ---- HCI adapter presence ----
+    hci_present = False
+    try:
+        bt_dir = "/sys/class/bluetooth"
+        hci_present = os.path.isdir(bt_dir) and next(os.scandir(bt_dir), None) is not None
+    except OSError:
+        pass
+
+    # ---- BlueZ availability ----
+    bluez_available = shutil.which("bluetoothctl") is not None
+
+    # ---- bluetooth.service state ----
+    bt_service_running = False
+    try:
+        r = subprocess.run(
+            ["systemctl", "is-active", "bluetooth"],
+            capture_output=True, text=True, timeout=5,
+        )
+        bt_service_running = r.stdout.strip() == "active"
+    except Exception:
+        pass
+
+    # ---- rfkill soft-block ----
+    rfkill_soft_blocked = False
+    try:
+        r = subprocess.run(
+            ["rfkill", "list", "bluetooth"],
+            capture_output=True, text=True, timeout=5,
+        )
+        rfkill_soft_blocked = "Soft blocked: yes" in r.stdout
+    except Exception:
+        pass
+
+    # ---- dtoverlay=disable-bt in boot config (uncommented lines only) ----
+    internal_bt_disabled = False
+    _disable_bt_re = re.compile(r'^\s*dtoverlay\s*=\s*disable-bt')
+    for boot_cfg in ("/boot/firmware/config.txt", "/boot/config.txt"):
+        try:
+            with open(boot_cfg) as f:
+                for line in f:
+                    if _disable_bt_re.match(line):
+                        internal_bt_disabled = True
+                        break
+            if internal_bt_disabled:
+                break
+        except OSError:
+            continue
+
+    return {
+        "pi_model":             pi_model,
+        "pi_gen":               pi_gen,
+        "has_internal_bt":      has_internal_bt,
+        "is_pi5_or_later":      is_pi5_or_later,
+        "hci_present":          hci_present,
+        "bluez_available":      bluez_available,
+        "bt_service_running":   bt_service_running,
+        "rfkill_soft_blocked":  rfkill_soft_blocked,
+        "internal_bt_disabled": internal_bt_disabled,
+    }
+
+
+def setup_usb_bluetooth():
+    """Install BlueZ packages and disable internal Bluetooth for USB-dongle use.
+
+    - Installs bluetooth, bluez, and bluez-tools via apt-get.
+    - On Pi 3/4 (models with internal BT that conflicts with JVS serial),
+      appends dtoverlay=disable-bt to the boot config so the internal adapter
+      is suppressed and only the USB dongle is used.
+    - Enables the bluetooth systemd service.
+    - Returns {"ok": True, "reboot_needed": bool, "output": [lines]}.
+    """
+    output_lines = []
+    reboot_needed = False
+
+    s = get_bluetooth_status()
+
+    # ---- Disable internal Bluetooth in boot config if applicable ----
+    if s["has_internal_bt"] and not s["is_pi5_or_later"] and not s["internal_bt_disabled"]:
+        boot_cfg = None
+        for path in ("/boot/firmware/config.txt", "/boot/config.txt"):
+            if os.path.isfile(path):
+                boot_cfg = path
+                break
+        if boot_cfg:
+            try:
+                with open(boot_cfg, "a") as f:
+                    f.write(
+                        "\n# Disable internal Bluetooth to use USB Bluetooth adapter\n"
+                        "dtoverlay=disable-bt\n"
+                    )
+                output_lines.append(
+                    f"✓ Internal Bluetooth disabled in {boot_cfg} (reboot required)."
+                )
+                reboot_needed = True
+            except OSError as e:
+                return {"error": f"Could not modify boot config: {e}"}
+        else:
+            output_lines.append("⚠ Boot config file not found; skipped disabling internal Bluetooth.")
+    elif s["internal_bt_disabled"]:
+        output_lines.append("✓ Internal Bluetooth already disabled in boot config.")
+
+    # ---- Install BlueZ packages ----
+    packages = ["bluetooth", "bluez", "bluez-tools"]
+    output_lines.append("Updating package lists…")
+    try:
+        r = subprocess.run(
+            ["apt-get", "update", "-qq"],
+            capture_output=True, text=True, timeout=120,
+        )
+        if r.returncode != 0:
+            detail = (r.stdout + "\n" + r.stderr).strip()
+            return {"error": f"apt-get update failed: {detail}"}
+        output_lines.append("✓ Package lists updated.")
+
+        output_lines.append(f"Installing {', '.join(packages)}…")
+        r = subprocess.run(
+            ["apt-get", "install", "-y", "-qq"] + packages,
+            capture_output=True, text=True, timeout=180,
+        )
+        if r.returncode != 0:
+            detail = (r.stdout + "\n" + r.stderr).strip()
+            return {"error": f"Package install failed: {detail}"}
+        output_lines.append("✓ Packages installed successfully.")
+    except subprocess.TimeoutExpired:
+        return {
+            "error": (
+                "Package installation timed out. "
+                "Run manually: sudo apt install bluetooth bluez bluez-tools"
+            )
+        }
+    except FileNotFoundError:
+        return {
+            "error": (
+                "apt-get not found. Install packages manually: "
+                "sudo apt install bluetooth bluez bluez-tools"
+            )
+        }
+
+    # ---- Enable the bluetooth service ----
+    try:
+        subprocess.run(
+            ["systemctl", "enable", "--now", "bluetooth"],
+            capture_output=True, text=True, timeout=15,
+        )
+        output_lines.append("✓ Bluetooth service enabled.")
+    except Exception:
+        pass
+
+    return {"ok": True, "reboot_needed": reboot_needed, "output": output_lines}
+
+
 class WebUIHandler(http.server.BaseHTTPRequestHandler):
     """Simple HTTP handler that serves the WebUI and its JSON API."""
 
@@ -2498,6 +2795,8 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
             self._json({"hasFont": has, "name": name, "size": size})
         elif path == "/api/bluetooth/paired":
             self._json(get_bluetooth_paired())
+        elif path == "/api/bluetooth/status":
+            self._json(get_bluetooth_status())
         else:
             self._not_found()
 
@@ -2610,6 +2909,9 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
                 self._json({"error": "Invalid JSON"}, HTTPStatus.BAD_REQUEST)
                 return
             self._json(bluetooth_remove(data.get("mac", "")))
+
+        elif path == "/api/bluetooth/setup_usb":
+            self._json(setup_usb_bluetooth())
 
         else:
             self._not_found()
