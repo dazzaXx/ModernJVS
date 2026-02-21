@@ -49,9 +49,6 @@ WEBUI_FONT_NAME_PATH = "/etc/modernjvs/webui-font-name"
 
 _SETTINGS_DEFAULTS = {
     "theme":          "black",
-    "accent":         "#970011",
-    "textColor":      "#e2e2f0",
-    "bgColor":        "#000000",
     "compact":        False,
     "noAnim":         False,
     "bgScrimOpacity": 0.70,   # 0.0 = no overlay, 0.9 = near-black overlay
@@ -770,24 +767,8 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
             <option value="dracula">Dracula</option>
             <option value="terminal">Green Terminal</option>
           </select>
-          <div class="settings-preview">Base colour theme (custom colour pickers below override these)</div>
+          <div class="settings-preview">Base colour theme</div>
         </div>
-        <div class="settings-field">
-          <label>Accent Colour</label>
-          <input type="color" id="stAccent" value="#970011">
-          <div class="settings-preview">Applied to buttons, borders and highlights</div>
-        </div>
-        <div class="settings-field">
-          <label>Text Colour</label>
-          <input type="color" id="stTextColor" value="#e2e2f0">
-          <div class="settings-preview">Main font and text colour throughout the UI</div>
-        </div>
-      </div>
-    </div>
-
-    <div class="card">
-      <h2>Typography</h2>
-      <div class="settings-grid">
         <div class="settings-field">
           <label>Custom Font</label>
           <div class="bg-upload-area" id="fontUploadArea">
@@ -810,11 +791,6 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
       <h2>Background</h2>
       <div class="settings-grid">
         <div class="settings-field">
-          <label>Background Colour</label>
-          <input type="color" id="stBgColor" value="#000000">
-          <div class="settings-preview">Overrides the theme background colour</div>
-        </div>
-        <div class="settings-field">
           <label>Background Image</label>
           <div class="bg-upload-area" id="bgUploadArea">
             <input type="file" id="stBgFile" accept="image/*" onchange="onBgFileChosen(this)">
@@ -828,7 +804,7 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
               <button class="btn btn-refresh btn-xs" style="margin-top:0.4rem;" onclick="clearBgImage()">✕ Clear Image</button>
             </div>
           </div>
-          <div class="settings-preview">Leave empty to use the solid colour above</div>
+          <div class="settings-preview">Leave empty to use the theme background colour</div>
         </div>
         <div class="settings-field">
           <label>Background Overlay Darkness</label>
@@ -1198,11 +1174,6 @@ const THEME_NAMES = {
   terminal: 'Green Terminal',
 };
 
-// Default colour values — must match Python _SETTINGS_DEFAULTS
-const DEFAULT_ACCENT     = '#970011';
-const DEFAULT_TEXT_COLOR = '#e2e2f0';
-const DEFAULT_BG_COLOR   = '#000000';
-
 // Seconds to wait for the WebUI service to come back up after a restart
 const WEBUI_RESTART_WAIT_SECS = 8;
 
@@ -1212,35 +1183,7 @@ function applyAppearanceSettings(s) {
   // Theme – always set an explicit data-theme value so selectors are consistent
   root.setAttribute('data-theme', s.theme || 'black');
 
-  // Accent colour (CSS custom property override on :root)
-  if (s.accent && s.accent !== DEFAULT_ACCENT) {
-    root.style.setProperty('--accent',  s.accent);
-    root.style.setProperty('--accent2', s.accent);  // same hue; theme CSS handles lightening
-  } else {
-    root.style.removeProperty('--accent');
-    root.style.removeProperty('--accent2');
-  }
-
-  // Text / font colour — controls both --text (body) and --accent2 (highlighted values)
-  // Applied after the accent block so textColor takes precedence over --accent2 when both are set.
-  if (s.textColor && s.textColor !== DEFAULT_TEXT_COLOR) {
-    root.style.setProperty('--text',    s.textColor);
-    root.style.setProperty('--accent2', s.textColor);
-  } else {
-    root.style.removeProperty('--text');
-    // --accent2 is already handled by the accent block above; don't touch it here.
-  }
-
   // Font is applied server-side via applyServerFont(); nothing to do here.
-
-  // Background colour
-  if (s.bgColor && s.bgColor !== DEFAULT_BG_COLOR) {
-    root.style.setProperty('--bg', s.bgColor);
-    document.body.style.backgroundColor = s.bgColor;
-  } else {
-    root.style.removeProperty('--bg');
-    document.body.style.backgroundColor = '';
-  }
 
   // Compact mode
   document.body.classList.toggle('compact', !!s.compact);
@@ -1397,11 +1340,8 @@ async function initAppearancePanel() {
   const d = await api('/api/webui/settings');
   if (d.error) return;
 
-  // Populate theme selector and colour pickers
+  // Populate theme selector
   document.getElementById('stTheme').value      = d.theme     || 'black';
-  document.getElementById('stAccent').value     = d.accent    || DEFAULT_ACCENT;
-  document.getElementById('stTextColor').value  = d.textColor || DEFAULT_TEXT_COLOR;
-  document.getElementById('stBgColor').value    = d.bgColor   || DEFAULT_BG_COLOR;
   document.getElementById('stCompact').checked  = !!d.compact;
   document.getElementById('stNoAnim').checked   = !!d.noAnim;
 
@@ -1438,9 +1378,6 @@ async function initAppearancePanel() {
 async function saveAppearanceSettings() {
   const s = {
     theme:          document.getElementById('stTheme').value,
-    accent:         document.getElementById('stAccent').value,
-    textColor:      document.getElementById('stTextColor').value,
-    bgColor:        document.getElementById('stBgColor').value,
     compact:        document.getElementById('stCompact').checked,
     noAnim:         document.getElementById('stNoAnim').checked,
     bgScrimOpacity: parseFloat(document.getElementById('stBgScrim').value),
@@ -1458,8 +1395,7 @@ async function saveAppearanceSettings() {
 }
 
 async function resetAppearanceSettings() {
-  const defaults = {theme:'black', accent:DEFAULT_ACCENT, textColor:DEFAULT_TEXT_COLOR,
-                    bgColor:DEFAULT_BG_COLOR, compact:false, noAnim:false,
+  const defaults = {theme:'black', compact:false, noAnim:false,
                     bgScrimOpacity:0.70};
   await api('/api/webui/settings', {
     method: 'POST',
