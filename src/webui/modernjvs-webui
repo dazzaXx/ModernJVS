@@ -397,6 +397,8 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
     --surface: #e0e0ea;
     --card:    #ffffff;
     --border:  #c4c4d4;
+    --accent:  #970011;
+    --accent2: #bf0017;
     --text:    #1a1a2e;
     --muted:   #55558a;
   }
@@ -405,6 +407,8 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
     --surface: #0d1528;
     --card:    #111c38;
     --border:  #1a2d54;
+    --accent:  #3b82f6;
+    --accent2: #60a5fa;
     --text:    #c5d8f5;
     --muted:   #4d6a9a;
   }
@@ -436,6 +440,104 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
     --text:    #e2e2f0;
     --muted:   #888888;
   }
+  /* ---- Additional colour themes ---- */
+  [data-theme="ocean"] {
+    --bg:      #020c18;
+    --surface: #051422;
+    --card:    #071c30;
+    --border:  #0c2e4a;
+    --accent:  #0ea5e9;
+    --accent2: #38bdf8;
+    --text:    #e0f4ff;
+    --muted:   #4a7e99;
+  }
+  [data-theme="sunset"] {
+    --bg:      #1a0800;
+    --surface: #261000;
+    --card:    #2d1400;
+    --border:  #4a2000;
+    --accent:  #f97316;
+    --accent2: #fb923c;
+    --text:    #fde8cc;
+    --muted:   #8a5a2a;
+  }
+  [data-theme="forest"] {
+    --bg:      #030d03;
+    --surface: #071507;
+    --card:    #091a09;
+    --border:  #0f2a10;
+    --accent:  #22c55e;
+    --accent2: #4ade80;
+    --text:    #d0f0d0;
+    --muted:   #3a7a45;
+  }
+  [data-theme="purple"] {
+    --bg:      #0d0018;
+    --surface: #130025;
+    --card:    #1a0030;
+    --border:  #2c004d;
+    --accent:  #a855f7;
+    --accent2: #c084fc;
+    --text:    #f0e0ff;
+    --muted:   #6e3f99;
+  }
+  [data-theme="neon"] {
+    --bg:      #00080d;
+    --surface: #001018;
+    --card:    #001820;
+    --border:  #002a38;
+    --accent:  #06b6d4;
+    --accent2: #22d3ee;
+    --text:    #cffafe;
+    --muted:   #2e7a8a;
+  }
+  [data-theme="rose"] {
+    --bg:      #1a0010;
+    --surface: #240018;
+    --card:    #2e0020;
+    --border:  #480038;
+    --accent:  #f43f5e;
+    --accent2: #fb7185;
+    --text:    #ffe0e8;
+    --muted:   #883a5a;
+  }
+  [data-theme="amber"] {
+    --bg:      #0d0600;
+    --surface: #180e00;
+    --card:    #1e1000;
+    --border:  #321a00;
+    --accent:  #f59e0b;
+    --accent2: #fbbf24;
+    --text:    #fef3c7;
+    --muted:   #7a5820;
+  }
+  [data-theme="solarized"] {
+    --bg:      #002b36;
+    --surface: #04323f;
+    --card:    #073642;
+    --border:  #0d4f5e;
+    --accent:  #2aa198;
+    --accent2: #859900;
+    --text:    #fdf6e3;
+    --muted:   #657b83;
+  }
+  /* ---- Logo colour tinting per theme ----
+     hue-rotate shifts all logo colours to complement each theme's accent.
+     Pure Dark / Dark use the original logo colours (no rotation). */
+  [data-theme="dark"]      #logo { filter: none; }
+  [data-theme="black"]     #logo { filter: none; }
+  [data-theme="light"]     #logo { filter: brightness(0.15); }
+  [data-theme="midnight"]  #logo { filter: hue-rotate(212deg) saturate(1.1); }
+  [data-theme="dracula"]   #logo { filter: hue-rotate(268deg) saturate(1.2); }
+  [data-theme="terminal"]  #logo { filter: hue-rotate(148deg) saturate(1.2); }
+  [data-theme="ocean"]     #logo { filter: hue-rotate(208deg) saturate(1.2); }
+  [data-theme="sunset"]    #logo { filter: hue-rotate(36deg)  saturate(1.2); }
+  [data-theme="forest"]    #logo { filter: hue-rotate(148deg) saturate(1.2); }
+  [data-theme="purple"]    #logo { filter: hue-rotate(278deg) saturate(1.2); }
+  [data-theme="neon"]      #logo { filter: hue-rotate(196deg) saturate(1.2); }
+  [data-theme="rose"]      #logo { filter: hue-rotate(4deg)   saturate(1.1); }
+  [data-theme="amber"]     #logo { filter: hue-rotate(50deg)  saturate(1.2); }
+  [data-theme="solarized"] #logo { filter: hue-rotate(192deg) saturate(0.9); }
 
   /* ---- compact mode ---- */
   body.compact .card { padding: 0.85rem 1rem; }
@@ -766,6 +868,14 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
             <option value="midnight">Midnight Blue</option>
             <option value="dracula">Dracula</option>
             <option value="terminal">Green Terminal</option>
+            <option value="ocean">Ocean Deep</option>
+            <option value="sunset">Sunset</option>
+            <option value="forest">Forest</option>
+            <option value="purple">Purple Night</option>
+            <option value="neon">Neon Cyan</option>
+            <option value="rose">Rose</option>
+            <option value="amber">Amber</option>
+            <option value="solarized">Solarized Dark</option>
           </select>
           <div class="settings-preview">Base colour theme</div>
         </div>
@@ -1166,12 +1276,20 @@ function downloadLogs() {
 // ---- Appearance / Settings ----
 
 const THEME_NAMES = {
-  black:    'Pure Dark (default)',
-  dark:     'Dark',
-  light:    'Light',
-  midnight: 'Midnight Blue',
-  dracula:  'Dracula',
-  terminal: 'Green Terminal',
+  black:     'Pure Dark (default)',
+  dark:      'Dark',
+  light:     'Light',
+  midnight:  'Midnight Blue',
+  dracula:   'Dracula',
+  terminal:  'Green Terminal',
+  ocean:     'Ocean Deep',
+  sunset:    'Sunset',
+  forest:    'Forest',
+  purple:    'Purple Night',
+  neon:      'Neon Cyan',
+  rose:      'Rose',
+  amber:     'Amber',
+  solarized: 'Solarized Dark',
 };
 
 // Seconds to wait for the WebUI service to come back up after a restart
