@@ -1221,11 +1221,14 @@ function applyAppearanceSettings(s) {
     root.style.removeProperty('--accent2');
   }
 
-  // Text / font colour
+  // Text / font colour — controls both --text (body) and --accent2 (highlighted values)
+  // Applied after the accent block so textColor takes precedence over --accent2 when both are set.
   if (s.textColor && s.textColor !== DEFAULT_TEXT_COLOR) {
-    root.style.setProperty('--text', s.textColor);
+    root.style.setProperty('--text',    s.textColor);
+    root.style.setProperty('--accent2', s.textColor);
   } else {
     root.style.removeProperty('--text');
+    // --accent2 is already handled by the accent block above; don't touch it here.
   }
 
   // Font is applied server-side via applyServerFont(); nothing to do here.
