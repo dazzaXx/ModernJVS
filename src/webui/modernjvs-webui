@@ -3113,7 +3113,10 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
 
     def _redirect_to_login(self):
         """Send a 302 redirect to /login, preserving the original path as ?next=."""
-        requested = urllib.parse.urlparse(self.path).path
+        # Strip CR/LF from the user-supplied path to prevent HTTP response splitting.
+        requested = urllib.parse.urlparse(self.path).path.translate(
+            str.maketrans("", "", "\r\n")
+        )
         target = "/login"
         if requested and requested not in ("/", "/login", "/index.html"):
             target += "?" + urllib.parse.urlencode({"next": requested})
