@@ -167,7 +167,7 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
     --card:    #1e1e2e;
     --border:  #2e2e42;
     --accent:  #970011;
-    --accent2: #c4364f;
+    --accent2: #970011;
     --text:    #e2e2f0;
     --muted:   #7878a0;
     --green:   #50fa7b;
@@ -388,7 +388,7 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
     --card:    #1e1e2e;
     --border:  #2e2e42;
     --accent:  #970011;
-    --accent2: #c4364f;
+    --accent2: #970011;
     --text:    #e2e2f0;
     --muted:   #7878a0;
   }
