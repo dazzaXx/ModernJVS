@@ -550,21 +550,22 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
     pointer-events: none;
     z-index: 0;
   }
-  /* Same hue-rotate values as the logo so both tint together */
+  /* Sticks image: dominant hue ~20°, logo dominant hue ~350°, offset = +330°.
+     sticks_rot = (logo_rot + 330) % 360  so both reach the same output hue. */
   [data-theme="dark"]      #sticks { filter: none; }
   [data-theme="black"]     #sticks { filter: none; }
   [data-theme="light"]     #sticks { filter: brightness(0) saturate(0); }
-  [data-theme="midnight"]  #sticks { filter: hue-rotate(212deg) saturate(1.1); }
-  [data-theme="dracula"]   #sticks { filter: hue-rotate(268deg) saturate(1.2); }
-  [data-theme="terminal"]  #sticks { filter: hue-rotate(148deg) saturate(1.2); }
-  [data-theme="ocean"]     #sticks { filter: hue-rotate(208deg) saturate(1.2); }
-  [data-theme="sunset"]    #sticks { filter: hue-rotate(36deg)  saturate(1.2); }
-  [data-theme="forest"]    #sticks { filter: hue-rotate(148deg) saturate(1.2); }
-  [data-theme="purple"]    #sticks { filter: hue-rotate(278deg) saturate(1.2); }
-  [data-theme="neon"]      #sticks { filter: hue-rotate(196deg) saturate(1.2); }
-  [data-theme="rose"]      #sticks { filter: hue-rotate(4deg)   saturate(1.1); }
-  [data-theme="amber"]     #sticks { filter: hue-rotate(50deg)  saturate(1.2); }
-  [data-theme="solarized"] #sticks { filter: hue-rotate(192deg) saturate(0.9); }
+  [data-theme="midnight"]  #sticks { filter: hue-rotate(182deg) saturate(1.1); }
+  [data-theme="dracula"]   #sticks { filter: hue-rotate(238deg) saturate(1.2); }
+  [data-theme="terminal"]  #sticks { filter: hue-rotate(118deg) saturate(1.2); }
+  [data-theme="ocean"]     #sticks { filter: hue-rotate(178deg) saturate(1.2); }
+  [data-theme="sunset"]    #sticks { filter: hue-rotate(6deg)   saturate(1.2); }
+  [data-theme="forest"]    #sticks { filter: hue-rotate(118deg) saturate(1.2); }
+  [data-theme="purple"]    #sticks { filter: hue-rotate(248deg) saturate(1.2); }
+  [data-theme="neon"]      #sticks { filter: hue-rotate(166deg) saturate(1.2); }
+  [data-theme="rose"]      #sticks { filter: hue-rotate(334deg) saturate(1.1); }
+  [data-theme="amber"]     #sticks { filter: hue-rotate(20deg)  saturate(1.2); }
+  [data-theme="solarized"] #sticks { filter: hue-rotate(162deg) saturate(0.9); }
 
   /* ---- compact mode ---- */
   body.compact .card { padding: 0.85rem 1rem; }
