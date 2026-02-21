@@ -884,6 +884,7 @@ JVSInputStatus initInputs(char *outputMappingPath, char *configPath, char *secon
         /* Attempt to do a generic map */
         char specialMap[256] = "";
         InputMappings inputMappings = {0};
+        int pendingNunchukMergeIndex = -1;
 
         // Put the device name into a temp variable so it can be changed
         char deviceName[MAX_PATH_LENGTH];
@@ -945,6 +946,7 @@ JVSInputStatus initInputs(char *outputMappingPath, char *configPath, char *secon
                 // Found an unclaimed Nunchuk to merge - claim it
                 debug(0, "  Found Nunchuk, using combined configuration\n");
                 mergedNunchukDevices[foundNunchukIndex] = 1;
+                pendingNunchukMergeIndex = foundNunchukIndex;
                 strncpy(deviceName, WIIMOTE_DEVICE_NAME_PLUS_NUNCHUK, MAX_PATH_LENGTH - 1);
                 deviceName[MAX_PATH_LENGTH - 1] = '\0';
                 strncpy(specialMap, " (Wiimote+Nunchuk)", sizeof(specialMap) - 1);
@@ -1020,6 +1022,10 @@ JVSInputStatus initInputs(char *outputMappingPath, char *configPath, char *secon
         // Fixed config value overrides auto-assignment
         int effectivePlayerNumber = playerNumber;
         
+        // For merged Nunchuk devices, use the same player number as the paired Wiimote
+        if (strcmp(originalName, WIIMOTE_DEVICE_NAME_NUNCHUK) == 0 && mergedNunchukDevices[i] > 0)
+            effectivePlayerNumber = mergedNunchukDevices[i];
+        
         // Parse the input mapping to check if a fixed player is set
         if (!processMappings(&inputMappings, &outputMappings, &evInputs, (ControllerPlayer)effectivePlayerNumber))
         {
@@ -1036,6 +1042,10 @@ JVSInputStatus initInputs(char *outputMappingPath, char *configPath, char *secon
         double playerDeadzone = getPlayerDeadzone(effectivePlayerNumber, analogDeadzoneP1, analogDeadzoneP2, analogDeadzoneP3, analogDeadzoneP4);
         if (startThread(&evInputs, device->path, strcmp(originalName, WIIMOTE_DEVICE_NAME_IR) == 0, effectivePlayerNumber, jvsIO, playerDeadzone) == THREAD_STATUS_SUCCESS)
         {
+            // Update merged Nunchuk player number to match this Wiimote's effective player number
+            if (pendingNunchukMergeIndex >= 0)
+                mergedNunchukDevices[pendingNunchukMergeIndex] = effectivePlayerNumber;
+            
             // Check if this is a special device that shouldn't increment player number
             int isAimtrakRemap = (strcmp(originalName, AIMTRAK_DEVICE_NAME_REMAP_OUT_SCREEN) == 0 || 
                                  strcmp(originalName, AIMTRAK_DEVICE_NAME_REMAP_JOYSTICK) == 0);
