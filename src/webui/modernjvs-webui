@@ -1538,7 +1538,13 @@ async function btPair(mac, name, btn) {
   } else {
     showAlert('btAlert', '✓ ' + (d.name || name) + ' paired and connected successfully.', false);
   }
-  btn.closest('tr').remove();
+  // Clear the scan results so the list doesn't linger after a successful pair
+  const scanTable = document.getElementById('btScanTable');
+  const scanBody  = document.getElementById('btScanBody');
+  const scanStatus = document.getElementById('btScanStatus');
+  if (scanTable)  { scanTable.style.display = 'none'; }
+  if (scanBody)   { scanBody.innerHTML = ''; }
+  if (scanStatus) { scanStatus.textContent = ''; }
   await loadBluetoothPaired();
 }
 
