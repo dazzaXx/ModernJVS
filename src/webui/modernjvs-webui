@@ -2364,10 +2364,31 @@ def _is_wiimote(name):
     return any(k in n for k in ("nintendo", "wii", "rvl-cnt"))
 
 
+def _is_xbox(name):
+    """Return True if the device name looks like an Xbox Wireless Controller."""
+    n = name.lower()
+    return any(k in n for k in ("xbox", "microsoft"))
+
+
 def _run_bt(*args, timeout=BT_INFO_TIMEOUT):
     """Run a bluetoothctl sub-command and return the CompletedProcess."""
     return subprocess.run(
         ["bluetoothctl"] + list(args),
+        capture_output=True, text=True, timeout=timeout,
+    )
+
+
+def _run_bt_piped(commands, timeout=BT_PAIR_TIMEOUT):
+    """Send a sequence of newline-separated commands to a single interactive
+    bluetoothctl session via stdin and return the CompletedProcess.
+
+    This is required for operations that need the agent to be set within the
+    same session (e.g. Xbox controllers need ``agent NoInputNoOutput`` before
+    ``pair``).
+    """
+    return subprocess.run(
+        ["bluetoothctl"],
+        input="\n".join(commands) + "\n",
         capture_output=True, text=True, timeout=timeout,
     )
 
@@ -2435,14 +2456,19 @@ def bluetooth_scan():
 def bluetooth_pair(mac):
     """Pair and connect a Bluetooth device by MAC address.
 
-    For Wii Remotes the connection sometimes fails on the first attempt;
-    the function automatically retries once after a short delay.
+    - For Wii Remotes the connection sometimes fails on the first attempt;
+      the function automatically retries once after a short delay.
+    - For Xbox Wireless Controllers (and any device that returns
+      AuthenticationFailed with the default agent), the function retries
+      using a ``NoInputNoOutput`` agent which tells BlueZ not to require
+      any PIN/passkey confirmation.  Xbox controllers must be in pairing
+      mode (hold the Pair button on the back until the Xbox button flashes).
     """
     if not _validate_bt_mac(mac):
         return {"error": "Invalid Bluetooth MAC address"}
 
     try:
-        # Resolve name for wiimote detection and user-facing messages
+        # Resolve name for device-type detection and user-facing messages
         info = _run_bt("info", mac)
         name = ""
         for line in info.stdout.splitlines():
@@ -2451,11 +2477,12 @@ def bluetooth_pair(mac):
                 name = nm.group(1).strip()
                 break
         wiimote = _is_wiimote(name)
+        xbox    = _is_xbox(name)
 
         # Trust first so the device can auto-reconnect in future
         _run_bt("trust", mac)
 
-        # Pair
+        # First pair attempt using the default agent
         pair_result = _run_bt("pair", mac, timeout=BT_PAIR_TIMEOUT)
         pair_out = (pair_result.stdout + pair_result.stderr).lower()
         pair_ok = (
@@ -2463,8 +2490,45 @@ def bluetooth_pair(mac):
             or "successful" in pair_out
             or "already paired" in pair_out
         )
+
+        # If pairing failed with AuthenticationFailed (common for Xbox
+        # controllers and other devices that require NoInputNoOutput agent),
+        # retry in a piped session with the appropriate agent set first.
+        if not pair_ok and "authenticationfailed" in pair_out.replace(" ", ""):
+            retry_result = _run_bt_piped([
+                "agent NoInputNoOutput",
+                "default-agent",
+                f"pair {mac}",
+                "quit",
+            ])
+            retry_out = (retry_result.stdout + retry_result.stderr).lower()
+            pair_ok = (
+                retry_result.returncode == 0
+                or "successful" in retry_out
+                or "already paired" in retry_out
+            )
+            if pair_ok:
+                pair_out = retry_out  # use retry output for subsequent checks
+
         if not pair_ok:
             detail = (pair_result.stdout.strip() + "\n" + pair_result.stderr.strip()).strip()
+            if "authenticationfailed" in pair_out.replace(" ", ""):
+                if xbox:
+                    return {
+                        "error": (
+                            "Pairing failed (Authentication Failed). "
+                            "Make sure the Xbox controller is in pairing mode: "
+                            "hold the Pair button (back of controller) until the "
+                            "Xbox button flashes rapidly, then try again."
+                        )
+                    }
+                return {
+                    "error": (
+                        "Pairing failed (Authentication Failed). "
+                        "Make sure the controller is in pairing mode and try again. "
+                        f"Detail: {detail}"
+                    )
+                }
             return {"error": f"Pairing failed: {detail}"}
 
         # Connect – first attempt
@@ -2482,12 +2546,22 @@ def bluetooth_pair(mac):
         if conn_ok:
             return {"ok": True, "name": name}
 
-        # Paired but couldn't connect – still a partial success
+        # Paired but couldn't connect – still a partial success; give
+        # device-appropriate reconnection guidance.
+        if wiimote:
+            reconnect_tip = "Try pressing 1+2 on the Wii Remote again to reconnect."
+        elif xbox:
+            reconnect_tip = (
+                "Press the Xbox button to reconnect. "
+                "If that fails, press the Pair button to force reconnection."
+            )
+        else:
+            reconnect_tip = "Try turning the controller off and on again to reconnect."
+
         return {
             "ok": True,
             "warning": (
-                "Paired successfully, but the connection attempt failed. "
-                "Try pressing 1+2 on the Wii Remote again to reconnect."
+                f"Paired successfully, but the connection attempt failed. {reconnect_tip}"
             ),
             "name": name,
         }
