@@ -49,7 +49,8 @@ WEBUI_FONT_NAME_PATH = "/etc/modernjvs/webui-font-name"
 
 _SETTINGS_DEFAULTS = {
     "theme":          "black",
-    "accent":         "#ff0000",
+    "accent":         "#970011",
+    "textColor":      "#e2e2f0",
     "bgColor":        "#000000",
     "compact":        False,
     "noAnim":         False,
@@ -168,8 +169,8 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
     --surface: #16161f;
     --card:    #1e1e2e;
     --border:  #2e2e42;
-    --accent:  #ff0000;
-    --accent2: #ff6666;
+    --accent:  #970011;
+    --accent2: #c4364f;
     --text:    #e2e2f0;
     --muted:   #7878a0;
     --green:   #50fa7b;
@@ -389,8 +390,8 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
     --surface: #16161f;
     --card:    #1e1e2e;
     --border:  #2e2e42;
-    --accent:  #ff0000;
-    --accent2: #ff6666;
+    --accent:  #970011;
+    --accent2: #c4364f;
     --text:    #e2e2f0;
     --muted:   #7878a0;
   }
@@ -533,16 +534,6 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
   .settings-toggle { display: flex; align-items: center; gap: 0.6rem; margin-top: 0.15rem; }
   .settings-toggle input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; }
   .settings-toggle span { font-size: 0.88rem; color: var(--text); }
-  .theme-swatches { display: flex; gap: 0.4rem; flex-wrap: wrap; margin-top: 0.15rem; }
-  .swatch {
-    width: 32px; height: 32px;
-    border-radius: 50%;
-    border: 2px solid var(--border);
-    cursor: pointer;
-    transition: border-color 0.2s, transform 0.15s;
-  }
-  .swatch:hover { transform: scale(1.15); }
-  .swatch.active { border-color: var(--accent); }
   .settings-preview {
     font-size: 0.78rem;
     color: var(--muted);
@@ -771,20 +762,25 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
       <div class="settings-grid">
         <div class="settings-field">
           <label>Colour Theme</label>
-          <div class="theme-swatches">
-            <div class="swatch" data-theme="dark"     title="Dark"                   style="background:#1e1e2e;border-color:#ff0000"></div>
-            <div class="swatch" data-theme="light"    title="Light"                  style="background:#ffffff"></div>
-            <div class="swatch" data-theme="midnight" title="Midnight Blue"          style="background:#111c38"></div>
-            <div class="swatch" data-theme="dracula"  title="Dracula"                style="background:#282a36"></div>
-            <div class="swatch" data-theme="terminal" title="Green Terminal"         style="background:#0a0f0a"></div>
-            <div class="swatch" data-theme="black"    title="Pure Black (default)"   style="background:#000000;border:1px solid #444"></div>
-          </div>
-          <div class="settings-preview" id="themePreviewLabel">Current: Pure Black (default)</div>
+          <select id="stTheme">
+            <option value="black">Pure Dark (default)</option>
+            <option value="dark">Dark</option>
+            <option value="light">Light</option>
+            <option value="midnight">Midnight Blue</option>
+            <option value="dracula">Dracula</option>
+            <option value="terminal">Green Terminal</option>
+          </select>
+          <div class="settings-preview">Base colour theme (custom colour pickers below override these)</div>
         </div>
         <div class="settings-field">
           <label>Accent Colour</label>
-          <input type="color" id="stAccent" value="#ff0000">
+          <input type="color" id="stAccent" value="#970011">
           <div class="settings-preview">Applied to buttons, borders and highlights</div>
+        </div>
+        <div class="settings-field">
+          <label>Text Colour</label>
+          <input type="color" id="stTextColor" value="#e2e2f0">
+          <div class="settings-preview">Main font and text colour throughout the UI</div>
         </div>
       </div>
     </div>
@@ -1194,22 +1190,16 @@ function downloadLogs() {
 // ---- Appearance / Settings ----
 
 const THEME_NAMES = {
+  black:    'Pure Dark (default)',
   dark:     'Dark',
   light:    'Light',
   midnight: 'Midnight Blue',
   dracula:  'Dracula',
   terminal: 'Green Terminal',
-  black:    'Pure Black (default)',
 };
 
 // Seconds to wait for the WebUI service to come back up after a restart
 const WEBUI_RESTART_WAIT_SECS = 8;
-
-function _getSettings() {
-  try {
-    return JSON.parse(localStorage.getItem('webui_appearance') || '{}');
-  } catch { return {}; }
-}
 
 function applyAppearanceSettings(s) {
   const root = document.documentElement;
@@ -1218,12 +1208,19 @@ function applyAppearanceSettings(s) {
   root.setAttribute('data-theme', s.theme || 'black');
 
   // Accent colour (CSS custom property override on :root)
-  if (s.accent && s.accent !== '#ff0000') {
+  if (s.accent && s.accent !== '#970011') {
     root.style.setProperty('--accent',  s.accent);
     root.style.setProperty('--accent2', s.accent);  // same hue; theme CSS handles lightening
   } else {
     root.style.removeProperty('--accent');
     root.style.removeProperty('--accent2');
+  }
+
+  // Text / font colour
+  if (s.textColor && s.textColor !== '#e2e2f0') {
+    root.style.setProperty('--text', s.textColor);
+  } else {
+    root.style.removeProperty('--text');
   }
 
   // Font is applied server-side via applyServerFont(); nothing to do here.
@@ -1392,24 +1389,13 @@ async function initAppearancePanel() {
   const d = await api('/api/webui/settings');
   if (d.error) return;
 
-  // Mark active swatch
-  document.querySelectorAll('.swatch').forEach(sw => {
-    const t = sw.dataset.theme;
-    sw.classList.toggle('active', (d.theme || 'black') === t);
-    sw.onclick = () => {
-      document.querySelectorAll('.swatch').forEach(x => x.classList.remove('active'));
-      sw.classList.add('active');
-      document.getElementById('themePreviewLabel').textContent =
-        'Current: ' + (THEME_NAMES[t] || t);
-    };
-  });
-  document.getElementById('themePreviewLabel').textContent =
-    'Current: ' + (THEME_NAMES[d.theme || 'black'] || d.theme || 'Pure Black (default)');
-
-  document.getElementById('stAccent').value    = d.accent   || '#ff0000';
-  document.getElementById('stBgColor').value   = d.bgColor  || '#000000';
-  document.getElementById('stCompact').checked = !!d.compact;
-  document.getElementById('stNoAnim').checked  = !!d.noAnim;
+  // Populate theme selector and colour pickers
+  document.getElementById('stTheme').value      = d.theme     || 'black';
+  document.getElementById('stAccent').value     = d.accent    || '#970011';
+  document.getElementById('stTextColor').value  = d.textColor || '#e2e2f0';
+  document.getElementById('stBgColor').value    = d.bgColor   || '#000000';
+  document.getElementById('stCompact').checked  = !!d.compact;
+  document.getElementById('stNoAnim').checked   = !!d.noAnim;
 
   // Scrim slider – live preview of opacity value
   const scrimVal = (typeof d.bgScrimOpacity === 'number') ? d.bgScrimOpacity : 0.70;
@@ -1442,10 +1428,10 @@ async function initAppearancePanel() {
 }
 
 async function saveAppearanceSettings() {
-  const activeSwatch = document.querySelector('.swatch.active');
   const s = {
-    theme:          activeSwatch ? activeSwatch.dataset.theme : 'black',
+    theme:          document.getElementById('stTheme').value,
     accent:         document.getElementById('stAccent').value,
+    textColor:      document.getElementById('stTextColor').value,
     bgColor:        document.getElementById('stBgColor').value,
     compact:        document.getElementById('stCompact').checked,
     noAnim:         document.getElementById('stNoAnim').checked,
@@ -1464,7 +1450,7 @@ async function saveAppearanceSettings() {
 }
 
 async function resetAppearanceSettings() {
-  const defaults = {theme:'black', accent:'#ff0000',
+  const defaults = {theme:'black', accent:'#970011', textColor:'#e2e2f0',
                     bgColor:'#000000', compact:false, noAnim:false,
                     bgScrimOpacity:0.70};
   await api('/api/webui/settings', {
