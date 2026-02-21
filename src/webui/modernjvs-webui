@@ -1495,7 +1495,7 @@ async function btScan() {
   const devs = d.devices || [];
   status.textContent = devs.length
     ? `Found ${devs.length} device(s).`
-    : 'No devices found. Make sure the controller is in pairing mode and try again.';
+    : 'No devices found. For Wii Remotes: press and hold the SYNC button (inside battery cover) or 1+2 until the LEDs flash rapidly, then scan again.';
 
   if (devs.length === 0) { table.style.display = 'none'; return; }
 
@@ -2346,8 +2346,8 @@ _BT_MAC_RE = re.compile(r'^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$')
 _BT_DEVICE_RE = re.compile(r'^Device\s+([0-9A-Fa-f:]{17})\s+(.*)')
 
 # Timeout constants (seconds) for Bluetooth operations
-BT_SCAN_TIMEOUT    = 5   # time allowed for scan on/off commands themselves
-BT_SCAN_DURATION   = 8   # seconds to wait while discovering devices
+BT_SCAN_TIMEOUT    = 5   # safety margin added on top of BT_SCAN_DURATION for subprocess timeout
+BT_SCAN_DURATION   = 8   # seconds bluetoothctl scans before exiting (--timeout flag)
 BT_PAIR_TIMEOUT    = 30  # pairing can be slow on first attempt
 BT_CONNECT_TIMEOUT = 20  # connection attempt timeout
 BT_INFO_TIMEOUT    = 10  # info / trust / remove commands
@@ -2391,11 +2391,20 @@ def get_bluetooth_paired():
 
 
 def bluetooth_scan():
-    """Scan for nearby Bluetooth devices for ~8 s and return discovered devices."""
+    """Scan for nearby Bluetooth devices for ~8 s and return discovered devices.
+
+    Uses `bluetoothctl --timeout N scan on` so that the process exits cleanly
+    after N seconds; the BlueZ daemon populates its device cache during this
+    time and we query it afterward with `bluetoothctl devices`.
+    """
     try:
-        _run_bt("scan", "on", timeout=BT_SCAN_TIMEOUT)
-        time.sleep(BT_SCAN_DURATION)
-        _run_bt("scan", "off", timeout=BT_SCAN_TIMEOUT)
+        # --timeout causes bluetoothctl to scan for exactly BT_SCAN_DURATION
+        # seconds and then exit cleanly. The subprocess timeout is set higher
+        # to account for startup/shutdown overhead.
+        _run_bt(
+            "--timeout", str(BT_SCAN_DURATION), "scan", "on",
+            timeout=BT_SCAN_DURATION + BT_SCAN_TIMEOUT,
+        )
 
         all_result   = _run_bt("devices")
         paired_result = _run_bt("devices", "Paired")
