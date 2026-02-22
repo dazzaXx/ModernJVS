@@ -834,6 +834,86 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
     margin-top: 0.5rem;
     font-style: italic;
   }
+
+  /* ================================================================
+     RESPONSIVE – tablets and mobile phones
+     ================================================================ */
+
+  /* ---- Tablet (≤ 768 px) ---- */
+  @media (max-width: 768px) {
+    header { padding: 0.65rem 1.25rem; gap: 1rem; }
+    header img { height: 36px; }
+    .container { padding: 1rem; }
+    .log-wrap { height: 320px; }
+    .sticks-corner { width: 140px; }
+  }
+
+  /* ---- Mobile (≤ 640 px) ---- */
+  @media (max-width: 640px) {
+    /* Header: tighter, smaller logo */
+    header { padding: 0.55rem 0.85rem; gap: 0.65rem; }
+    header img { height: 30px; }
+    header h1 { font-size: 1.1rem; }
+    .ver-badge { display: none !important; }
+    .status-badge { font-size: 0.78rem; }
+
+    /* Container: less horizontal padding */
+    .container { padding: 0.75rem 0.65rem; }
+
+    /* Tabs: single scrollable row, no wrapping */
+    .tabs {
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+      flex-wrap: nowrap;
+      scrollbar-width: none;       /* Firefox */
+    }
+    .tabs::-webkit-scrollbar { display: none; }
+    .tab {
+      padding: 0.5rem 0.85rem;
+      font-size: 0.82rem;
+      flex-shrink: 0;
+      white-space: nowrap;
+    }
+
+    /* Cards: tighter padding */
+    .card { padding: 0.9rem 0.75rem; }
+    .card h2 { font-size: 0.95rem; margin-bottom: 0.75rem; }
+
+    /* Buttons: slightly narrower */
+    .btn { padding: 0.55rem 0.9rem; font-size: 0.85rem; }
+
+    /* Stat grid: 2 columns */
+    .stat-grid { grid-template-columns: repeat(2, 1fr); gap: 0.65rem; }
+    .stat-card { padding: 0.7rem 0.5rem; }
+    .stat-card .val { font-size: 1.1rem; }
+
+    /* Form / settings grids: single column */
+    .form-grid    { grid-template-columns: 1fr; }
+    .settings-grid { grid-template-columns: 1fr; }
+
+    /* Log terminal: shorter, smaller text */
+    .log-wrap { height: 260px; font-size: 0.75rem; padding: 0.5rem 0.65rem; }
+
+    /* Device tables: horizontal scroll */
+    .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    .device-table { min-width: 420px; }
+
+    /* Log filter bar: narrower search input */
+    .log-filter-bar input[type="text"] { width: 110px; }
+
+    /* Sticks decoration: smaller and more translucent */
+    .sticks-corner { width: 90px; opacity: 0.12; }
+  }
+
+  /* ---- Small phones (≤ 400 px) ---- */
+  @media (max-width: 400px) {
+    /* Hide logo so the status badge doesn't get squeezed out */
+    header img { display: none; }
+    /* Sticks is distracting on tiny screens */
+    .sticks-corner { display: none; }
+    /* Single column stat grid */
+    .stat-grid { grid-template-columns: 1fr; }
+  }
 </style>
 </head>
 <body>
@@ -1043,10 +1123,12 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
     <div class="card">
       <h2>Connected Input Devices <button class="btn btn-refresh btn-xs" onclick="loadDevices()" style="margin-left:0.5rem;vertical-align:middle;">⟳ Refresh</button></h2>
       <p style="font-size:0.83rem;color:var(--muted);margin-bottom:1rem;">Shows all <code style="color:var(--accent2);font-family:monospace">/dev/input/event*</code> nodes currently present on the system.</p>
+      <div class="table-wrap">
       <table class="device-table">
         <thead><tr><th>Event Node</th><th>Device Name</th><th>Status</th></tr></thead>
         <tbody id="deviceTableBody"><tr><td colspan="3" style="color:var(--muted)">Loading…</td></tr></tbody>
       </table>
+      </div>
     </div>
 
     <div class="card" style="margin-top:1rem;">
@@ -1057,10 +1139,12 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
 
       <div id="btPairedSection">
         <h3 style="font-size:0.85rem;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:0.5rem;">Paired Devices</h3>
+        <div class="table-wrap">
         <table class="device-table">
           <thead><tr><th>Device Name</th><th>MAC Address</th><th>Status</th><th></th></tr></thead>
           <tbody id="btPairedBody"><tr><td colspan="4" style="color:var(--muted)">Loading…</td></tr></tbody>
         </table>
+        </div>
       </div>
 
       <div id="btScanSection" style="margin-top:1.25rem;padding-top:1rem;border-top:1px solid var(--border);">
@@ -1072,11 +1156,12 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
           <button class="btn btn-refresh" id="btScanBtn" onclick="btScan()">&#x1F50D; Scan for Devices (8s)</button>
           <span id="btScanStatus" style="font-size:0.82rem;color:var(--muted);"></span>
         </div>
+        <div class="table-wrap">
         <table class="device-table" id="btScanTable" style="display:none;">
           <thead><tr><th>Device Name</th><th>MAC Address</th><th></th></tr></thead>
           <tbody id="btScanBody"></tbody>
         </table>
-      </div>
+        </div>
     </div>
   </div>
 
