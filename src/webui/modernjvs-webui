@@ -318,12 +318,13 @@ _LOGIN_TEMPLATE = """\
         padding:2.5rem;width:100%;max-width:360px;box-shadow:0 8px 32px rgba(0,0,0,.5);
         position:relative;z-index:1;}}
   .hdr{{text-align:center;margin-bottom:1.75rem;}}
-  .hdr img{{height:clamp(32px,10vw,48px);max-width:100%;}}
+  .hdr img{{max-height:48px;width:auto;max-width:100%;}}
   .hdr h1{{font-size:1.1rem;color:var(--muted);font-weight:400;margin-top:.4rem;}}
-  .ver-badge{{font-size:0.72rem;color:var(--muted);background:var(--surface);
+  /* Version badge pinned to top-left corner */
+  .ver-badge{{position:fixed;top:0.6rem;left:0.75rem;font-size:0.72rem;
+              color:var(--muted);background:var(--surface);
               border:1px solid var(--border);border-radius:4px;
-              padding:0.15rem 0.4rem;margin-left:0.4rem;vertical-align:middle;
-              white-space:nowrap;}}
+              padding:0.15rem 0.4rem;white-space:nowrap;z-index:10;}}
   label{{display:block;font-size:.82rem;color:var(--muted);text-transform:uppercase;
          letter-spacing:.06em;margin-bottom:.3rem;}}
   input[type=password]{{width:100%;background:var(--surface);border:1px solid var(--border);
@@ -350,10 +351,11 @@ _LOGIN_TEMPLATE = """\
   }}
 </style></head>
 <body>
+<div class="ver-badge" id="lVer" style="display:none"></div>
 <div class="box">
   <div class="hdr">
     <img id="logo" src="{logo}" alt="ModernJVS">
-    <h1>WebUI<span class="ver-badge" id="lVer" style="display:none"></span></h1>
+    <h1>WebUI</h1>
   </div>
   <label for="lPw">Password</label>
   <input type="password" id="lPw" autocomplete="current-password" autofocus
