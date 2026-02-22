@@ -1251,10 +1251,16 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
     <div class="card">
       <h2>Profile Editor</h2>
       <div id="profilesAlert" class="alert"></div>
-      <div style="display:flex;gap:0.5rem;margin-bottom:1rem;flex-wrap:wrap;">
+      <div style="display:flex;gap:0.5rem;margin-bottom:1rem;flex-wrap:wrap;align-items:center;">
         <button class="btn btn-xs" id="profTabGames"   onclick="setProfileTab('games')"   style="background:var(--accent);color:#000;">Games</button>
         <button class="btn btn-xs" id="profTabDevices" onclick="setProfileTab('devices')" style="">Devices</button>
         <button class="btn btn-xs" id="profTabIos"     onclick="setProfileTab('ios')"     style="">I/O Boards</button>
+        <span style="flex:1"></span>
+        <button class="btn btn-xs btn-refresh" onclick="newProfileFile()">+ New File</button>
+        <label class="btn btn-xs" style="cursor:pointer;margin:0;">
+          ⬆ Upload
+          <input type="file" id="profileUploadInputTop" style="display:none;" onchange="uploadProfile(this)">
+        </label>
       </div>
       <div class="table-wrap">
       <table class="device-table" id="profilesTable">
