@@ -3336,6 +3336,12 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
 
         # Login page is always accessible (needed when password is set)
         if path == "/login":
+            if not read_password_hash():
+                self.send_response(HTTPStatus.FOUND)
+                self.send_header("Location", "/")
+                self.send_header("Content-Length", 0)
+                self.end_headers()
+                return
             self._send_html(LOGIN_PAGE)
             return
 
