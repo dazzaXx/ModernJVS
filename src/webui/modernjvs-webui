@@ -26,7 +26,7 @@ IOS_PATH = "/etc/modernjvs/ios"
 GAMES_PATH = "/etc/modernjvs/games"
 DEVICES_PATH = "/etc/modernjvs/devices"
 LOGO_PATH   = "/usr/share/modernjvs/modernjvs2.png"
-STICKS_PATH = "/usr/share/modernjvs/Sticks2.png"
+STICKS_PATH = "/usr/share/modernjvs/Sticks3.png"
 SERVICE_NAME = "modernjvs"
 WEBUI_SERVICE_NAME = "modernjvs-webui"
 
@@ -2729,8 +2729,8 @@ def get_sticks_bytes():
     script_dir = os.path.dirname(os.path.abspath(__file__))
     candidates = [
         STICKS_PATH,
-        "/usr/share/modernjvs/Sticks2.png",
-        os.path.join(script_dir, "..", "..", "docs", "Sticks2.png"),
+        "/usr/share/modernjvs/Sticks3.png",
+        os.path.join(script_dir, "..", "..", "docs", "Sticks3.png"),
     ]
     for p in candidates:
         try:
