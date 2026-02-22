@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.10)
 
 project(modernjvs
-        VERSION "5.10.1"
+        VERSION "5.10.2"
         LANGUAGES "C"
         DESCRIPTION "JVS I/O Emulator"
         HOMEPAGE_URL "https://github.com/dazzaXx/ModernJVS"
@@ -106,7 +106,7 @@ if(ENABLE_WEBUI)
 
     install(FILES
         ${CMAKE_SOURCE_DIR}/docs/modernjvs2.png
-        ${CMAKE_SOURCE_DIR}/docs/Sticks3.png
+        ${CMAKE_SOURCE_DIR}/docs/Sticks4.png
         COMPONENT ${PROJECT_NAME}
         DESTINATION "/usr/share/modernjvs/"
     )
