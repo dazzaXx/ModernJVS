@@ -344,6 +344,8 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
     --font:    'Segoe UI', system-ui, sans-serif;
   }
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  /* Prevent horizontal page scrolling; inner containers (tabs, tables) still scroll independently */
+  html, body { max-width: 100%; overflow-x: hidden; }
   body { background: var(--bg); color: var(--text); font-family: var(--font); min-height: 100vh; }
 
   /* --- header --- */
@@ -358,10 +360,23 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
     top: 0;
     z-index: 100;
   }
-  header img { height: clamp(26px, 5vw, 42px); }
-  header h1 { font-size: clamp(0.95rem, 3.5vw, 1.4rem); color: var(--muted); font-weight: 400; letter-spacing: 0.05em; }
+  /* Logo: fluid height, never shrinks below clamped minimum */
+  header img { height: clamp(26px, 5vw, 42px); flex-shrink: 0; }
+  /* h1: stretches to fill available space, then shrinks and truncates before
+     pushing the status badge off-screen */
+  header h1 {
+    font-size: clamp(0.95rem, 3.5vw, 1.4rem);
+    color: var(--muted);
+    font-weight: 400;
+    letter-spacing: 0.05em;
+    flex: 1 1 0;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
   .status-badge {
-    margin-left: auto;
+    flex-shrink: 0;        /* always fully visible */
     display: flex;
     align-items: center;
     gap: 0.5rem;
