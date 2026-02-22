@@ -11,7 +11,8 @@ case "$1" in
               /etc/modernjvs/webui-bg \
               /etc/modernjvs/webui-bg.mime \
               /etc/modernjvs/webui-font \
-              /etc/modernjvs/webui-font-name
+              /etc/modernjvs/webui-font-name \
+              /etc/modernjvs/webui-password
 
         # Remove the directory itself if nothing else remains inside it.
         rmdir /etc/modernjvs 2>/dev/null || true

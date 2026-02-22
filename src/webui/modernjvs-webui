@@ -5,10 +5,13 @@
 
 import http.server
 import glob as _glob
+import hashlib
+import hmac
 import ipaddress
 import json
 import os
 import re
+import secrets
 import shutil
 import subprocess
 import threading
@@ -49,12 +52,16 @@ WEBUI_BG_PATH        = "/etc/modernjvs/webui-bg"
 WEBUI_BG_MIME_PATH   = "/etc/modernjvs/webui-bg.mime"
 WEBUI_FONT_PATH      = "/etc/modernjvs/webui-font"
 WEBUI_FONT_NAME_PATH = "/etc/modernjvs/webui-font-name"
+WEBUI_PASSWORD_PATH  = "/etc/modernjvs/webui-password"
+
+# Session cookie settings
+SESSION_COOKIE_NAME = "mjvs_session"
+SESSION_MAX_AGE     = 7 * 24 * 3600   # 7 days
 
 _SETTINGS_DEFAULTS = {
     "theme":          "black",
     "compact":        False,
     "noAnim":         False,
-    "showSticks":     True,
     "bgScrimOpacity": 0.70,   # 0.0 = no overlay, 0.9 = near-black overlay
 }
 
@@ -101,10 +108,103 @@ def write_webui_settings(settings):
         return False, str(e)
 
 # ---------------------------------------------------------------------------
-# Internet access protection – only allow private / local-network addresses.
-# This prevents the WebUI from being accessible from the public internet even
-# when the Raspberry Pi has an internet connection.
+# Password protection
 # ---------------------------------------------------------------------------
+
+_PBKDF2_ITERATIONS = 260_000
+
+
+def hash_password(password):
+    """Return a PBKDF2-HMAC-SHA256 hash string for *password*."""
+    salt = secrets.token_bytes(32)
+    key  = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, _PBKDF2_ITERATIONS)
+    return f"pbkdf2_sha256${_PBKDF2_ITERATIONS}${salt.hex()}${key.hex()}"
+
+
+def verify_password(password, stored_hash):
+    """Return True if *password* matches *stored_hash*."""
+    try:
+        alg, iters_s, salt_hex, key_hex = stored_hash.split("$")
+        if alg != "pbkdf2_sha256":
+            return False
+        key_actual = hashlib.pbkdf2_hmac(
+            "sha256", password.encode("utf-8"),
+            bytes.fromhex(salt_hex), int(iters_s),
+        )
+        return hmac.compare_digest(key_actual, bytes.fromhex(key_hex))
+    except Exception:
+        return False
+
+
+def read_password_hash():
+    """Return the stored password hash string, or None if no password is set."""
+    try:
+        with open(WEBUI_PASSWORD_PATH, "r") as f:
+            return f.read().strip() or None
+    except OSError:
+        return None
+
+
+def _write_password_hash(hash_str):
+    """Persist *hash_str* to disk readable only by root."""
+    os.makedirs(os.path.dirname(WEBUI_PASSWORD_PATH), exist_ok=True)
+    with open(WEBUI_PASSWORD_PATH, "w") as f:
+        f.write(hash_str + "\n")
+    os.chmod(WEBUI_PASSWORD_PATH, 0o600)
+
+
+def clear_password_file():
+    """Remove the stored password hash file.  Returns True on success."""
+    try:
+        os.remove(WEBUI_PASSWORD_PATH)
+        return True
+    except FileNotFoundError:
+        return True
+    except OSError:
+        return False
+
+
+# ---------------------------------------------------------------------------
+# Session management (in-memory; cleared on server restart)
+# ---------------------------------------------------------------------------
+
+_sessions: dict = {}
+_sessions_lock = threading.Lock()
+
+
+def create_session():
+    """Create a new random session token and return it."""
+    token  = secrets.token_hex(32)
+    expiry = time.time() + SESSION_MAX_AGE
+    with _sessions_lock:
+        _sessions[token] = expiry
+        # Prune expired tokens opportunistically
+        now     = time.time()
+        expired = [t for t, e in list(_sessions.items()) if e < now]
+        for t in expired:
+            del _sessions[t]
+    return token
+
+
+def is_valid_session(token):
+    """Return True if *token* is a known, unexpired session."""
+    if not token:
+        return False
+    with _sessions_lock:
+        expiry = _sessions.get(token)
+        if expiry is None:
+            return False
+        if time.time() > expiry:
+            del _sessions[token]
+            return False
+        return True
+
+
+def invalidate_all_sessions():
+    """Clear every active session (call after password change / removal)."""
+    with _sessions_lock:
+        _sessions.clear()
+
 
 _PRIVATE_NETS = [
     ipaddress.ip_network("127.0.0.0/8"),    # loopback
@@ -155,6 +255,148 @@ code{color:#ff7e7e;font-family:monospace}
 </div></body></html>
 """
 
+# Login page shown to unauthenticated visitors when a password is set
+_LOGIN_TEMPLATE = """\
+<!DOCTYPE html>
+<html lang="en" data-theme="black">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ModernJVS WebUI \u2014 Login</title>
+<style>
+  :root{{--bg:#000000;--surface:#0a0a0a;--card:#111111;--border:#1f1f1f;
+        --accent:#970011;--text:#e2e2f0;--muted:#888888;--red:#ff5555;
+        --radius:8px;--font:'Segoe UI',system-ui,sans-serif;}}
+  *,*::before,*::after{{box-sizing:border-box;margin:0;padding:0;}}
+  body{{background:var(--bg);color:var(--text);font-family:var(--font);
+       min-height:100vh;display:flex;flex-direction:column;
+       align-items:center;justify-content:center;}}
+  /* ---- theme variable overrides ---- */
+  [data-theme="dark"]{{--bg:#0d0d14;--surface:#16161f;--card:#1e1e2e;--border:#2e2e42;--accent:#970011;--text:#e2e2f0;--muted:#7878a0;}}
+  [data-theme="light"]{{--bg:#f0f0f5;--surface:#e0e0ea;--card:#ffffff;--border:#c4c4d4;--accent:#000000;--text:#1a1a2e;--muted:#55558a;}}
+  [data-theme="midnight"]{{--bg:#080c18;--surface:#0d1528;--card:#111c38;--border:#1a2d54;--accent:#3b82f6;--text:#c5d8f5;--muted:#4d6a9a;}}
+  [data-theme="dracula"]{{--bg:#1e1f29;--surface:#282a36;--card:#313442;--border:#44475a;--accent:#bd93f9;--text:#f8f8f2;--muted:#6272a4;}}
+  [data-theme="terminal"]{{--bg:#0a0f0a;--surface:#0d150d;--card:#111c11;--border:#1a2e1a;--accent:#50fa7b;--text:#a0f0a0;--muted:#4a8a4a;}}
+  [data-theme="ocean"]{{--bg:#020c18;--surface:#051422;--card:#071c30;--border:#0c2e4a;--accent:#0ea5e9;--text:#e0f4ff;--muted:#4a7e99;}}
+  [data-theme="sunset"]{{--bg:#1a0800;--surface:#261000;--card:#2d1400;--border:#4a2000;--accent:#f97316;--text:#fde8cc;--muted:#8a5a2a;}}
+  [data-theme="forest"]{{--bg:#030d03;--surface:#071507;--card:#091a09;--border:#0f2a10;--accent:#22c55e;--text:#d0f0d0;--muted:#3a7a45;}}
+  [data-theme="purple"]{{--bg:#0d0018;--surface:#130025;--card:#1a0030;--border:#2c004d;--accent:#a855f7;--text:#f0e0ff;--muted:#6e3f99;}}
+  [data-theme="neon"]{{--bg:#00080d;--surface:#001018;--card:#001820;--border:#002a38;--accent:#06b6d4;--text:#cffafe;--muted:#2e7a8a;}}
+  [data-theme="rose"]{{--bg:#1a0010;--surface:#240018;--card:#2e0020;--border:#480038;--accent:#f43f5e;--text:#ffe0e8;--muted:#883a5a;}}
+  [data-theme="amber"]{{--bg:#0d0600;--surface:#180e00;--card:#1e1000;--border:#321a00;--accent:#f59e0b;--text:#fef3c7;--muted:#7a5820;}}
+  [data-theme="solarized"]{{--bg:#002b36;--surface:#04323f;--card:#073642;--border:#0d4f5e;--accent:#2aa198;--text:#fdf6e3;--muted:#657b83;}}
+  /* ---- logo tint per theme ---- */
+  [data-theme="dark"] #logo,[data-theme="black"] #logo{{filter:none;}}
+  [data-theme="light"] #logo{{filter:brightness(0) saturate(0);}}
+  [data-theme="midnight"] #logo{{filter:hue-rotate(212deg) saturate(1.1);}}
+  [data-theme="dracula"] #logo{{filter:hue-rotate(268deg) saturate(1.2);}}
+  [data-theme="terminal"] #logo{{filter:hue-rotate(148deg) saturate(1.2);}}
+  [data-theme="ocean"] #logo{{filter:hue-rotate(208deg) saturate(1.2);}}
+  [data-theme="sunset"] #logo{{filter:hue-rotate(36deg) saturate(1.2);}}
+  [data-theme="forest"] #logo{{filter:hue-rotate(148deg) saturate(1.2);}}
+  [data-theme="purple"] #logo{{filter:hue-rotate(278deg) saturate(1.2);}}
+  [data-theme="neon"] #logo{{filter:hue-rotate(196deg) saturate(1.2);}}
+  [data-theme="rose"] #logo{{filter:hue-rotate(4deg) saturate(1.1);}}
+  [data-theme="amber"] #logo{{filter:hue-rotate(50deg) saturate(1.2);}}
+  [data-theme="solarized"] #logo{{filter:hue-rotate(192deg) saturate(0.9);}}
+  /* ---- sticks decoration ---- */
+  .sticks-corner{{position:fixed;bottom:0;right:0;width:200px;opacity:0.18;pointer-events:none;z-index:0;}}
+  [data-theme="dark"] #sticks,[data-theme="black"] #sticks{{filter:hue-rotate(330deg) saturate(1.1) brightness(0.75);}}
+  [data-theme="light"] #sticks{{filter:grayscale(1) brightness(0.5);}}
+  [data-theme="midnight"] #sticks{{filter:hue-rotate(182deg) saturate(1.1);}}
+  [data-theme="dracula"] #sticks{{filter:hue-rotate(238deg) saturate(1.2);}}
+  [data-theme="terminal"] #sticks{{filter:hue-rotate(118deg) saturate(1.2);}}
+  [data-theme="ocean"] #sticks{{filter:hue-rotate(178deg) saturate(1.2);}}
+  [data-theme="sunset"] #sticks{{filter:hue-rotate(6deg) saturate(1.2);}}
+  [data-theme="forest"] #sticks{{filter:hue-rotate(118deg) saturate(1.2);}}
+  [data-theme="purple"] #sticks{{filter:hue-rotate(248deg) saturate(1.2);}}
+  [data-theme="neon"] #sticks{{filter:hue-rotate(166deg) saturate(1.2);}}
+  [data-theme="rose"] #sticks{{filter:hue-rotate(334deg) saturate(1.1);}}
+  [data-theme="amber"] #sticks{{filter:hue-rotate(20deg) saturate(1.2);}}
+  [data-theme="solarized"] #sticks{{filter:hue-rotate(162deg) saturate(0.9);}}
+  /* ---- login card ---- */
+  .box{{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);
+        padding:2.5rem;width:100%;max-width:360px;box-shadow:0 8px 32px rgba(0,0,0,.5);
+        position:relative;z-index:1;}}
+  .hdr{{text-align:center;margin-bottom:1.75rem;}}
+  .hdr img{{max-height:48px;width:auto;max-width:100%;}}
+  .hdr h1{{font-size:1.1rem;color:var(--muted);font-weight:400;margin-top:.4rem;}}
+  /* Version badge pinned to top-left corner */
+  .ver-badge{{position:fixed;top:0.6rem;left:0.75rem;font-size:0.72rem;
+              color:var(--muted);background:var(--surface);
+              border:1px solid var(--border);border-radius:4px;
+              padding:0.15rem 0.4rem;white-space:nowrap;z-index:10;}}
+  label{{display:block;font-size:.82rem;color:var(--muted);text-transform:uppercase;
+         letter-spacing:.06em;margin-bottom:.3rem;}}
+  input[type=password]{{width:100%;background:var(--surface);border:1px solid var(--border);
+    border-radius:4px;color:var(--text);padding:.55rem .75rem;font-size:.95rem;
+    margin-bottom:1.25rem;font-family:var(--font);}}
+  input[type=password]:focus{{outline:none;border-color:var(--accent);}}
+  button{{width:100%;background:var(--accent);color:#fff;border:none;border-radius:4px;
+          padding:.65rem;font-size:.95rem;cursor:pointer;transition:opacity .15s;
+          font-family:var(--font);}}
+  button:hover{{opacity:.85;}}
+  .err{{color:var(--red);font-size:.85rem;margin-top:.75rem;text-align:center;min-height:1.2em;}}
+  /* ---- footer (sticks only) ---- */
+  footer{{position:relative;z-index:1;}}
+  /* On mobile, sticks moves below the login card */
+  @media(max-width:640px){{
+    .sticks-corner{{position:static;display:block;width:clamp(80px,30vw,130px);opacity:0.35;
+                    margin:0.5rem auto 0;pointer-events:none;}}
+  }}
+  @media(max-width:400px){{
+    .box{{padding:1.75rem 1.25rem;}}
+  }}
+</style></head>
+<body>
+<div class="ver-badge" id="lVer" style="display:none"></div>
+<div class="box">
+  <div class="hdr">
+    <img id="logo" src="{logo}" alt="ModernJVS">
+    <h1>WebUI</h1>
+  </div>
+  <label for="lPw">Password</label>
+  <input type="password" id="lPw" autocomplete="current-password" autofocus
+         onkeydown="if(event.key==='Enter')doLogin()">
+  <button onclick="doLogin()">&#128275; Unlock</button>
+  <div class="err" id="lErr"></div>
+</div>
+<footer>
+  <img id="sticks" src="{sticks}" alt="" class="sticks-corner">
+</footer>
+<script>
+async function doLogin(){{
+  const pw=document.getElementById('lPw').value;
+  const err=document.getElementById('lErr');
+  err.textContent='';
+  if(!pw){{err.textContent='Please enter a password.';return;}}
+  try{{
+    const r=await fetch('/api/login',{{method:'POST',
+      headers:{{'Content-Type':'application/json'}},
+      body:JSON.stringify({{password:pw}})}});
+    const d=await r.json();
+    if(d.ok){{
+      const next=new URLSearchParams(window.location.search).get('next')||'/';
+      window.location.href=next;
+    }}else{{
+      err.textContent=d.error||'Incorrect password.';
+      document.getElementById('lPw').select();
+    }}
+  }}catch(e){{err.textContent='Network error: '+e;}}
+}}
+// Apply saved theme
+fetch('/api/webui/settings').then(r=>r.json()).then(s=>{{
+  if(s&&s.theme)document.documentElement.setAttribute('data-theme',s.theme);
+}}).catch(()=>{{}});
+// Show version badge
+fetch('/api/version').then(r=>r.json()).then(d=>{{
+  if(d.version&&d.version!=='unknown'){{
+    const b=document.getElementById('lVer');
+    if(b){{b.textContent='v'+d.version;b.style.display='';}}
+  }}
+}}).catch(()=>{{}});
+</script>
+</body></html>
+"""
+
 # ---------------------------------------------------------------------------
 # HTML / CSS / JS – embedded so the server is a single file with no assets
 # ---------------------------------------------------------------------------
@@ -195,10 +437,23 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
     top: 0;
     z-index: 100;
   }
-  header img { height: 42px; }
-  header h1 { font-size: 1.4rem; color: var(--muted); font-weight: 400; letter-spacing: 0.05em; }
+  /* Logo: fluid height, never shrinks below clamped minimum */
+  header img { height: clamp(26px, 5vw, 42px); flex-shrink: 0; }
+  /* h1: stretches to fill available space, then shrinks and truncates before
+     pushing the status badge off-screen */
+  header h1 {
+    font-size: clamp(0.95rem, 3.5vw, 1.4rem);
+    color: var(--muted);
+    font-weight: 400;
+    letter-spacing: 0.05em;
+    flex: 1 1 0;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
   .status-badge {
-    margin-left: auto;
+    flex-shrink: 0;        /* always fully visible */
     display: flex;
     align-items: center;
     gap: 0.5rem;
@@ -216,7 +471,16 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
 
   /* --- layout --- */
   .container { max-width: 1100px; margin: 0 auto; padding: 1.5rem; position: relative; z-index: 2; }
-  footer { text-align: center; color: var(--muted); font-size: 0.78rem; padding: 1.5rem; position: relative; z-index: 2; }
+  footer {
+    text-align: center;
+    color: var(--muted);
+    font-size: 0.78rem;
+    padding: 1.5rem;
+    position: relative;
+    z-index: 2;
+  }
+  /* Version in footer: only shown on mobile (see ≤640px breakpoint) */
+  .footer-ver { display: none; }
 
   /* --- tabs --- */
   .tabs { display: flex; gap: 0.25rem; margin-bottom: 1.5rem; border-bottom: 2px solid var(--border); }
@@ -608,7 +872,8 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
   .settings-field { display: flex; flex-direction: column; gap: 0.35rem; }
   .settings-field label { font-size: 0.82rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
   .settings-field select,
-  .settings-field input[type="text"] {
+  .settings-field input[type="text"],
+  .settings-field input[type="password"] {
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: 4px;
@@ -669,6 +934,99 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
     color: var(--muted);
     margin-top: 0.5rem;
     font-style: italic;
+  }
+
+  /* ================================================================
+     RESPONSIVE – tablets and mobile phones
+     ================================================================ */
+
+  /* ---- Tablet (≤ 768 px) ---- */
+  @media (max-width: 768px) {
+    header { padding: 0.65rem 1.25rem; gap: 1rem; }
+    .container { padding: 1rem; }
+    .log-wrap { height: 320px; }
+    .sticks-corner { width: 140px; }
+  }
+
+  /* ---- Mobile (≤ 640 px) ---- */
+  @media (max-width: 640px) {
+    /* Header: tighter padding */
+    header { padding: 0.55rem 0.85rem; gap: 0.65rem; }
+    .status-badge { font-size: 0.78rem; }
+
+    /* Container: less horizontal padding */
+    .container { padding: 0.75rem 0.65rem; }
+
+    /* Tabs: single scrollable row, no wrapping */
+    .tabs {
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+      flex-wrap: nowrap;
+      scrollbar-width: none;       /* Firefox */
+    }
+    .tabs::-webkit-scrollbar { display: none; }
+    .tab {
+      padding: 0.5rem 0.85rem;
+      font-size: 0.82rem;
+      flex-shrink: 0;
+      white-space: nowrap;
+    }
+
+    /* Cards: tighter padding */
+    .card { padding: 0.9rem 0.75rem; }
+    .card h2 { font-size: 0.95rem; margin-bottom: 0.75rem; }
+
+    /* Buttons: slightly narrower */
+    .btn { padding: 0.55rem 0.9rem; font-size: 0.85rem; }
+
+    /* Stat grid: 2 columns */
+    .stat-grid { grid-template-columns: repeat(2, 1fr); gap: 0.65rem; }
+    .stat-card { padding: 0.7rem 0.5rem; }
+    .stat-card .val { font-size: 1.1rem; }
+
+    /* Form / settings grids: single column */
+    .form-grid    { grid-template-columns: 1fr; }
+    .settings-grid { grid-template-columns: 1fr; }
+
+    /* Log terminal: shorter, smaller text */
+    .log-wrap { height: 260px; font-size: 0.75rem; padding: 0.5rem 0.65rem; }
+
+    /* Device tables: horizontal scroll */
+    .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    .device-table { min-width: 420px; }
+
+    /* Log filter bar: narrower search input */
+    .log-filter-bar input[type="text"] { width: 110px; }
+
+    /* Sticks: leave fixed position but shrink further */
+    .sticks-corner { width: 80px; opacity: 0.12; }
+    /* Version badge: hidden on mobile — version shown in footer text instead */
+    .ver-badge { display: none !important; }
+    /* Footer: stack as column so sticks appears below the text line */
+    footer {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0.6rem;
+      padding: 1rem 0.75rem;
+    }
+    /* Show version in footer */
+    .footer-ver { display: inline; }
+    /* Sticks: switch from fixed corner to static, centred below footer text */
+    .sticks-corner {
+      position: static;
+      display: block;
+      width: clamp(80px, 30vw, 130px);
+      opacity: 0.35;
+      margin: 0 auto;
+      pointer-events: none;
+    }
+  }
+
+  /* ---- Small phones (≤ 400 px) ---- */
+  @media (max-width: 400px) {
+    /* Single column stat grid */
+    .stat-grid { grid-template-columns: 1fr; }
   }
 </style>
 </head>
@@ -879,10 +1237,12 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
     <div class="card">
       <h2>Connected Input Devices <button class="btn btn-refresh btn-xs" onclick="loadDevices()" style="margin-left:0.5rem;vertical-align:middle;">⟳ Refresh</button></h2>
       <p style="font-size:0.83rem;color:var(--muted);margin-bottom:1rem;">Shows all <code style="color:var(--accent2);font-family:monospace">/dev/input/event*</code> nodes currently present on the system.</p>
+      <div class="table-wrap">
       <table class="device-table">
         <thead><tr><th>Event Node</th><th>Device Name</th><th>Status</th></tr></thead>
         <tbody id="deviceTableBody"><tr><td colspan="3" style="color:var(--muted)">Loading…</td></tr></tbody>
       </table>
+      </div>
     </div>
 
     <div class="card" style="margin-top:1rem;">
@@ -893,10 +1253,12 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
 
       <div id="btPairedSection">
         <h3 style="font-size:0.85rem;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:0.5rem;">Paired Devices</h3>
+        <div class="table-wrap">
         <table class="device-table">
           <thead><tr><th>Device Name</th><th>MAC Address</th><th>Status</th><th></th></tr></thead>
           <tbody id="btPairedBody"><tr><td colspan="4" style="color:var(--muted)">Loading…</td></tr></tbody>
         </table>
+        </div>
       </div>
 
       <div id="btScanSection" style="margin-top:1.25rem;padding-top:1rem;border-top:1px solid var(--border);">
@@ -908,10 +1270,12 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
           <button class="btn btn-refresh" id="btScanBtn" onclick="btScan()">&#x1F50D; Scan for Devices (8s)</button>
           <span id="btScanStatus" style="font-size:0.82rem;color:var(--muted);"></span>
         </div>
+        <div class="table-wrap">
         <table class="device-table" id="btScanTable" style="display:none;">
           <thead><tr><th>Device Name</th><th>MAC Address</th><th></th></tr></thead>
           <tbody id="btScanBody"></tbody>
         </table>
+        </div>
       </div>
     </div>
   </div>
@@ -1006,13 +1370,31 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
             <span>Disable all CSS transitions and animations</span>
           </div>
         </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>&#128274; Password Protection</h2>
+      <p id="pwStatus" style="margin-bottom:1rem;font-size:0.88rem;"></p>
+      <div class="settings-grid">
         <div class="settings-field">
-          <label>Corner Image</label>
-          <div class="settings-toggle">
-            <input type="checkbox" id="stShowSticks" checked>
-            <span>Show decorative Sticks image in the bottom-right corner</span>
-          </div>
+          <label>New Password</label>
+          <input type="password" id="pwNew" autocomplete="new-password" maxlength="128"
+                 placeholder="Enter new password">
         </div>
+        <div class="settings-field">
+          <label>Confirm Password</label>
+          <input type="password" id="pwConfirm" autocomplete="new-password" maxlength="128"
+                 placeholder="Re-enter new password">
+        </div>
+      </div>
+      <div id="pwMsg" style="font-size:0.85rem;min-height:1.2em;margin-bottom:0.75rem;"></div>
+      <div class="control-row">
+        <button class="btn btn-save" onclick="setPassword()">&#128190; Set Password</button>
+        <button class="btn btn-stop" id="pwClearBtn" onclick="clearPassword()" style="display:none">&#128275; Clear Password</button>
+      </div>
+      <div class="settings-preview" style="margin-top:0.75rem;">
+        If you forget the password, remove <code style="color:var(--muted)">/etc/modernjvs/webui-password</code> via SSH to reset it.
       </div>
     </div>
 
@@ -1031,9 +1413,9 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
   </div>
 </div>
 
-<footer>ModernJVS WebUI &mdash; <a href="https://github.com/dazzaXx/ModernJVS" target="_blank">github.com/dazzaXx/ModernJVS</a></footer>
-
+<footer><span>ModernJVS <span id="footerVer" class="footer-ver"></span>WebUI &mdash; <a href="https://github.com/dazzaXx/ModernJVS" target="_blank">github.com/dazzaXx/ModernJVS</a></span>
 <img id="sticks" src="__STICKS__" alt="" class="sticks-corner">
+</footer>
 
 <script>
 // ---- Constants ----
@@ -1624,9 +2006,6 @@ function applyAppearanceSettings(s) {
 
   // No animations
   document.body.classList.toggle('no-anim', !!s.noAnim);
-  // Show/hide the sticks corner image
-  const sticksEl = document.getElementById('sticks');
-  if (sticksEl) sticksEl.style.display = s.showSticks === false ? 'none' : '';
 
   // Background overlay (scrim) opacity
   const scrim = (typeof s.bgScrimOpacity === 'number') ? s.bgScrimOpacity : 0.70;
@@ -1781,7 +2160,6 @@ async function initAppearancePanel() {
   document.getElementById('stTheme').value      = d.theme     || 'black';
   document.getElementById('stCompact').checked  = !!d.compact;
   document.getElementById('stNoAnim').checked   = !!d.noAnim;
-  document.getElementById('stShowSticks').checked = d.showSticks !== false;
 
   // Scrim slider – live preview of opacity value
   const scrimVal = (typeof d.bgScrimOpacity === 'number') ? d.bgScrimOpacity : 0.70;
@@ -1811,6 +2189,7 @@ async function initAppearancePanel() {
   } else {
     _hideFontPreview();
   }
+  initPasswordSection();
 }
 
 async function saveAppearanceSettings() {
@@ -1818,7 +2197,6 @@ async function saveAppearanceSettings() {
     theme:          document.getElementById('stTheme').value,
     compact:        document.getElementById('stCompact').checked,
     noAnim:         document.getElementById('stNoAnim').checked,
-    showSticks:     document.getElementById('stShowSticks').checked,
     bgScrimOpacity: parseFloat(document.getElementById('stBgScrim').value),
   };
   const d = await api('/api/webui/settings', {
@@ -1834,7 +2212,7 @@ async function saveAppearanceSettings() {
 }
 
 async function resetAppearanceSettings() {
-  const defaults = {theme:'black', compact:false, noAnim:false, showSticks:true,
+  const defaults = {theme:'black', compact:false, noAnim:false,
                     bgScrimOpacity:0.70};
   await api('/api/webui/settings', {
     method: 'POST',
@@ -1845,6 +2223,58 @@ async function resetAppearanceSettings() {
   await clearFont();
   applyAppearanceSettings(defaults);
   initAppearancePanel();
+}
+
+// ---- Password protection ----
+async function initPasswordSection() {
+  const d = await api('/api/webui/password/status');
+  if (d.error) return;
+  const set = d.passwordSet;
+  const statusEl = document.getElementById('pwStatus');
+  statusEl.textContent = set
+    ? '\uD83D\uDD10 Password protection is enabled.'
+    : '\uD83D\uDD13 Password protection is disabled.';
+  statusEl.style.color = set ? 'var(--green)' : 'var(--muted)';
+  document.getElementById('pwClearBtn').style.display = set ? '' : 'none';
+  document.getElementById('pwMsg').textContent = '';
+}
+
+async function setPassword() {
+  const pw1 = document.getElementById('pwNew').value;
+  const pw2 = document.getElementById('pwConfirm').value;
+  const msg = document.getElementById('pwMsg');
+  msg.style.color = 'var(--red)';
+  if (!pw1) { msg.textContent = 'Please enter a new password.'; return; }
+  if (pw1.length < 8) { msg.textContent = 'Password must be at least 8 characters.'; return; }
+  if (pw1 !== pw2) { msg.textContent = 'Passwords do not match.'; return; }
+  const d = await api('/api/webui/password', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({password: pw1}),
+  });
+  if (d.ok) {
+    msg.style.color = 'var(--green)';
+    msg.textContent = 'Password set successfully.';
+    document.getElementById('pwNew').value = '';
+    document.getElementById('pwConfirm').value = '';
+    initPasswordSection();
+  } else {
+    msg.textContent = d.error || 'Failed to set password.';
+  }
+}
+
+async function clearPassword() {
+  if (!confirm('Remove password protection? Anyone on the local network will be able to access the WebUI.')) return;
+  const d = await api('/api/webui/password/clear', {method: 'POST'});
+  const msg = document.getElementById('pwMsg');
+  if (d.ok) {
+    msg.style.color = 'var(--muted)';
+    msg.textContent = 'Password protection removed.';
+    initPasswordSection();
+  } else {
+    msg.style.color = 'var(--red)';
+    msg.textContent = d.error || 'Failed to clear password.';
+  }
 }
 
 // ---- Restart WebUI ----
@@ -1877,12 +2307,14 @@ refreshSysinfo();
 setInterval(refreshDashboard, 10000);
 setInterval(refreshSysinfo, 5000);
 
-// Fetch version once and show in header badge only when available
+// Fetch version once and show in header badge (desktop) and footer (mobile)
 api('/api/version').then(d => {
   if (d.version && d.version !== 'unknown') {
     const badge = document.getElementById('verBadge');
     badge.textContent = 'v' + d.version;
     badge.classList.add('visible');
+    const footerVer = document.getElementById('footerVer');
+    if (footerVer) footerVer.textContent = 'v' + d.version + ' ';
   }
 });
 </script>
@@ -2311,7 +2743,8 @@ def get_sticks_bytes():
 
 # Build HTML_PAGE now that get_logo_bytes() / get_sticks_bytes() are defined.
 # Done once at module load so every request serves the same cached bytes.
-HTML_PAGE = _build_html_page()
+HTML_PAGE  = _build_html_page()
+LOGIN_PAGE = _LOGIN_TEMPLATE.format(logo=_logo_data_uri(), sticks=_sticks_data_uri())
 
 
 # ---------------------------------------------------------------------------
@@ -2846,6 +3279,42 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
             return False
         return True
 
+    def _get_session_token(self):
+        """Extract the session token from the Cookie request header."""
+        cookie_header = self.headers.get("Cookie", "")
+        for part in cookie_header.split(";"):
+            part = part.strip()
+            if part.startswith(SESSION_COOKIE_NAME + "="):
+                return part[len(SESSION_COOKIE_NAME) + 1:]
+        return None
+
+    def _check_auth(self):
+        """Return True if the request is authenticated (or no password is set).
+
+        Sends a 302 redirect to /login and returns False when a password is
+        configured and the request carries no valid session cookie.
+        """
+        if read_password_hash() is None:
+            return True   # password protection disabled
+        if is_valid_session(self._get_session_token()):
+            return True
+        self._redirect_to_login()
+        return False
+
+    def _redirect_to_login(self):
+        """Send a 302 redirect to /login, preserving the original path as ?next=."""
+        # Strip CR/LF from the user-supplied path to prevent HTTP response splitting.
+        requested = urllib.parse.urlparse(self.path).path.translate(
+            str.maketrans("", "", "\r\n")
+        )
+        target = "/login"
+        if requested and requested not in ("/", "/login", "/index.html"):
+            target += "?" + urllib.parse.urlencode({"next": requested})
+        self.send_response(HTTPStatus.FOUND)
+        self.send_header("Location", target)
+        self.send_header("Content-Length", 0)
+        self.end_headers()
+
     def _access_denied(self, client_ip):
         html = _ACCESS_DENIED_HTML.format(client_ip=client_ip)
         data = html.encode("utf-8")
@@ -2864,6 +3333,29 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
         query = urllib.parse.parse_qs(parsed.query)
+
+        # Login page is always accessible (needed when password is set)
+        if path == "/login":
+            if not read_password_hash():
+                self.send_response(HTTPStatus.FOUND)
+                self.send_header("Location", "/")
+                self.send_header("Content-Length", 0)
+                self.end_headers()
+                return
+            self._send_html(LOGIN_PAGE)
+            return
+
+        # These two endpoints are needed by the login page (theme + version badge)
+        # and are read-only / non-sensitive, so serve them without auth.
+        if path == "/api/version":
+            self._json({"version": get_version()})
+            return
+        if path == "/api/webui/settings":
+            self._json(read_webui_settings())
+            return
+
+        if not self._check_auth():
+            return
 
         if path == "/" or path == "/index.html":
             self._send_html(HTML_PAGE)
@@ -2942,6 +3434,8 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
             self._json(get_bluetooth_paired())
         elif path == "/api/bluetooth/status":
             self._json(get_bluetooth_status())
+        elif path == "/api/webui/password/status":
+            self._json({"passwordSet": read_password_hash() is not None})
         else:
             self._not_found()
 
@@ -2951,6 +3445,15 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
 
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
+
+        # Login endpoint is always accessible – no auth check required
+        if path == "/api/login":
+            self._handle_api_login()
+            return
+
+        # All other POST routes require authentication when a password is set
+        if not self._check_auth():
+            return
 
         # Binary upload must be routed BEFORE _read_body() to avoid
         # attempting to UTF-8 decode raw image bytes.
@@ -3058,8 +3561,82 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
         elif path == "/api/bluetooth/setup_usb":
             self._json(setup_usb_bluetooth())
 
+        elif path == "/api/webui/password":
+            try:
+                data = json.loads(body) if body else {}
+            except json.JSONDecodeError:
+                self._json({"error": "Invalid JSON"}, HTTPStatus.BAD_REQUEST)
+                return
+            password = data.get("password", "")
+            if not password:
+                self._json({"error": "Password cannot be empty."}, HTTPStatus.BAD_REQUEST)
+                return
+            if len(password) < 8:
+                self._json({"error": "Password must be at least 8 characters."}, HTTPStatus.BAD_REQUEST)
+                return
+            if len(password) > 128:
+                self._json({"error": "Password is too long."}, HTTPStatus.BAD_REQUEST)
+                return
+            try:
+                _write_password_hash(hash_password(password))
+                invalidate_all_sessions()
+                # Re-authenticate the current user so they aren't immediately logged out
+                token = create_session()
+                resp  = json.dumps({"ok": True}).encode("utf-8")
+                cookie = (
+                    f"{SESSION_COOKIE_NAME}={token}; HttpOnly; SameSite=Strict; "
+                    f"Max-Age={SESSION_MAX_AGE}; Path=/"
+                )
+                self.send_response(HTTPStatus.OK)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", len(resp))
+                self.send_header("Set-Cookie", cookie)
+                self.end_headers()
+                self.wfile.write(resp)
+            except OSError as e:
+                self._json({"error": str(e)}, HTTPStatus.INTERNAL_SERVER_ERROR)
+
+        elif path == "/api/webui/password/clear":
+            if clear_password_file():
+                invalidate_all_sessions()
+                self._json({"ok": True})
+            else:
+                self._json({"error": "Failed to remove password file."}, HTTPStatus.INTERNAL_SERVER_ERROR)
+
         else:
             self._not_found()
+
+    # ---- login handler ----
+
+    def _handle_api_login(self):
+        """Validate password and issue a session cookie on success."""
+        body = self._read_body()
+        try:
+            data = json.loads(body) if body else {}
+        except json.JSONDecodeError:
+            self._json({"error": "Invalid JSON"}, HTTPStatus.BAD_REQUEST)
+            return
+        password     = data.get("password", "")
+        stored_hash  = read_password_hash()
+        if stored_hash is None:
+            # Password protection is not enabled – login endpoint is not needed.
+            self._json({"error": "Password protection is not enabled."}, HTTPStatus.BAD_REQUEST)
+            return
+        if not verify_password(password, stored_hash):
+            self._json({"error": "Incorrect password."}, HTTPStatus.UNAUTHORIZED)
+            return
+        token  = create_session()
+        resp   = json.dumps({"ok": True}).encode("utf-8")
+        cookie = (
+            f"{SESSION_COOKIE_NAME}={token}; HttpOnly; SameSite=Strict; "
+            f"Max-Age={SESSION_MAX_AGE}; Path=/"
+        )
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", len(resp))
+        self.send_header("Set-Cookie", cookie)
+        self.end_headers()
+        self.wfile.write(resp)
 
     # ---- response helpers ----
 
