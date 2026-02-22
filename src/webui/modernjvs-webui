@@ -3805,7 +3805,7 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
             })
         elif path == "/api/profiles/read":
             type_ = query.get("type", [""])[0]
-            name  = query.get("name", [""])[0]
+            name  = os.path.basename(query.get("name", [""])[0])
             fpath = _resolve_profile_path(type_, name)
             if fpath is None:
                 self._json({"error": "Invalid type or name."}, HTTPStatus.BAD_REQUEST)
@@ -3820,7 +3820,7 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
                 self._json({"error": str(e)}, HTTPStatus.INTERNAL_SERVER_ERROR)
         elif path == "/api/profiles/download":
             type_ = query.get("type", [""])[0]
-            name  = query.get("name", [""])[0]
+            name  = os.path.basename(query.get("name", [""])[0])
             fpath = _resolve_profile_path(type_, name)
             if fpath is None:
                 self._json({"error": "Invalid type or name."}, HTTPStatus.BAD_REQUEST)
@@ -3843,14 +3843,11 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
             except OSError as e:
                 self._json({"error": str(e)}, HTTPStatus.INTERNAL_SERVER_ERROR)
         elif path == "/api/input/test":
-            device = query.get("device", [""])[0]
+            device = os.path.basename(query.get("device", [""])[0])
             if not re.match(r'^event\d+$', device):
                 self._json({"error": "Invalid device."}, HTTPStatus.BAD_REQUEST)
                 return
-            dev_path = f"/dev/input/{device}"
-            if not dev_path.startswith("/dev/input/"):
-                self._json({"error": "Invalid device path."}, HTTPStatus.BAD_REQUEST)
-                return
+            dev_path = "/dev/input/" + device
             if not os.path.exists(dev_path):
                 self._json({"error": "Device not found."}, HTTPStatus.NOT_FOUND)
                 return
@@ -4090,7 +4087,7 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
                 self._json({"error": "Invalid JSON"}, HTTPStatus.BAD_REQUEST)
                 return
             type_ = data.get("type", "")
-            name  = data.get("name", "")
+            name  = os.path.basename(data.get("name", ""))
             content = data.get("content", "")
             fpath = _resolve_profile_path(type_, name)
             if fpath is None:
@@ -4119,7 +4116,7 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
                 self._json({"error": "Invalid JSON"}, HTTPStatus.BAD_REQUEST)
                 return
             type_ = data.get("type", "")
-            name  = data.get("name", "")
+            name  = os.path.basename(data.get("name", ""))
             fpath = _resolve_profile_path(type_, name)
             if fpath is None:
                 self._json({"error": "Invalid type or name."}, HTTPStatus.BAD_REQUEST)
@@ -4181,7 +4178,7 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
     def _handle_profile_upload(self):
         """Accept a profile file upload via binary POST with X-Profile-Type/Name headers."""
         type_ = self.headers.get("X-Profile-Type", "")
-        name  = self.headers.get("X-Profile-Name", "")
+        name  = os.path.basename(self.headers.get("X-Profile-Name", ""))
         fpath = _resolve_profile_path(type_, name)
         if fpath is None:
             self._json({"error": "Invalid type or name."}, HTTPStatus.BAD_REQUEST)
