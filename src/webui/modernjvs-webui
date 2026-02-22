@@ -16,7 +16,6 @@ import shutil
 import subprocess
 import threading
 import time
-import fcntl
 import struct
 import urllib.parse
 import base64
@@ -42,6 +41,8 @@ MAX_SETTING_STRING_LENGTH = 64  # cap per string field in webui-settings.json
 MAX_FONT_UPLOAD_BYTES = 10 * 1024 * 1024   # 10 MB hard cap for font files
 MAX_PROFILE_UPLOAD_BYTES = 256 * 1024      # 256 KB hard cap for profile files
 MAX_PROFILE_NAME_LENGTH = 64               # max filename length for profile files
+MAX_PROFILE_CONTENT_CHARS = 65536         # max content length for profile writes
+INPUT_TEST_TIMEOUT_SECONDS = 60           # max duration for SSE input test stream
 ALLOWED_FONT_EXTS  = {".ttf", ".otf", ".woff", ".woff2"}
 FONT_EXT_TO_MIME   = {
     ".ttf":   "font/ttf",
@@ -1495,7 +1496,7 @@ function showTab(name, btn) {
   if (name === 'config') loadConfig();
   if (name === 'profiles') loadProfiles();
   if (name === 'devices') { loadDevices(); loadBluetoothSection(); populateInputTesterDevices(); }
-  else stopInputTest();
+  if (name !== 'devices') stopInputTest(); // stop streaming when leaving the Devices tab
   if (name === 'webui-settings') initAppearancePanel();
 }
 
@@ -2694,14 +2695,19 @@ _PROFILE_TYPE_MAP = {
 def _resolve_profile_path(type_, name):
     """Map type_ to the correct base path and return the resolved absolute path.
 
-    Returns None if type_ or name is invalid.
+    Returns None if type_ or name is invalid.  The resolved path is verified
+    to remain within the expected base directory for defense-in-depth.
     """
     base = _PROFILE_TYPE_MAP.get(type_)
     if base is None:
         return None
     if not _validate_profile_name(name):
         return None
-    return os.path.join(base, name)
+    resolved = os.path.realpath(os.path.join(base, name))
+    base_real = os.path.realpath(base)
+    if not resolved.startswith(base_real + os.sep) and resolved != base_real:
+        return None
+    return resolved
 
 
 def read_config():
@@ -3833,6 +3839,9 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
                 self._json({"error": "Invalid device."}, HTTPStatus.BAD_REQUEST)
                 return
             dev_path = f"/dev/input/{device}"
+            if not dev_path.startswith("/dev/input/"):
+                self._json({"error": "Invalid device path."}, HTTPStatus.BAD_REQUEST)
+                return
             if not os.path.exists(dev_path):
                 self._json({"error": "Device not found."}, HTTPStatus.NOT_FOUND)
                 return
@@ -3846,7 +3855,7 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
             try:
                 fd = os.open(dev_path, os.O_RDONLY | os.O_NONBLOCK)
                 try:
-                    deadline    = time.time() + 60
+                    deadline    = time.time() + INPUT_TEST_TIMEOUT_SECONDS
                     last_event  = time.time()
                     buf         = b""
                     while time.time() < deadline:
@@ -4081,8 +4090,8 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
             if not isinstance(content, str):
                 self._json({"error": "content must be a string."}, HTTPStatus.BAD_REQUEST)
                 return
-            if len(content) > 65536:
-                self._json({"error": "Content too large (max 65536 chars)."}, HTTPStatus.BAD_REQUEST)
+            if len(content) > MAX_PROFILE_CONTENT_CHARS:
+                self._json({"error": f"Content too large (max {MAX_PROFILE_CONTENT_CHARS} chars)."}, HTTPStatus.BAD_REQUEST)
                 return
             tmp = fpath + ".tmp"
             try:
