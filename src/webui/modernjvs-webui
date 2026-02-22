@@ -344,8 +344,6 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
     --font:    'Segoe UI', system-ui, sans-serif;
   }
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-  /* Prevent horizontal page scrolling; inner containers (tabs, tables) still scroll independently */
-  html, body { max-width: 100%; overflow-x: hidden; }
   body { background: var(--bg); color: var(--text); font-family: var(--font); min-height: 100vh; }
 
   /* --- header --- */
@@ -394,7 +392,16 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
 
   /* --- layout --- */
   .container { max-width: 1100px; margin: 0 auto; padding: 1.5rem; position: relative; z-index: 2; }
-  footer { text-align: center; color: var(--muted); font-size: 0.78rem; padding: 1.5rem; position: relative; z-index: 2; }
+  footer {
+    text-align: center;
+    color: var(--muted);
+    font-size: 0.78rem;
+    padding: 1.5rem;
+    position: relative;
+    z-index: 2;
+  }
+  /* Version in footer: only shown on mobile (see ≤640px breakpoint) */
+  .footer-ver { display: none; }
 
   /* --- tabs --- */
   .tabs { display: flex; gap: 0.25rem; margin-bottom: 1.5rem; border-bottom: 2px solid var(--border); }
@@ -914,20 +921,33 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
 
     /* Sticks: leave fixed position but shrink further */
     .sticks-corner { width: 80px; opacity: 0.12; }
+    /* Version badge: hidden on mobile — version shown in footer text instead */
+    .ver-badge { display: none !important; }
+    /* Footer: stack as column so sticks appears below the text line */
+    footer {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0.6rem;
+      padding: 1rem 0.75rem;
+    }
+    /* Show version in footer */
+    .footer-ver { display: inline; }
+    /* Sticks: switch from fixed corner to static, centred below footer text */
+    .sticks-corner {
+      position: static;
+      display: block;
+      width: clamp(80px, 30vw, 130px);
+      opacity: 0.35;
+      margin: 0 auto;
+      pointer-events: none;
+    }
   }
 
   /* ---- Small phones (≤ 400 px) ---- */
   @media (max-width: 400px) {
     /* Single column stat grid */
     .stat-grid { grid-template-columns: 1fr; }
-    /* Sticks moves from fixed corner to inline below footer */
-    .sticks-corner {
-      position: static;
-      display: block;
-      width: clamp(80px, 30vw, 130px);
-      opacity: 0.35;
-      margin: 0.5rem auto 0;
-    }
   }
 </style>
 </head>
@@ -1177,6 +1197,7 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
           <tbody id="btScanBody"></tbody>
         </table>
         </div>
+      </div>
     </div>
   </div>
 
@@ -1320,10 +1341,9 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
   </div>
 </div>
 
-<footer>ModernJVS WebUI &mdash; <a href="https://github.com/dazzaXx/ModernJVS" target="_blank">github.com/dazzaXx/ModernJVS</a></footer>
-<div style="text-align:center;position:relative;z-index:2;">
+<footer><span>ModernJVS <span id="footerVer" class="footer-ver"></span>WebUI &mdash; <a href="https://github.com/dazzaXx/ModernJVS" target="_blank">github.com/dazzaXx/ModernJVS</a></span>
 <img id="sticks" src="__STICKS__" alt="" class="sticks-corner">
-</div>
+</footer>
 
 <script>
 // ---- Constants ----
@@ -2220,12 +2240,14 @@ refreshSysinfo();
 setInterval(refreshDashboard, 10000);
 setInterval(refreshSysinfo, 5000);
 
-// Fetch version once and show in header badge only when available
+// Fetch version once and show in header badge (desktop) and footer (mobile)
 api('/api/version').then(d => {
   if (d.version && d.version !== 'unknown') {
     const badge = document.getElementById('verBadge');
     badge.textContent = 'v' + d.version;
     badge.classList.add('visible');
+    const footerVer = document.getElementById('footerVer');
+    if (footerVer) footerVer.textContent = 'v' + d.version + ' ';
   }
 });
 </script>
