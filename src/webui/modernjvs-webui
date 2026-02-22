@@ -1076,8 +1076,10 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
         <div class="stat-card"><div class="val" id="svcPid">—</div><div class="lbl">PID</div></div>
         <div class="stat-card"><div class="val" id="svcUptime">—</div><div class="lbl">Active Since</div></div>
         <div class="stat-card"><div class="val" id="currentIO">—</div><div class="lbl">Emulated I/O</div></div>
+        <div class="stat-card"><div class="val" id="currentIO2">—</div><div class="lbl">Secondary I/O</div></div>
         <div class="stat-card"><div class="val" id="currentGame">—</div><div class="lbl">Current Game</div></div>
         <div class="stat-card"><div class="val" id="currentDevice">—</div><div class="lbl">Device Path</div></div>
+        <div class="stat-card"><div class="val" id="currentRotary" style="font-size:0.85rem;word-break:break-all;">—</div><div class="lbl">Rotary Path</div></div>
       </div>
       <div id="playerSlots"></div>
     </div>
@@ -1536,9 +1538,11 @@ async function refreshDashboard() {
   document.getElementById('svcState').textContent    = d.active_state  || '—';
   document.getElementById('svcPid').textContent      = d.main_pid      || '—';
   document.getElementById('svcUptime').textContent   = d.active_since  || '—';
-  document.getElementById('currentIO').textContent   = d.config?.emulate  || '—';
-  document.getElementById('currentGame').textContent = d.config?.game     || '—';
-  document.getElementById('currentDevice').textContent = d.config?.device || '—';
+  document.getElementById('currentIO').textContent     = d.config?.emulate         || '—';
+  document.getElementById('currentIO2').textContent    = d.config?.emulate_second   || '—';
+  document.getElementById('currentGame').textContent   = d.config?.game             || '—';
+  document.getElementById('currentDevice').textContent = d.config?.device           || '—';
+  document.getElementById('currentRotary').textContent = d.config?.rotary_path      || '—';
 
   const players = d.players || [];
   const psEl = document.getElementById('playerSlots');
