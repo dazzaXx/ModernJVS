@@ -358,8 +358,8 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
     top: 0;
     z-index: 100;
   }
-  header img { height: 42px; }
-  header h1 { font-size: 1.4rem; color: var(--muted); font-weight: 400; letter-spacing: 0.05em; }
+  header img { height: clamp(26px, 5vw, 42px); }
+  header h1 { font-size: clamp(0.95rem, 3.5vw, 1.4rem); color: var(--muted); font-weight: 400; letter-spacing: 0.05em; }
   .status-badge {
     margin-left: auto;
     display: flex;
@@ -842,7 +842,6 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
   /* ---- Tablet (≤ 768 px) ---- */
   @media (max-width: 768px) {
     header { padding: 0.65rem 1.25rem; gap: 1rem; }
-    header img { height: 36px; }
     .container { padding: 1rem; }
     .log-wrap { height: 320px; }
     .sticks-corner { width: 140px; }
@@ -850,11 +849,8 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
 
   /* ---- Mobile (≤ 640 px) ---- */
   @media (max-width: 640px) {
-    /* Header: tighter, smaller logo */
+    /* Header: tighter padding */
     header { padding: 0.55rem 0.85rem; gap: 0.65rem; }
-    header img { height: 30px; }
-    header h1 { font-size: 1.1rem; }
-    .ver-badge { display: none !important; }
     .status-badge { font-size: 0.78rem; }
 
     /* Container: less horizontal padding */
@@ -901,18 +897,22 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
     /* Log filter bar: narrower search input */
     .log-filter-bar input[type="text"] { width: 110px; }
 
-    /* Sticks decoration: smaller and more translucent */
-    .sticks-corner { width: 90px; opacity: 0.12; }
+    /* Sticks: leave fixed position but shrink further */
+    .sticks-corner { width: 80px; opacity: 0.12; }
   }
 
   /* ---- Small phones (≤ 400 px) ---- */
   @media (max-width: 400px) {
-    /* Hide logo so the status badge doesn't get squeezed out */
-    header img { display: none; }
-    /* Sticks is distracting on tiny screens */
-    .sticks-corner { display: none; }
     /* Single column stat grid */
     .stat-grid { grid-template-columns: 1fr; }
+    /* Sticks moves from fixed corner to inline below footer */
+    .sticks-corner {
+      position: static;
+      display: block;
+      width: clamp(80px, 30vw, 130px);
+      opacity: 0.35;
+      margin: 0.5rem auto 0;
+    }
   }
 </style>
 </head>
@@ -1306,8 +1306,9 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
 </div>
 
 <footer>ModernJVS WebUI &mdash; <a href="https://github.com/dazzaXx/ModernJVS" target="_blank">github.com/dazzaXx/ModernJVS</a></footer>
-
+<div style="text-align:center;position:relative;z-index:2;">
 <img id="sticks" src="__STICKS__" alt="" class="sticks-corner">
+</div>
 
 <script>
 // ---- Constants ----
