@@ -13,6 +13,7 @@ import os
 import re
 import secrets
 import shutil
+import ssl
 import subprocess
 import threading
 import time
@@ -58,6 +59,10 @@ WEBUI_BG_MIME_PATH   = "/etc/modernjvs/webui-bg.mime"
 WEBUI_FONT_PATH      = "/etc/modernjvs/webui-font"
 WEBUI_FONT_NAME_PATH = "/etc/modernjvs/webui-font-name"
 WEBUI_PASSWORD_PATH  = "/etc/modernjvs/webui-password"
+HTTPS_CERT_PATH      = "/etc/modernjvs/webui-cert.pem"
+HTTPS_KEY_PATH       = "/etc/modernjvs/webui-key.pem"
+AUDIT_LOG_PATH       = "/etc/modernjvs/webui-audit.log"
+MAX_AUDIT_LOG_LINES  = 1000
 
 # Session cookie settings
 SESSION_COOKIE_NAME = "mjvs_session"
@@ -177,15 +182,16 @@ _sessions: dict = {}
 _sessions_lock = threading.Lock()
 
 
-def create_session():
+def create_session(ip=""):
     """Create a new random session token and return it."""
-    token  = secrets.token_hex(32)
-    expiry = time.time() + SESSION_MAX_AGE
+    token   = secrets.token_hex(32)
+    now     = time.time()
+    expiry  = now + SESSION_MAX_AGE
+    meta    = {"expiry": expiry, "created": now, "ip": ip}
     with _sessions_lock:
-        _sessions[token] = expiry
+        _sessions[token] = meta
         # Prune expired tokens opportunistically
-        now     = time.time()
-        expired = [t for t, e in list(_sessions.items()) if e < now]
+        expired = [t for t, m in list(_sessions.items()) if m["expiry"] < now]
         for t in expired:
             del _sessions[t]
     return token
@@ -196,19 +202,68 @@ def is_valid_session(token):
     if not token:
         return False
     with _sessions_lock:
-        expiry = _sessions.get(token)
-        if expiry is None:
+        meta = _sessions.get(token)
+        if meta is None:
             return False
-        if time.time() > expiry:
+        if time.time() > meta["expiry"]:
             del _sessions[token]
             return False
         return True
+
+
+def list_sessions():
+    """Return a list of dicts describing each active session (token masked)."""
+    now = time.time()
+    result = []
+    with _sessions_lock:
+        for token, meta in list(_sessions.items()):
+            if meta["expiry"] < now:
+                continue
+            result.append({
+                "token_hint": token[:8] + "…",
+                "created":    time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(meta["created"])),
+                "expires":    time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(meta["expiry"])),
+                "ip":         meta.get("ip", ""),
+            })
+    return result
 
 
 def invalidate_all_sessions():
     """Clear every active session (call after password change / removal)."""
     with _sessions_lock:
         _sessions.clear()
+
+
+def invalidate_other_sessions(current_token):
+    """Clear every session except *current_token*."""
+    with _sessions_lock:
+        tokens_to_del = [t for t in list(_sessions.keys()) if t != current_token]
+        for t in tokens_to_del:
+            del _sessions[t]
+
+
+# ---------------------------------------------------------------------------
+# Audit log
+# ---------------------------------------------------------------------------
+
+_audit_lock = threading.Lock()
+
+
+def audit_log(action, detail="", ip=""):
+    """Append one line to the WebUI audit log (best-effort, never raises)."""
+    timestamp = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+    parts = [f"[{timestamp}]", action]
+    if detail:
+        parts.append(f"- {detail}")
+    if ip:
+        parts.append(f"(from {ip})")
+    line = " ".join(parts) + "\n"
+    try:
+        with _audit_lock:
+            with open(AUDIT_LOG_PATH, "a") as f:
+                f.write(line)
+    except OSError:
+        pass
 
 
 _PRIVATE_NETS = [
@@ -1246,6 +1301,12 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
       </div>
       <div class="log-wrap" id="jvsBox" style="height:340px;"></div>
     </div>
+
+    <div class="card">
+      <h2>Audit Log <button class="btn btn-refresh btn-xs" onclick="loadAuditLog()" style="margin-left:0.5rem;vertical-align:middle;">⟳ Refresh</button></h2>
+      <p style="font-size:0.82rem;color:var(--muted);margin-bottom:0.75rem;">WebUI actions: config changes, service restarts, logins, Bluetooth pairings, profile edits.</p>
+      <div class="log-wrap" id="auditLogBox" style="height:300px;"></div>
+    </div>
   </div>
 
   <!-- ====== PROFILES ====== -->
@@ -1478,6 +1539,31 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
       <div id="webuiRestartMsg" style="display:none;margin-top:0.75rem;font-size:0.88rem;color:var(--muted)"></div>
     </div>
 
+    <div class="card">
+      <h2>&#128274; Active Sessions</h2>
+      <p style="font-size:0.82rem;color:var(--muted);margin-bottom:0.75rem;">Each entry is a logged-in browser. Token shown as first 8 characters only.</p>
+      <div id="sessionsList" style="margin-bottom:0.75rem;"></div>
+      <div class="control-row">
+        <button class="btn btn-refresh btn-xs" onclick="loadSessions()">⟳ Refresh</button>
+        <button class="btn btn-stop" onclick="invalidateOtherSessions()">&#128274; Log Out All Other Devices</button>
+      </div>
+      <div id="sessionsMsg" style="font-size:0.85rem;min-height:1.2em;margin-top:0.5rem;"></div>
+    </div>
+
+    <div class="card">
+      <h2>&#128274; HTTPS</h2>
+      <div id="httpsStatus" style="font-size:0.85rem;margin-bottom:0.75rem;"></div>
+      <div class="control-row">
+        <button class="btn btn-save" onclick="setupHttps()">&#128274; Generate Self-Signed Cert &amp; Enable HTTPS</button>
+        <button class="btn btn-stop" id="httpsRemoveBtn" onclick="removeHttps()" style="display:none">✕ Remove Cert &amp; Revert to HTTP</button>
+      </div>
+      <div id="httpsMsg" style="font-size:0.85rem;min-height:1.2em;margin-top:0.5rem;"></div>
+      <div class="settings-preview" style="margin-top:0.75rem;">
+        Generates a self-signed certificate via <code style="color:var(--muted)">openssl</code>. After setup, restart the WebUI to activate HTTPS on port 8080.
+        Your browser will show a security warning for self-signed certs — this is expected on a local network.
+      </div>
+    </div>
+
     <div class="control-row">
       <button class="btn btn-save" onclick="saveAppearanceSettings()">&#128190; Save &amp; Apply</button>
       <button class="btn btn-refresh" onclick="resetAppearanceSettings()">&#8635; Reset to Defaults</button>
@@ -1502,12 +1588,12 @@ function showTab(name, btn) {
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
   document.getElementById('panel-' + name).classList.add('active');
   btn.classList.add('active');
-  if (name === 'monitor') fetchLogs();
+  if (name === 'monitor') { fetchLogs(); loadAuditLog(); }
   if (name === 'config') loadConfig();
   if (name === 'profiles') loadProfiles();
   if (name === 'devices') { loadDevices(); loadBluetoothSection(); populateInputTesterDevices(); }
   if (name !== 'devices') stopInputTest(); // stop streaming when leaving the Devices tab
-  if (name === 'webui-settings') initAppearancePanel();
+  if (name === 'webui-settings') { initAppearancePanel(); loadSessions(); loadHttpsStatus(); }
 }
 
 // ---- API helpers ----
@@ -2755,6 +2841,106 @@ function restartWebUI() {
     else { window.location.reload(); }
   };
   tick();
+}
+
+// ---- Active Sessions ----
+async function loadSessions() {
+  const d = await api('/api/sessions/list');
+  const el = document.getElementById('sessionsList');
+  if (!el) return;
+  if (!d.sessions || d.sessions.length === 0) {
+    el.innerHTML = '<span style="font-size:0.85rem;color:var(--muted);">No active sessions.</span>';
+    return;
+  }
+  let html = '<table style="width:100%;border-collapse:collapse;font-size:0.82rem;">'
+    + '<tr style="color:var(--muted);border-bottom:1px solid var(--border);">'
+    + '<th style="text-align:left;padding:0.3rem 0.5rem;">Token</th>'
+    + '<th style="text-align:left;padding:0.3rem 0.5rem;">IP</th>'
+    + '<th style="text-align:left;padding:0.3rem 0.5rem;">Created</th>'
+    + '<th style="text-align:left;padding:0.3rem 0.5rem;">Expires</th>'
+    + '</tr>';
+  d.sessions.forEach(s => {
+    html += `<tr style="border-bottom:1px solid var(--border);">`
+      + `<td style="padding:0.3rem 0.5rem;font-family:monospace;">${_escHtml(s.token_hint)}</td>`
+      + `<td style="padding:0.3rem 0.5rem;">${_escHtml(s.ip || '—')}</td>`
+      + `<td style="padding:0.3rem 0.5rem;">${_escHtml(s.created)}</td>`
+      + `<td style="padding:0.3rem 0.5rem;">${_escHtml(s.expires)}</td>`
+      + `</tr>`;
+  });
+  html += '</table>';
+  el.innerHTML = html;
+}
+
+async function invalidateOtherSessions() {
+  const d = await api('/api/sessions/invalidate_all', {method:'POST'});
+  const msg = document.getElementById('sessionsMsg');
+  if (d.ok) {
+    msg.style.color = 'var(--green,#22c55e)';
+    msg.textContent = 'All other sessions invalidated.';
+    loadSessions();
+  } else {
+    msg.style.color = 'var(--red,#ef4444)';
+    msg.textContent = d.error || 'Failed.';
+  }
+}
+
+// ---- HTTPS ----
+async function loadHttpsStatus() {
+  const d = await api('/api/https/status');
+  const statusEl = document.getElementById('httpsStatus');
+  const removeBtn = document.getElementById('httpsRemoveBtn');
+  if (!statusEl) return;
+  if (d.enabled) {
+    statusEl.innerHTML = '<span style="color:var(--green,#22c55e);">&#128274; HTTPS is enabled</span> — certificate at <code style="color:var(--muted);">' + _escHtml(d.cert) + '</code>. Restart WebUI to activate if recently changed.';
+    if (removeBtn) removeBtn.style.display = '';
+  } else {
+    statusEl.innerHTML = '<span style="color:var(--muted);">HTTPS is not configured.</span> Generate a self-signed certificate to enable it.';
+    if (removeBtn) removeBtn.style.display = 'none';
+  }
+}
+
+async function setupHttps() {
+  const msgEl = document.getElementById('httpsMsg');
+  msgEl.style.color = 'var(--muted)';
+  msgEl.textContent = 'Generating certificate…';
+  const d = await api('/api/https/setup', {method:'POST'});
+  if (d.ok) {
+    msgEl.style.color = 'var(--green,#22c55e)';
+    msgEl.textContent = d.note || 'Certificate generated.';
+    loadHttpsStatus();
+  } else {
+    msgEl.style.color = 'var(--red,#ef4444)';
+    msgEl.textContent = d.error || 'Failed.';
+  }
+}
+
+async function removeHttps() {
+  if (!confirm('Remove the HTTPS certificate and revert to HTTP?')) return;
+  const msgEl = document.getElementById('httpsMsg');
+  const d = await api('/api/https/remove', {method:'POST'});
+  if (d.ok) {
+    msgEl.style.color = 'var(--muted)';
+    msgEl.textContent = d.note || 'Certificate removed.';
+    loadHttpsStatus();
+  } else {
+    msgEl.style.color = 'var(--red,#ef4444)';
+    msgEl.textContent = d.error || 'Failed.';
+  }
+}
+
+// ---- Audit Log ----
+async function loadAuditLog() {
+  const d = await api('/api/audit/log?lines=200');
+  const el = document.getElementById('auditLogBox');
+  if (!el) return;
+  if (d.error) { el.textContent = 'Error: ' + d.error; return; }
+  const lines = d.lines || [];
+  if (lines.length === 0) {
+    el.innerHTML = '<span style="color:var(--muted);font-size:0.82rem;">No audit log entries yet.</span>';
+    return;
+  }
+  el.textContent = lines.join('');
+  el.scrollTop = el.scrollHeight;
 }
 
 // ---- Init ----
@@ -4105,6 +4291,26 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
             self._json(get_bluetooth_status())
         elif path == "/api/webui/password/status":
             self._json({"passwordSet": read_password_hash() is not None})
+        elif path == "/api/sessions/list":
+            self._json({"sessions": list_sessions()})
+        elif path == "/api/https/status":
+            cert_exists = os.path.isfile(HTTPS_CERT_PATH) and os.path.isfile(HTTPS_KEY_PATH)
+            self._json({"enabled": cert_exists,
+                        "cert": HTTPS_CERT_PATH if cert_exists else ""})
+        elif path == "/api/audit/log":
+            lines_param = query.get("lines", ["200"])[0]
+            try:
+                n = min(1000, max(1, int(lines_param)))
+            except ValueError:
+                n = 200
+            try:
+                with _audit_lock, open(AUDIT_LOG_PATH, "r", errors="replace") as f:
+                    all_lines = f.readlines()
+                self._json({"lines": all_lines[-n:]})
+            except FileNotFoundError:
+                self._json({"lines": []})
+            except OSError as e:
+                self._json({"error": str(e)}, HTTPStatus.INTERNAL_SERVER_ERROR)
         else:
             self._not_found()
 
@@ -4146,6 +4352,7 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
                 return
             ok, msg = write_config(data)
             if ok:
+                audit_log("Config updated", ip=self.client_address[0])
                 self._json({"ok": True})
             else:
                 self._json({"error": msg}, HTTPStatus.INTERNAL_SERVER_ERROR)
@@ -4162,6 +4369,7 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
                 return
             ok, msg = systemctl(action, SERVICE_NAME)
             if ok:
+                audit_log(f"Service {action}", SERVICE_NAME, ip=self.client_address[0])
                 self._json({"ok": True})
             else:
                 self._json({"error": msg}, HTTPStatus.INTERNAL_SERVER_ERROR)
@@ -4170,6 +4378,7 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
             # Send the response BEFORE restarting — systemctl kills this
             # process immediately, so schedule it on a short timer so the
             # HTTP response can be flushed first.
+            audit_log("WebUI restart", ip=self.client_address[0])
             def _do_restart():
                 ok, msg = systemctl("restart", WEBUI_SERVICE_NAME)
                 if not ok:
@@ -4220,7 +4429,10 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
             except json.JSONDecodeError:
                 self._json({"error": "Invalid JSON"}, HTTPStatus.BAD_REQUEST)
                 return
-            self._json(bluetooth_pair(data.get("mac", "")))
+            result = bluetooth_pair(data.get("mac", ""))
+            if result.get("ok"):
+                audit_log("BT pair", data.get("mac", ""), ip=self.client_address[0])
+            self._json(result)
 
         elif path == "/api/bluetooth/remove":
             try:
@@ -4228,7 +4440,10 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
             except json.JSONDecodeError:
                 self._json({"error": "Invalid JSON"}, HTTPStatus.BAD_REQUEST)
                 return
-            self._json(bluetooth_remove(data.get("mac", "")))
+            result = bluetooth_remove(data.get("mac", ""))
+            if result.get("ok"):
+                audit_log("BT remove", data.get("mac", ""), ip=self.client_address[0])
+            self._json(result)
 
         elif path == "/api/bluetooth/setup_usb":
             self._json(setup_usb_bluetooth())
@@ -4252,8 +4467,9 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
             try:
                 _write_password_hash(hash_password(password))
                 invalidate_all_sessions()
+                audit_log("Password changed", ip=self.client_address[0])
                 # Re-authenticate the current user so they aren't immediately logged out
-                token = create_session()
+                token = create_session(ip=self.client_address[0])
                 resp  = json.dumps({"ok": True}).encode("utf-8")
                 cookie = (
                     f"{SESSION_COOKIE_NAME}={token}; HttpOnly; SameSite=Strict; "
@@ -4271,6 +4487,7 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
         elif path == "/api/webui/password/clear":
             if clear_password_file():
                 invalidate_all_sessions()
+                audit_log("Password cleared", ip=self.client_address[0])
                 self._json({"ok": True})
             else:
                 self._json({"error": "Failed to remove password file."}, HTTPStatus.INTERNAL_SERVER_ERROR)
@@ -4300,6 +4517,7 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
                 with open(tmp, "w") as f:
                     f.write(content)
                 os.replace(tmp, fpath)
+                audit_log(f"Profile write", f"{type_}/{name}", ip=self.client_address[0])
                 self._json({"ok": True})
             except OSError as e:
                 self._json({"error": str(e)}, HTTPStatus.INTERNAL_SERVER_ERROR)
@@ -4318,11 +4536,58 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
                 return
             try:
                 os.remove(fpath)
+                audit_log(f"Profile delete", f"{type_}/{name}", ip=self.client_address[0])
                 self._json({"ok": True})
             except FileNotFoundError:
                 self._json({"error": "File not found."}, HTTPStatus.NOT_FOUND)
             except OSError as e:
                 self._json({"error": str(e)}, HTTPStatus.INTERNAL_SERVER_ERROR)
+
+        elif path == "/api/sessions/invalidate_all":
+            current = self._get_session_token()
+            invalidate_other_sessions(current)
+            audit_log("Sessions invalidated (kept current)", ip=self.client_address[0])
+            self._json({"ok": True})
+
+        elif path == "/api/https/setup":
+            cert = HTTPS_CERT_PATH
+            key  = HTTPS_KEY_PATH
+            try:
+                r = subprocess.run(
+                    [
+                        "openssl", "req", "-x509", "-newkey", "rsa:2048",
+                        "-keyout", key, "-out", cert,
+                        "-days", "3650", "-nodes",
+                        "-subj", "/CN=modernjvs",
+                    ],
+                    capture_output=True, text=True, timeout=30,
+                )
+                if r.returncode != 0:
+                    self._json({"error": r.stderr.strip() or "openssl failed."}, HTTPStatus.INTERNAL_SERVER_ERROR)
+                    return
+                audit_log("HTTPS cert generated", ip=self.client_address[0])
+                self._json({"ok": True, "note": "Restart the WebUI to activate HTTPS."})
+            except FileNotFoundError:
+                self._json({"error": "openssl not found. Install it with: sudo apt install openssl"}, HTTPStatus.INTERNAL_SERVER_ERROR)
+            except subprocess.TimeoutExpired:
+                self._json({"error": "openssl timed out."}, HTTPStatus.INTERNAL_SERVER_ERROR)
+            except OSError as e:
+                self._json({"error": str(e)}, HTTPStatus.INTERNAL_SERVER_ERROR)
+
+        elif path == "/api/https/remove":
+            errors = []
+            for p in (HTTPS_CERT_PATH, HTTPS_KEY_PATH):
+                try:
+                    os.remove(p)
+                except FileNotFoundError:
+                    pass
+                except OSError as e:
+                    errors.append(str(e))
+            if errors:
+                self._json({"error": "; ".join(errors)}, HTTPStatus.INTERNAL_SERVER_ERROR)
+            else:
+                audit_log("HTTPS cert removed", ip=self.client_address[0])
+                self._json({"ok": True, "note": "Restart the WebUI to revert to HTTP."})
 
         else:
             self._not_found()
@@ -4346,7 +4611,8 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
         if not verify_password(password, stored_hash):
             self._json({"error": "Incorrect password."}, HTTPStatus.UNAUTHORIZED)
             return
-        token  = create_session()
+        audit_log("Login", ip=self.client_address[0])
+        token  = create_session(ip=self.client_address[0])
         resp   = json.dumps({"ok": True}).encode("utf-8")
         cookie = (
             f"{SESSION_COOKIE_NAME}={token}; HttpOnly; SameSite=Strict; "
@@ -4572,7 +4838,13 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
 
 def main():
     server = http.server.ThreadingHTTPServer(("0.0.0.0", WEBUI_PORT), WebUIHandler)
-    print(f"ModernJVS WebUI running on http://0.0.0.0:{WEBUI_PORT}")
+    if os.path.isfile(HTTPS_CERT_PATH) and os.path.isfile(HTTPS_KEY_PATH):
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        ctx.load_cert_chain(HTTPS_CERT_PATH, HTTPS_KEY_PATH)
+        server.socket = ctx.wrap_socket(server.socket, server_side=True)
+        print(f"ModernJVS WebUI running on https://0.0.0.0:{WEBUI_PORT} (HTTPS)")
+    else:
+        print(f"ModernJVS WebUI running on http://0.0.0.0:{WEBUI_PORT}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
