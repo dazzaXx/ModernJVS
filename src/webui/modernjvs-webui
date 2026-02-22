@@ -1486,6 +1486,8 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
 </div>
 
 <footer><span>ModernJVS <span id="footerVer" class="footer-ver"></span>WebUI &mdash; <a href="https://github.com/dazzaXx/ModernJVS" target="_blank">github.com/dazzaXx/ModernJVS</a></span>
+<div id="footerSysInfo" style="display:none;font-size:0.75rem;color:var(--muted);"></div>
+<div id="footerPiModel" style="display:none;font-size:0.75rem;color:var(--muted);"></div>
 <img id="sticks" src="__STICKS__" alt="" class="sticks-corner">
 </footer>
 
@@ -1604,6 +1606,21 @@ async function refreshSysinfo() {
   if (d.ip_addresses && d.ip_addresses.length) {
     document.getElementById('siIP').textContent =
       d.ip_addresses.map(ip => 'http://' + ip + ':8080').join('  |  ');
+  }
+
+  // Footer: libgpiod + kernel on one line, Pi model on the next
+  const sysInfoEl  = document.getElementById('footerSysInfo');
+  const piModelEl  = document.getElementById('footerPiModel');
+  const parts = [];
+  if (d.libgpiod_version) parts.push('libgpiod v' + d.libgpiod_version);
+  if (d.kernel_version)   parts.push('Kernel ' + d.kernel_version);
+  if (parts.length) {
+    sysInfoEl.textContent = parts.join('  |  ');
+    sysInfoEl.style.display = 'block';
+  }
+  if (d.pi_model) {
+    piModelEl.textContent = d.pi_model;
+    piModelEl.style.display = 'block';
   }
 }
 
@@ -3178,17 +3195,54 @@ def get_sysinfo():
     except Exception:
         pass
 
+    # --- Kernel version ---
+    kernel_version = ""
+    try:
+        with open("/proc/version") as f:
+            line = f.read().split()
+            # format: "Linux version X.Y.Z-... ..."
+            if len(line) >= 3:
+                kernel_version = line[2]
+    except Exception:
+        pass
+
+    # --- libgpiod version ---
+    libgpiod_version = ""
+    try:
+        r = subprocess.run(
+            ["gpiodetect", "--version"],
+            capture_output=True, text=True, timeout=5,
+        )
+        # gpiodetect prints "gpiodetect (libgpiod) vX.Y.Z" to stdout or stderr
+        out = (r.stdout or r.stderr or "").strip()
+        m = re.search(r'v?(\d+\.\d+[\.\d]*)', out)
+        if m:
+            libgpiod_version = m.group(1)
+    except Exception:
+        pass
+
+    # --- Raspberry Pi model ---
+    pi_model_sysinfo = ""
+    try:
+        with open("/proc/device-tree/model", "r", encoding="utf-8", errors="replace") as f:
+            pi_model_sysinfo = f.read().strip().rstrip("\x00")
+    except OSError:
+        pass
+
     return {
-        "cpu_pct":      cpu_pct,
-        "mem_used_mb":  mem_used_mb,
-        "mem_total_mb": mem_total_mb,
-        "mem_pct":      mem_pct,
-        "temp_c":       temp_c,
-        "disk_used_gb": disk_used_gb,
-        "disk_total_gb":disk_total_gb,
-        "disk_pct":     disk_pct,
-        "load_avg":     load_avg,
-        "ip_addresses": ip_addresses,
+        "cpu_pct":        cpu_pct,
+        "mem_used_mb":    mem_used_mb,
+        "mem_total_mb":   mem_total_mb,
+        "mem_pct":        mem_pct,
+        "temp_c":         temp_c,
+        "disk_used_gb":   disk_used_gb,
+        "disk_total_gb":  disk_total_gb,
+        "disk_pct":       disk_pct,
+        "load_avg":       load_avg,
+        "ip_addresses":   ip_addresses,
+        "kernel_version": kernel_version,
+        "libgpiod_version": libgpiod_version,
+        "pi_model":       pi_model_sysinfo,
     }
 
 
