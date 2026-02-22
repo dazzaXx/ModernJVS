@@ -339,7 +339,7 @@ _LOGIN_TEMPLATE = """\
   footer{{position:relative;z-index:1;}}
   /* On mobile, sticks moves below the login card */
   @media(max-width:640px){{
-    .sticks-corner{{position:static;display:block;width:clamp(80px,30vw,130px);opacity:0.45;
+    .sticks-corner{{position:static;display:block;width:clamp(80px,30vw,130px);opacity:0.28;
                     margin:0.5rem auto 0;pointer-events:none;}}
   }}
   @media(max-width:400px){{
@@ -999,7 +999,7 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
     .log-filter-bar input[type="text"] { width: 110px; }
 
     /* Sticks: leave fixed position but shrink further */
-    .sticks-corner { width: 80px; opacity: 0.22; }
+    .sticks-corner { width: 80px; opacity: 0.28; }
     /* Version badge: hidden on mobile — version shown in footer text instead */
     .ver-badge { display: none !important; }
     /* Footer: stack as column so sticks appears below the text line */
@@ -1017,7 +1017,7 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
       position: static;
       display: block;
       width: clamp(80px, 30vw, 130px);
-      opacity: 0.45;
+      opacity: 0.28;
       margin: 0 auto;
       pointer-events: none;
     }
