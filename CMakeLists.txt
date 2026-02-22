@@ -106,7 +106,7 @@ if(ENABLE_WEBUI)
 
     install(FILES
         ${CMAKE_SOURCE_DIR}/docs/modernjvs2.png
-        ${CMAKE_SOURCE_DIR}/docs/Sticks.png
+        ${CMAKE_SOURCE_DIR}/docs/Sticks3.png
         COMPONENT ${PROJECT_NAME}
         DESTINATION "/usr/share/modernjvs/"
     )
