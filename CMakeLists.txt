@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.10)
 
 project(modernjvs
-        VERSION "5.10.0"
+        VERSION "5.10.1"
         LANGUAGES "C"
         DESCRIPTION "JVS I/O Emulator"
         HOMEPAGE_URL "https://github.com/dazzaXx/ModernJVS"
