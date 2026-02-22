@@ -16,6 +16,8 @@ import shutil
 import subprocess
 import threading
 import time
+import fcntl
+import struct
 import urllib.parse
 import base64
 from http import HTTPStatus
@@ -38,6 +40,8 @@ ALLOWED_IMAGE_MIMES = {
 }
 MAX_SETTING_STRING_LENGTH = 64  # cap per string field in webui-settings.json
 MAX_FONT_UPLOAD_BYTES = 10 * 1024 * 1024   # 10 MB hard cap for font files
+MAX_PROFILE_UPLOAD_BYTES = 256 * 1024      # 256 KB hard cap for profile files
+MAX_PROFILE_NAME_LENGTH = 64               # max filename length for profile files
 ALLOWED_FONT_EXTS  = {".ttf", ".otf", ".woff", ".woff2"}
 FONT_EXT_TO_MIME   = {
     ".ttf":   "font/ttf",
@@ -1045,6 +1049,7 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
     <button class="tab active" onclick="showTab('dashboard', this)">Dashboard</button>
     <button class="tab" onclick="showTab('config', this)">Configuration</button>
     <button class="tab" onclick="showTab('monitor', this)">Monitor &amp; Logs</button>
+    <button class="tab" onclick="showTab('profiles', this)">Profiles</button>
     <button class="tab" onclick="showTab('devices', this)">Devices</button>
     <button class="tab" onclick="showTab('webui-settings', this)">&#9881; WebUI Settings</button>
   </div>
@@ -1172,6 +1177,14 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
           <label>Analog Deadzone – Player 4</label>
           <input type="number" id="cfgDz4" step="0.01" min="0" max="0.5" placeholder="0.2">
         </div>
+        <div class="field">
+          <label>Secondary I/O Board (EMULATE_SECOND)</label>
+          <select id="cfgEmulate2"></select>
+        </div>
+        <div class="field">
+          <label>Rotary Encoder Path</label>
+          <input type="text" id="cfgRotaryPath" placeholder="/etc/modernjvs/rotary">
+        </div>
       </div>
       <br>
       <div class="control-row">
@@ -1232,6 +1245,42 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
     </div>
   </div>
 
+  <!-- ====== PROFILES ====== -->
+  <div id="panel-profiles" class="panel">
+    <div class="card">
+      <h2>Profile Editor</h2>
+      <div id="profilesAlert" class="alert"></div>
+      <div style="display:flex;gap:0.5rem;margin-bottom:1rem;flex-wrap:wrap;">
+        <button class="btn btn-xs" id="profTabGames"   onclick="setProfileTab('games')"   style="background:var(--accent);color:#000;">Games</button>
+        <button class="btn btn-xs" id="profTabDevices" onclick="setProfileTab('devices')" style="">Devices</button>
+        <button class="btn btn-xs" id="profTabIos"     onclick="setProfileTab('ios')"     style="">I/O Boards</button>
+      </div>
+      <div class="table-wrap">
+      <table class="device-table" id="profilesTable">
+        <thead><tr><th>Name</th><th>Actions</th></tr></thead>
+        <tbody id="profilesTableBody"><tr><td colspan="2" style="color:var(--muted)">Loading…</td></tr></tbody>
+      </table>
+      </div>
+      <div id="profileEditorWrap" style="display:none;margin-top:1.25rem;padding-top:1rem;border-top:1px solid var(--border);">
+        <div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:0.5rem;flex-wrap:wrap;">
+          <span style="font-size:0.82rem;color:var(--muted);">Editing:</span>
+          <code id="profileEditName" style="color:var(--accent2);font-family:monospace;font-size:0.9rem;"></code>
+          <input type="text" id="profileNewName" placeholder="new-filename" style="display:none;background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--text);padding:0.25rem 0.5rem;font-family:monospace;font-size:0.85rem;">
+        </div>
+        <textarea id="profileEditContent" style="width:100%;box-sizing:border-box;min-height:300px;background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--text);font-family:monospace;font-size:0.85rem;padding:0.5rem;resize:vertical;"></textarea>
+        <div style="display:flex;gap:0.5rem;margin-top:0.75rem;flex-wrap:wrap;">
+          <button class="btn btn-save" onclick="saveProfile()">💾 Save</button>
+          <button class="btn btn-refresh" onclick="newProfileFile()">+ New File</button>
+          <label class="btn" style="cursor:pointer;">
+            ⬆ Upload File
+            <input type="file" id="profileUploadInput" style="display:none;" onchange="uploadProfile(this)">
+          </label>
+          <button class="btn btn-danger" onclick="closeProfileEditor()">✕ Close</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- ====== DEVICES ====== -->
   <div id="panel-devices" class="panel">
     <div class="card">
@@ -1277,6 +1326,20 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
         </table>
         </div>
       </div>
+    </div>
+
+    <div class="card" id="inputTesterCard" style="margin-top:1rem;">
+      <h2>Live Input Tester</h2>
+      <p style="font-size:0.83rem;color:var(--muted);margin-bottom:1rem;">
+        Select a controller to monitor its button presses and axis values in real time.
+      </p>
+      <div style="display:flex;gap:0.75rem;align-items:center;flex-wrap:wrap;margin-bottom:1rem;">
+        <select id="inputTesterDevice" style="background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--text);padding:0.35rem 0.6rem;"></select>
+        <button class="btn btn-start" onclick="startInputTest()">&#9654; Start</button>
+        <button class="btn btn-stop"  onclick="stopInputTest()" disabled id="inputTesterStopBtn">&#9632; Stop</button>
+      </div>
+      <div id="inputTesterStatus" style="font-size:0.82rem;color:var(--muted);margin-bottom:0.75rem;"></div>
+      <div id="inputTesterDisplay" style="font-family:monospace;font-size:0.82rem;min-height:60px;"></div>
     </div>
   </div>
 
@@ -1430,7 +1493,9 @@ function showTab(name, btn) {
   btn.classList.add('active');
   if (name === 'monitor') fetchLogs();
   if (name === 'config') loadConfig();
-  if (name === 'devices') { loadDevices(); loadBluetoothSection(); }
+  if (name === 'profiles') loadProfiles();
+  if (name === 'devices') { loadDevices(); loadBluetoothSection(); populateInputTesterDevices(); }
+  else stopInputTest();
   if (name === 'webui-settings') initAppearancePanel();
 }
 
@@ -1577,6 +1642,17 @@ async function loadConfig() {
   document.getElementById('cfgDz2').value = cfgData.deadzone_p2 ?? '0.2';
   document.getElementById('cfgDz3').value = cfgData.deadzone_p3 ?? '0.2';
   document.getElementById('cfgDz4').value = cfgData.deadzone_p4 ?? '0.2';
+
+  const io2Sel = document.getElementById('cfgEmulate2');
+  io2Sel.innerHTML = '<option value="">— None —</option>';
+  (iosData.ios || []).forEach(io => {
+    const o = document.createElement('option');
+    o.value = io; o.textContent = io;
+    if (cfgData.emulate_second === io) o.selected = true;
+    io2Sel.appendChild(o);
+  });
+
+  document.getElementById('cfgRotaryPath').value = cfgData.rotary_path ?? '/etc/modernjvs/rotary';
 }
 
 async function saveConfig() {
@@ -1592,6 +1668,8 @@ async function saveConfig() {
     deadzone_p2:                document.getElementById('cfgDz2').value,
     deadzone_p3:                document.getElementById('cfgDz3').value,
     deadzone_p4:                document.getElementById('cfgDz4').value,
+    emulate_second:             document.getElementById('cfgEmulate2').value,
+    rotary_path:                document.getElementById('cfgRotaryPath').value,
   };
   const d = await api('/api/config', {
     method: 'POST',
@@ -1613,7 +1691,235 @@ function resetConfig() {
   document.getElementById('cfgDz2').value = '0.2';
   document.getElementById('cfgDz3').value = '0.2';
   document.getElementById('cfgDz4').value = '0.2';
+  document.getElementById('cfgEmulate2').value   = '';
+  document.getElementById('cfgRotaryPath').value = '/etc/modernjvs/rotary';
   showAlert('cfgAlert', 'Fields reset to defaults. Click Save to write the configuration.', false);
+}
+
+// ---- Profiles ----
+let _profilesCurrentTab = 'games';
+let _profileEditingName = null;
+let _profileEditingIsNew = false;
+
+async function loadProfiles() {
+  const d = await api('/api/profiles/list');
+  if (d.error) { showAlert('profilesAlert', 'Error: ' + d.error, true); return; }
+  renderProfilesTable(d);
+}
+
+function setProfileTab(tab) {
+  _profilesCurrentTab = tab;
+  ['games','devices','ios'].forEach(t => {
+    const btn = document.getElementById('profTab' + t.charAt(0).toUpperCase() + t.slice(1));
+    if (btn) btn.style.background = (t === tab) ? 'var(--accent)' : '';
+    if (btn) btn.style.color      = (t === tab) ? '#000' : '';
+  });
+  // Re-render with current data
+  api('/api/profiles/list').then(d => { if (!d.error) renderProfilesTable(d); });
+}
+
+function renderProfilesTable(data) {
+  const files = data[_profilesCurrentTab] || [];
+  const tbody = document.getElementById('profilesTableBody');
+  if (files.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="2" style="color:var(--muted)">No files found.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = files.map(name => `
+    <tr>
+      <td><code style="color:var(--accent2);font-family:monospace;">${_escHtml(name)}</code></td>
+      <td style="white-space:nowrap;">
+        <button class="btn btn-xs btn-refresh" onclick="editProfile(${JSON.stringify(name)})" style="margin-right:0.25rem;">Edit</button>
+        <a href="/api/profiles/download?type=${encodeURIComponent(_profilesCurrentTab)}&name=${encodeURIComponent(name)}" class="btn btn-xs" style="margin-right:0.25rem;text-decoration:none;">Download</a>
+        <button class="btn btn-xs btn-danger" onclick="deleteProfile(${JSON.stringify(name)})">Delete</button>
+      </td>
+    </tr>`).join('');
+}
+
+async function editProfile(name) {
+  const d = await api('/api/profiles/read?type=' + encodeURIComponent(_profilesCurrentTab) + '&name=' + encodeURIComponent(name));
+  if (d.error) { showAlert('profilesAlert', 'Error: ' + d.error, true); return; }
+  _profileEditingName  = name;
+  _profileEditingIsNew = false;
+  document.getElementById('profileEditName').textContent = name;
+  document.getElementById('profileEditName').style.display = '';
+  document.getElementById('profileNewName').style.display  = 'none';
+  document.getElementById('profileEditContent').value = d.content;
+  document.getElementById('profileEditorWrap').style.display = '';
+  document.getElementById('profileEditContent').focus();
+}
+
+function newProfileFile() {
+  _profileEditingName  = null;
+  _profileEditingIsNew = true;
+  document.getElementById('profileEditName').style.display = 'none';
+  document.getElementById('profileNewName').style.display  = '';
+  document.getElementById('profileNewName').value = '';
+  document.getElementById('profileEditContent').value = '';
+  document.getElementById('profileEditorWrap').style.display = '';
+  document.getElementById('profileNewName').focus();
+}
+
+function closeProfileEditor() {
+  document.getElementById('profileEditorWrap').style.display = 'none';
+  _profileEditingName  = null;
+  _profileEditingIsNew = false;
+}
+
+async function saveProfile() {
+  const name = _profileEditingIsNew
+    ? document.getElementById('profileNewName').value.trim()
+    : _profileEditingName;
+  if (!name) { showAlert('profilesAlert', 'Please enter a filename.', true); return; }
+  const content = document.getElementById('profileEditContent').value;
+  const d = await api('/api/profiles/write', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ type: _profilesCurrentTab, name, content })
+  });
+  if (d.error) { showAlert('profilesAlert', 'Error: ' + d.error, true); return; }
+  showAlert('profilesAlert', 'Saved ' + name + ' successfully.', false);
+  if (_profileEditingIsNew) {
+    _profileEditingName  = name;
+    _profileEditingIsNew = false;
+    document.getElementById('profileEditName').textContent = name;
+    document.getElementById('profileEditName').style.display = '';
+    document.getElementById('profileNewName').style.display  = 'none';
+  }
+  loadProfiles();
+}
+
+async function deleteProfile(name) {
+  if (!confirm('Delete profile "' + name + '"? This cannot be undone.')) return;
+  const d = await api('/api/profiles/delete', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ type: _profilesCurrentTab, name })
+  });
+  if (d.error) { showAlert('profilesAlert', 'Error: ' + d.error, true); return; }
+  showAlert('profilesAlert', 'Deleted ' + name + '.', false);
+  if (_profileEditingName === name) closeProfileEditor();
+  loadProfiles();
+}
+
+async function uploadProfile(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const name = _profileEditingIsNew
+    ? (document.getElementById('profileNewName').value.trim() || file.name)
+    : (_profileEditingName || file.name);
+  const r = await fetch('/api/profiles/upload', {
+    method: 'POST',
+    headers: {
+      'X-Profile-Type': _profilesCurrentTab,
+      'X-Profile-Name': name,
+      'Content-Length': file.size,
+    },
+    body: file,
+  });
+  const d = await r.json().catch(() => ({error: 'Parse error'}));
+  if (d.error) { showAlert('profilesAlert', 'Upload error: ' + d.error, true); return; }
+  showAlert('profilesAlert', 'Uploaded ' + name + ' (' + d.size + ' bytes).', false);
+  editProfile(name);
+  loadProfiles();
+  input.value = '';
+}
+
+// ---- Live Input Tester ----
+let _inputTestSource = null;
+let _inputTestState  = {};
+
+async function populateInputTesterDevices() {
+  const d = await api('/api/input_devices');
+  const sel = document.getElementById('inputTesterDevice');
+  if (!sel) return;
+  sel.innerHTML = '';
+  (d.devices || []).filter(dev => !dev.ignored).forEach(dev => {
+    const o = document.createElement('option');
+    o.value = dev.event;
+    o.textContent = dev.event + (dev.name !== dev.event ? ' – ' + dev.name : '');
+    sel.appendChild(o);
+  });
+  if (!sel.options.length) {
+    const o = document.createElement('option');
+    o.value = ''; o.textContent = '— No devices found —';
+    sel.appendChild(o);
+  }
+}
+
+function startInputTest() {
+  const sel = document.getElementById('inputTesterDevice');
+  const device = sel ? sel.value : '';
+  if (!device) return;
+  stopInputTest();
+  _inputTestState = {};
+  document.getElementById('inputTesterStatus').textContent = 'Connecting to ' + device + '…';
+  document.getElementById('inputTesterDisplay').innerHTML = '';
+  document.querySelector('[onclick="startInputTest()"]').disabled = true;
+  document.getElementById('inputTesterStopBtn').disabled = false;
+  _inputTestSource = new EventSource('/api/input/test?device=' + encodeURIComponent(device));
+  _inputTestSource.onmessage = function(ev) {
+    let data;
+    try { data = JSON.parse(ev.data); } catch(e) { return; }
+    if (data.keepalive) {
+      document.getElementById('inputTesterStatus').textContent = 'Connected – ' + device;
+      return;
+    }
+    if (data.error) {
+      document.getElementById('inputTesterStatus').textContent = 'Error: ' + data.error;
+      stopInputTest();
+      return;
+    }
+    const { type, code, value } = data;
+    if (type === 0) return; // EV_SYN – skip
+    const key = type + '_' + code;
+    _inputTestState[key] = { type, code, value };
+    renderInputTestDisplay();
+  };
+  _inputTestSource.onerror = function() {
+    document.getElementById('inputTesterStatus').textContent = 'Connection lost.';
+    stopInputTest();
+  };
+}
+
+function stopInputTest() {
+  if (_inputTestSource) { _inputTestSource.close(); _inputTestSource = null; }
+  const startBtn = document.querySelector('[onclick="startInputTest()"]');
+  if (startBtn) startBtn.disabled = false;
+  const stopBtn = document.getElementById('inputTesterStopBtn');
+  if (stopBtn) stopBtn.disabled = true;
+  document.getElementById('inputTesterStatus').textContent = '';
+}
+
+function renderInputTestDisplay() {
+  const keys  = Object.values(_inputTestState).filter(s => s.type === 1);
+  const axes  = Object.values(_inputTestState).filter(s => s.type === 3);
+  let html = '';
+  if (keys.length) {
+    html += '<div style="margin-bottom:0.5rem;"><strong style="font-size:0.78rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;">Buttons</strong><div style="display:flex;flex-wrap:wrap;gap:0.35rem;margin-top:0.35rem;">';
+    keys.forEach(s => {
+      const on = s.value === 1;
+      html += `<span style="padding:0.2rem 0.5rem;border-radius:4px;font-size:0.82rem;background:${on?'var(--green,#22c55e)':'var(--surface)'};color:${on?'#000':'var(--muted)'};border:1px solid ${on?'transparent':'var(--border)'};">BTN ${s.code}</span>`;
+    });
+    html += '</div></div>';
+  }
+  if (axes.length) {
+    html += '<div><strong style="font-size:0.78rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;">Axes</strong>';
+    axes.forEach(s => {
+      // Track min/max per axis code
+      const stateKey = 'axisRange_' + s.code;
+      if (!_inputTestState[stateKey]) _inputTestState[stateKey] = {min: s.value, max: s.value};
+      const range = _inputTestState[stateKey];
+      range.min = Math.min(range.min, s.value);
+      range.max = Math.max(range.max, s.value);
+      const span = range.max - range.min || 1;
+      const pct  = Math.round(((s.value - range.min) / span) * 100);
+      html += `<div style="margin-top:0.35rem;"><span style="font-size:0.78rem;color:var(--muted);">ABS ${s.code}</span><div style="background:var(--surface);border:1px solid var(--border);border-radius:4px;height:8px;margin-top:2px;"><div style="background:var(--accent);height:100%;border-radius:4px;width:${pct}%;"></div></div></div>`;
+    });
+    html += '</div>';
+  }
+  if (!html) html = '<span style="color:var(--muted)">Waiting for events…</span>';
+  document.getElementById('inputTesterDisplay').innerHTML = html;
 }
 
 // ---- Monitor ----
@@ -2363,6 +2669,41 @@ def _build_html_page():
 # Config helpers
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Profile file helpers
+# ---------------------------------------------------------------------------
+
+def _validate_profile_name(name):
+    """Return True only if name is a safe, plain filename."""
+    if not name or len(name) > MAX_PROFILE_NAME_LENGTH:
+        return False
+    if "/" in name or "\\" in name or ".." in name:
+        return False
+    if name.startswith("."):
+        return False
+    return True
+
+
+_PROFILE_TYPE_MAP = {
+    "games":   GAMES_PATH,
+    "devices": DEVICES_PATH,
+    "ios":     IOS_PATH,
+}
+
+
+def _resolve_profile_path(type_, name):
+    """Map type_ to the correct base path and return the resolved absolute path.
+
+    Returns None if type_ or name is invalid.
+    """
+    base = _PROFILE_TYPE_MAP.get(type_)
+    if base is None:
+        return None
+    if not _validate_profile_name(name):
+        return None
+    return os.path.join(base, name)
+
+
 def read_config():
     """Parse the modernjvs config file into a dict."""
     cfg = {}
@@ -2400,13 +2741,21 @@ def write_config(new_values):
         "deadzone_p2":                "ANALOG_DEADZONE_PLAYER_2",
         "deadzone_p3":                "ANALOG_DEADZONE_PLAYER_3",
         "deadzone_p4":                "ANALOG_DEADZONE_PLAYER_4",
+        "emulate_second":             "EMULATE_SECOND",
+        "rotary_path":                "ROTARY_PATH",
     }
 
     # Build a dict of directive → new value
+    # For EMULATE_SECOND: if value is empty/blank, mark for removal instead of update
+    _remove_directives = set()
     updates = {}
     for api_key, directive in key_map.items():
         if api_key in new_values:
-            updates[directive] = new_values[api_key]
+            val = new_values[api_key]
+            if directive == "EMULATE_SECOND" and not str(val).strip():
+                _remove_directives.add(directive)
+            else:
+                updates[directive] = val
 
     try:
         with open(CONFIG_PATH, "r") as f:
@@ -2421,6 +2770,10 @@ def write_config(new_values):
         if stripped and not stripped.startswith("#"):
             # split on any whitespace, producing at most [directive, value]
             parts = stripped.split(None, 1)
+            if parts and parts[0] in _remove_directives:
+                # Drop this line entirely (remove the directive)
+                written.add(parts[0])
+                continue
             if parts and parts[0] in updates:
                 new_lines.append(f"{parts[0]} {updates[parts[0]]}\n")
                 written.add(parts[0])
@@ -2455,6 +2808,8 @@ def config_to_api(cfg):
         "deadzone_p2":                cfg.get("ANALOG_DEADZONE_PLAYER_2",   "0.2"),
         "deadzone_p3":                cfg.get("ANALOG_DEADZONE_PLAYER_3",   "0.2"),
         "deadzone_p4":                cfg.get("ANALOG_DEADZONE_PLAYER_4",   "0.2"),
+        "emulate_second":             cfg.get("EMULATE_SECOND",             ""),
+        "rotary_path":                cfg.get("ROTARY_PATH",                "/etc/modernjvs/rotary"),
     }
 
 
@@ -3430,6 +3785,110 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
                 except OSError:
                     name = "custom-font"
             self._json({"hasFont": has, "name": name, "size": size})
+        elif path == "/api/profiles/list":
+            self._json({
+                "games":   list_dir(GAMES_PATH),
+                "devices": list_dir(DEVICES_PATH),
+                "ios":     list_dir(IOS_PATH),
+            })
+        elif path == "/api/profiles/read":
+            type_ = query.get("type", [""])[0]
+            name  = query.get("name", [""])[0]
+            fpath = _resolve_profile_path(type_, name)
+            if fpath is None:
+                self._json({"error": "Invalid type or name."}, HTTPStatus.BAD_REQUEST)
+                return
+            try:
+                with open(fpath, "r", errors="replace") as f:
+                    content = f.read()
+                self._json({"content": content})
+            except FileNotFoundError:
+                self._json({"error": "File not found."}, HTTPStatus.NOT_FOUND)
+            except OSError as e:
+                self._json({"error": str(e)}, HTTPStatus.INTERNAL_SERVER_ERROR)
+        elif path == "/api/profiles/download":
+            type_ = query.get("type", [""])[0]
+            name  = query.get("name", [""])[0]
+            fpath = _resolve_profile_path(type_, name)
+            if fpath is None:
+                self._json({"error": "Invalid type or name."}, HTTPStatus.BAD_REQUEST)
+                return
+            try:
+                with open(fpath, "rb") as f:
+                    data = f.read()
+                self.send_response(HTTPStatus.OK)
+                self.send_header("Content-Type", "text/plain; charset=utf-8")
+                self.send_header("Content-Disposition",
+                                 f'attachment; filename="{name}"')
+                self.send_header("Content-Length", len(data))
+                self.end_headers()
+                self.wfile.write(data)
+            except FileNotFoundError:
+                self._json({"error": "File not found."}, HTTPStatus.NOT_FOUND)
+            except OSError as e:
+                self._json({"error": str(e)}, HTTPStatus.INTERNAL_SERVER_ERROR)
+        elif path == "/api/input/test":
+            device = query.get("device", [""])[0]
+            if not re.match(r'^event\d+$', device):
+                self._json({"error": "Invalid device."}, HTTPStatus.BAD_REQUEST)
+                return
+            dev_path = f"/dev/input/{device}"
+            if not os.path.exists(dev_path):
+                self._json({"error": "Device not found."}, HTTPStatus.NOT_FOUND)
+                return
+            _INPUT_EVENT_FMT = "llHHi"
+            _INPUT_EVENT_SIZE = struct.calcsize(_INPUT_EVENT_FMT)
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("X-Accel-Buffering", "no")
+            self.end_headers()
+            try:
+                fd = os.open(dev_path, os.O_RDONLY | os.O_NONBLOCK)
+                try:
+                    deadline    = time.time() + 60
+                    last_event  = time.time()
+                    buf         = b""
+                    while time.time() < deadline:
+                        now = time.time()
+                        remaining = deadline - now
+                        silence   = now - last_event
+                        if silence >= 2.0:
+                            msg = b'data: {"keepalive":true}\n\n'
+                            self.wfile.write(msg)
+                            self.wfile.flush()
+                            last_event = now
+                        try:
+                            chunk = os.read(fd, _INPUT_EVENT_SIZE * 16)
+                            buf += chunk
+                            last_event = time.time()
+                        except BlockingIOError:
+                            time.sleep(0.05)
+                            continue
+                        while len(buf) >= _INPUT_EVENT_SIZE:
+                            rec = buf[:_INPUT_EVENT_SIZE]
+                            buf = buf[_INPUT_EVENT_SIZE:]
+                            _, _, ev_type, code, value = struct.unpack(_INPUT_EVENT_FMT, rec)
+                            payload = json.dumps({"type": ev_type, "code": code, "value": value})
+                            msg = f"data: {payload}\n\n".encode("utf-8")
+                            self.wfile.write(msg)
+                            self.wfile.flush()
+                except OSError as e:
+                    err_msg = f'data: {{"error":"{str(e)}"}}\n\n'.encode("utf-8")
+                    try:
+                        self.wfile.write(err_msg)
+                        self.wfile.flush()
+                    except OSError:
+                        pass
+                finally:
+                    os.close(fd)
+            except OSError as e:
+                err_msg = f'data: {{"error":"{str(e)}"}}\n\n'.encode("utf-8")
+                try:
+                    self.wfile.write(err_msg)
+                    self.wfile.flush()
+                except OSError:
+                    pass
         elif path == "/api/bluetooth/paired":
             self._json(get_bluetooth_paired())
         elif path == "/api/bluetooth/status":
@@ -3462,6 +3921,9 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
             return
         if path == "/api/font/upload":
             self._handle_font_upload()
+            return
+        if path == "/api/profiles/upload":
+            self._handle_profile_upload()
             return
 
         body = self._read_body()
@@ -3603,6 +4065,55 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
             else:
                 self._json({"error": "Failed to remove password file."}, HTTPStatus.INTERNAL_SERVER_ERROR)
 
+        elif path == "/api/profiles/write":
+            try:
+                data = json.loads(body) if body else {}
+            except json.JSONDecodeError:
+                self._json({"error": "Invalid JSON"}, HTTPStatus.BAD_REQUEST)
+                return
+            type_ = data.get("type", "")
+            name  = data.get("name", "")
+            content = data.get("content", "")
+            fpath = _resolve_profile_path(type_, name)
+            if fpath is None:
+                self._json({"error": "Invalid type or name."}, HTTPStatus.BAD_REQUEST)
+                return
+            if not isinstance(content, str):
+                self._json({"error": "content must be a string."}, HTTPStatus.BAD_REQUEST)
+                return
+            if len(content) > 65536:
+                self._json({"error": "Content too large (max 65536 chars)."}, HTTPStatus.BAD_REQUEST)
+                return
+            tmp = fpath + ".tmp"
+            try:
+                os.makedirs(os.path.dirname(fpath), exist_ok=True)
+                with open(tmp, "w") as f:
+                    f.write(content)
+                os.replace(tmp, fpath)
+                self._json({"ok": True})
+            except OSError as e:
+                self._json({"error": str(e)}, HTTPStatus.INTERNAL_SERVER_ERROR)
+
+        elif path == "/api/profiles/delete":
+            try:
+                data = json.loads(body) if body else {}
+            except json.JSONDecodeError:
+                self._json({"error": "Invalid JSON"}, HTTPStatus.BAD_REQUEST)
+                return
+            type_ = data.get("type", "")
+            name  = data.get("name", "")
+            fpath = _resolve_profile_path(type_, name)
+            if fpath is None:
+                self._json({"error": "Invalid type or name."}, HTTPStatus.BAD_REQUEST)
+                return
+            try:
+                os.remove(fpath)
+                self._json({"ok": True})
+            except FileNotFoundError:
+                self._json({"error": "File not found."}, HTTPStatus.NOT_FOUND)
+            except OSError as e:
+                self._json({"error": str(e)}, HTTPStatus.INTERNAL_SERVER_ERROR)
+
         else:
             self._not_found()
 
@@ -3648,6 +4159,40 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
         """Read the raw request body as bytes (for binary uploads)."""
         length = int(self.headers.get("Content-Length", 0))
         return self.rfile.read(length) if length else b""
+
+    def _handle_profile_upload(self):
+        """Accept a profile file upload via binary POST with X-Profile-Type/Name headers."""
+        type_ = self.headers.get("X-Profile-Type", "")
+        name  = self.headers.get("X-Profile-Name", "")
+        fpath = _resolve_profile_path(type_, name)
+        if fpath is None:
+            self._json({"error": "Invalid type or name."}, HTTPStatus.BAD_REQUEST)
+            return
+        content_length = int(self.headers.get("Content-Length", 0))
+        if content_length > MAX_PROFILE_UPLOAD_BYTES:
+            self._json(
+                {"error": f"File too large. Maximum size is {MAX_PROFILE_UPLOAD_BYTES // 1024} KB."},
+                HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
+            )
+            return
+        raw = self.rfile.read(content_length) if content_length else b""
+        if not raw:
+            self._json({"error": "Empty upload."}, HTTPStatus.BAD_REQUEST)
+            return
+        try:
+            text = raw.decode("utf-8")
+        except UnicodeDecodeError:
+            self._json({"error": "File must be valid UTF-8 text."}, HTTPStatus.BAD_REQUEST)
+            return
+        tmp = fpath + ".tmp"
+        try:
+            os.makedirs(os.path.dirname(fpath), exist_ok=True)
+            with open(tmp, "w") as f:
+                f.write(text)
+            os.replace(tmp, fpath)
+            self._json({"ok": True, "size": len(raw)})
+        except OSError as e:
+            self._json({"error": str(e)}, HTTPStatus.INTERNAL_SERVER_ERROR)
 
     def _handle_bg_upload(self):
         """Accept a background image upload and persist it to disk."""
