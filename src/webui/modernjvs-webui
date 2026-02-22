@@ -26,7 +26,7 @@ IOS_PATH = "/etc/modernjvs/ios"
 GAMES_PATH = "/etc/modernjvs/games"
 DEVICES_PATH = "/etc/modernjvs/devices"
 LOGO_PATH   = "/usr/share/modernjvs/modernjvs2.png"
-STICKS_PATH = "/usr/share/modernjvs/Sticks.png"
+STICKS_PATH = "/usr/share/modernjvs/Sticks3.png"
 SERVICE_NAME = "modernjvs"
 WEBUI_SERVICE_NAME = "modernjvs-webui"
 
@@ -298,7 +298,7 @@ _LOGIN_TEMPLATE = """\
   [data-theme="amber"] #logo{{filter:hue-rotate(50deg) saturate(1.2);}}
   [data-theme="solarized"] #logo{{filter:hue-rotate(192deg) saturate(0.9);}}
   /* ---- sticks decoration ---- */
-  .sticks-corner{{position:fixed;bottom:0;right:0;width:200px;opacity:0.18;pointer-events:none;z-index:0;}}
+  .sticks-corner{{position:fixed;bottom:0;right:0;width:150px;opacity:0.18;pointer-events:none;z-index:0;}}
   [data-theme="dark"] #sticks,[data-theme="black"] #sticks{{filter:hue-rotate(330deg) saturate(1.1) brightness(0.75);}}
   [data-theme="light"] #sticks{{filter:grayscale(1) brightness(0.5);}}
   [data-theme="midnight"] #sticks{{filter:hue-rotate(182deg) saturate(1.1);}}
@@ -812,7 +812,7 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
     position: fixed;
     bottom: 0;
     right: 0;
-    width: 200px;
+    width: 150px;
     opacity: 0.18;
     pointer-events: none;
     z-index: 0;
@@ -945,7 +945,7 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
     header { padding: 0.65rem 1.25rem; gap: 1rem; }
     .container { padding: 1rem; }
     .log-wrap { height: 320px; }
-    .sticks-corner { width: 140px; }
+    .sticks-corner { width: 105px; }
   }
 
   /* ---- Mobile (≤ 640 px) ---- */
@@ -2729,8 +2729,8 @@ def get_sticks_bytes():
     script_dir = os.path.dirname(os.path.abspath(__file__))
     candidates = [
         STICKS_PATH,
-        "/usr/share/modernjvs/Sticks.png",
-        os.path.join(script_dir, "..", "..", "docs", "Sticks.png"),
+        "/usr/share/modernjvs/Sticks3.png",
+        os.path.join(script_dir, "..", "..", "docs", "Sticks3.png"),
     ]
     for p in candidates:
         try:
