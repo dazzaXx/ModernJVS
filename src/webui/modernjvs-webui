@@ -2682,6 +2682,9 @@ def _validate_profile_name(name):
         return False
     if name.startswith("."):
         return False
+    # Reject characters that could enable HTTP header injection or shell issues
+    if any(c in name for c in ('\r', '\n', '"', '\x00')):
+        return False
     return True
 
 
@@ -2701,9 +2704,12 @@ def _resolve_profile_path(type_, name):
     base = _PROFILE_TYPE_MAP.get(type_)
     if base is None:
         return None
-    if not _validate_profile_name(name):
+    # os.path.basename is the CodeQL-recognised sanitizer for path injection:
+    # it strips all directory components, making traversal impossible.
+    clean = os.path.basename(name)
+    if not _validate_profile_name(clean):
         return None
-    resolved = os.path.realpath(os.path.join(base, name))
+    resolved = os.path.realpath(os.path.join(base, clean))
     base_real = os.path.realpath(base)
     if not resolved.startswith(base_real + os.sep) and resolved != base_real:
         return None
@@ -3824,8 +3830,11 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
                     data = f.read()
                 self.send_response(HTTPStatus.OK)
                 self.send_header("Content-Type", "text/plain; charset=utf-8")
+                # Derive filename from the resolved path (not raw user input) and
+                # strip CRLF/quotes to prevent HTTP response splitting (py/header-injection).
+                safe_dl_name = re.sub(r'[\r\n"]', '', os.path.basename(fpath))
                 self.send_header("Content-Disposition",
-                                 f'attachment; filename="{name}"')
+                                 f'attachment; filename="{safe_dl_name}"')
                 self.send_header("Content-Length", len(data))
                 self.end_headers()
                 self.wfile.write(data)
