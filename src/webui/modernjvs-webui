@@ -62,7 +62,6 @@ _SETTINGS_DEFAULTS = {
     "theme":          "black",
     "compact":        False,
     "noAnim":         False,
-    "showSticks":     True,
     "bgScrimOpacity": 0.70,   # 0.0 = no overlay, 0.9 = near-black overlay
 }
 
@@ -336,15 +335,12 @@ _LOGIN_TEMPLATE = """\
           font-family:var(--font);}}
   button:hover{{opacity:.85;}}
   .err{{color:var(--red);font-size:.85rem;margin-top:.75rem;text-align:center;min-height:1.2em;}}
-  /* ---- footer ---- */
-  footer{{text-align:center;color:var(--muted);font-size:0.78rem;
-          padding:1rem 1rem 0.5rem;position:relative;z-index:1;width:100%;max-width:360px;}}
-  footer a{{color:var(--accent);text-decoration:none;}}
-  /* On mobile, sticks moves below footer (same rule as main page) */
+  /* ---- footer (sticks only) ---- */
+  footer{{position:relative;z-index:1;}}
+  /* On mobile, sticks moves below the login card */
   @media(max-width:640px){{
     .sticks-corner{{position:static;display:block;width:clamp(80px,30vw,130px);opacity:0.35;
                     margin:0.5rem auto 0;pointer-events:none;}}
-    footer{{display:flex;flex-direction:column;align-items:center;gap:0.5rem;}}
   }}
   @media(max-width:400px){{
     .box{{padding:1.75rem 1.25rem;}}
@@ -364,9 +360,6 @@ _LOGIN_TEMPLATE = """\
   <div class="err" id="lErr"></div>
 </div>
 <footer>
-  <span>ModernJVS <span id="footerVer"></span>WebUI &mdash;
-    <a href="https://github.com/dazzaXx/ModernJVS" target="_blank">github.com/dazzaXx/ModernJVS</a>
-  </span>
   <img id="sticks" src="{sticks}" alt="" class="sticks-corner">
 </footer>
 <script>
@@ -389,19 +382,15 @@ async function doLogin(){{
     }}
   }}catch(e){{err.textContent='Network error: '+e;}}
 }}
-// Apply saved theme and sticks visibility
+// Apply saved theme
 fetch('/api/webui/settings').then(r=>r.json()).then(s=>{{
   if(s&&s.theme)document.documentElement.setAttribute('data-theme',s.theme);
-  const st=document.getElementById('sticks');
-  if(st&&s.showSticks===false)st.style.display='none';
 }}).catch(()=>{{}});
-// Show version badge and footer version
+// Show version badge
 fetch('/api/version').then(r=>r.json()).then(d=>{{
   if(d.version&&d.version!=='unknown'){{
     const b=document.getElementById('lVer');
     if(b){{b.textContent='v'+d.version;b.style.display='';}}
-    const fv=document.getElementById('footerVer');
-    if(fv)fv.textContent='v'+d.version+' ';
   }}
 }}).catch(()=>{{}});
 </script>
@@ -1381,13 +1370,6 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
             <span>Disable all CSS transitions and animations</span>
           </div>
         </div>
-        <div class="settings-field">
-          <label>Corner Image</label>
-          <div class="settings-toggle">
-            <input type="checkbox" id="stShowSticks" checked>
-            <span>Show decorative Sticks image in the bottom-right corner</span>
-          </div>
-        </div>
       </div>
     </div>
 
@@ -2024,9 +2006,6 @@ function applyAppearanceSettings(s) {
 
   // No animations
   document.body.classList.toggle('no-anim', !!s.noAnim);
-  // Show/hide the sticks corner image
-  const sticksEl = document.getElementById('sticks');
-  if (sticksEl) sticksEl.style.display = s.showSticks === false ? 'none' : '';
 
   // Background overlay (scrim) opacity
   const scrim = (typeof s.bgScrimOpacity === 'number') ? s.bgScrimOpacity : 0.70;
@@ -2181,7 +2160,6 @@ async function initAppearancePanel() {
   document.getElementById('stTheme').value      = d.theme     || 'black';
   document.getElementById('stCompact').checked  = !!d.compact;
   document.getElementById('stNoAnim').checked   = !!d.noAnim;
-  document.getElementById('stShowSticks').checked = d.showSticks !== false;
 
   // Scrim slider – live preview of opacity value
   const scrimVal = (typeof d.bgScrimOpacity === 'number') ? d.bgScrimOpacity : 0.70;
@@ -2219,7 +2197,6 @@ async function saveAppearanceSettings() {
     theme:          document.getElementById('stTheme').value,
     compact:        document.getElementById('stCompact').checked,
     noAnim:         document.getElementById('stNoAnim').checked,
-    showSticks:     document.getElementById('stShowSticks').checked,
     bgScrimOpacity: parseFloat(document.getElementById('stBgScrim').value),
   };
   const d = await api('/api/webui/settings', {
@@ -2235,7 +2212,7 @@ async function saveAppearanceSettings() {
 }
 
 async function resetAppearanceSettings() {
-  const defaults = {theme:'black', compact:false, noAnim:false, showSticks:true,
+  const defaults = {theme:'black', compact:false, noAnim:false,
                     bgScrimOpacity:0.70};
   await api('/api/webui/settings', {
     method: 'POST',
