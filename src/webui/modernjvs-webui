@@ -1833,6 +1833,51 @@ async function uploadProfile(input) {
 }
 
 // ---- Live Input Tester ----
+
+// Linux input event code → name lookup tables (from input-event-codes.h)
+// Used by renderInputTestDisplay() to show readable names instead of raw numbers.
+const _EV_KEY_NAMES = {
+  // KEY_* (keyboard)
+  2:'KEY_1',3:'KEY_2',4:'KEY_3',5:'KEY_4',6:'KEY_5',7:'KEY_6',8:'KEY_7',
+  9:'KEY_8',10:'KEY_9',11:'KEY_0',
+  16:'KEY_Q',17:'KEY_W',18:'KEY_E',19:'KEY_R',20:'KEY_T',21:'KEY_Y',
+  22:'KEY_U',23:'KEY_I',24:'KEY_O',25:'KEY_P',
+  30:'KEY_A',31:'KEY_S',32:'KEY_D',33:'KEY_F',34:'KEY_G',35:'KEY_H',
+  36:'KEY_J',37:'KEY_K',38:'KEY_L',
+  44:'KEY_Z',45:'KEY_X',46:'KEY_C',47:'KEY_V',48:'KEY_B',49:'KEY_N',50:'KEY_M',
+  57:'KEY_SPACE',
+  103:'KEY_UP',105:'KEY_LEFT',106:'KEY_RIGHT',108:'KEY_DOWN',
+  208:'KEY_NEXT',412:'KEY_PREVIOUS',
+  // BTN_MISC (0x100)
+  256:'BTN_0',257:'BTN_1',258:'BTN_2',259:'BTN_3',260:'BTN_4',
+  261:'BTN_5',262:'BTN_6',263:'BTN_7',264:'BTN_8',265:'BTN_9',
+  // BTN_MOUSE (0x110)
+  272:'BTN_LEFT',273:'BTN_RIGHT',274:'BTN_MIDDLE',275:'BTN_SIDE',
+  276:'BTN_EXTRA',277:'BTN_FORWARD',278:'BTN_BACK',
+  // BTN_JOYSTICK (0x120)
+  288:'BTN_TRIGGER',289:'BTN_THUMB',290:'BTN_THUMB2',291:'BTN_TOP',
+  292:'BTN_TOP2',293:'BTN_PINKIE',294:'BTN_BASE',295:'BTN_BASE2',
+  296:'BTN_BASE3',297:'BTN_BASE4',298:'BTN_BASE5',299:'BTN_BASE6',
+  303:'BTN_DEAD',
+  // BTN_GAMEPAD (0x130)
+  304:'BTN_SOUTH',305:'BTN_EAST',306:'BTN_C',307:'BTN_NORTH',308:'BTN_WEST',
+  309:'BTN_Z',310:'BTN_TL',311:'BTN_TR',312:'BTN_TL2',313:'BTN_TR2',
+  314:'BTN_SELECT',315:'BTN_START',316:'BTN_MODE',317:'BTN_THUMBL',318:'BTN_THUMBR',
+  // BTN_DPAD (0x220)
+  544:'BTN_DPAD_UP',545:'BTN_DPAD_DOWN',546:'BTN_DPAD_LEFT',547:'BTN_DPAD_RIGHT',
+  // BTN_TRIGGER_HAPPY (0x2c0)
+  704:'BTN_TRIGGER_HAPPY1',705:'BTN_TRIGGER_HAPPY2',706:'BTN_TRIGGER_HAPPY3',
+  707:'BTN_TRIGGER_HAPPY4',708:'BTN_TRIGGER_HAPPY5',709:'BTN_TRIGGER_HAPPY6',
+  710:'BTN_TRIGGER_HAPPY7',711:'BTN_TRIGGER_HAPPY8',
+};
+const _EV_ABS_NAMES = {
+  0:'ABS_X',1:'ABS_Y',2:'ABS_Z',3:'ABS_RX',4:'ABS_RY',5:'ABS_RZ',
+  6:'ABS_THROTTLE',7:'ABS_RUDDER',8:'ABS_WHEEL',9:'ABS_GAS',10:'ABS_BRAKE',
+  16:'ABS_HAT0X',17:'ABS_HAT0Y',18:'ABS_HAT1X',19:'ABS_HAT1Y',
+  20:'ABS_HAT2X',21:'ABS_HAT2Y',22:'ABS_HAT3X',23:'ABS_HAT3Y',
+  24:'ABS_PRESSURE',25:'ABS_DISTANCE',26:'ABS_TILT_X',27:'ABS_TILT_Y',
+  40:'ABS_MISC',
+};
 let _inputTestSource = null;
 let _inputTestState  = {};
 
@@ -1905,8 +1950,9 @@ function renderInputTestDisplay() {
   if (keys.length) {
     html += '<div style="margin-bottom:0.5rem;"><strong style="font-size:0.78rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;">Buttons</strong><div style="display:flex;flex-wrap:wrap;gap:0.35rem;margin-top:0.35rem;">';
     keys.forEach(s => {
-      const on = s.value === 1;
-      html += `<span style="padding:0.2rem 0.5rem;border-radius:4px;font-size:0.82rem;background:${on?'var(--green,#22c55e)':'var(--surface)'};color:${on?'#000':'var(--muted)'};border:1px solid ${on?'transparent':'var(--border)'};">BTN ${s.code}</span>`;
+      const on   = s.value === 1;
+      const name = _EV_KEY_NAMES[s.code] || ('CODE_' + s.code);
+      html += `<span style="padding:0.2rem 0.5rem;border-radius:4px;font-size:0.82rem;background:${on?'var(--green,#22c55e)':'var(--surface)'};color:${on?'#000':'var(--muted)'};border:1px solid ${on?'transparent':'var(--border)'};" title="code ${s.code}">${name}</span>`;
     });
     html += '</div></div>';
   }
@@ -1921,7 +1967,8 @@ function renderInputTestDisplay() {
       range.max = Math.max(range.max, s.value);
       const span = range.max - range.min || 1;
       const pct  = Math.round(((s.value - range.min) / span) * 100);
-      html += `<div style="margin-top:0.35rem;"><span style="font-size:0.78rem;color:var(--muted);">ABS ${s.code}</span><div style="background:var(--surface);border:1px solid var(--border);border-radius:4px;height:8px;margin-top:2px;"><div style="background:var(--accent);height:100%;border-radius:4px;width:${pct}%;"></div></div></div>`;
+      const name = _EV_ABS_NAMES[s.code] || ('ABS_' + s.code);
+      html += `<div style="margin-top:0.35rem;"><span style="font-size:0.78rem;color:var(--muted);" title="code ${s.code}">${name}</span><div style="background:var(--surface);border:1px solid var(--border);border-radius:4px;height:8px;margin-top:2px;"><div style="background:var(--accent);height:100%;border-radius:4px;width:${pct}%;"></div></div></div>`;
     });
     html += '</div>';
   }
