@@ -3345,6 +3345,15 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
             self._send_html(LOGIN_PAGE)
             return
 
+        # These two endpoints are needed by the login page (theme + version badge)
+        # and are read-only / non-sensitive, so serve them without auth.
+        if path == "/api/version":
+            self._json({"version": get_version()})
+            return
+        if path == "/api/webui/settings":
+            self._json(read_webui_settings())
+            return
+
         if not self._check_auth():
             return
 
