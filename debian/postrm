@@ -12,7 +12,13 @@ case "$1" in
               /etc/modernjvs/webui-bg.mime \
               /etc/modernjvs/webui-font \
               /etc/modernjvs/webui-font-name \
-              /etc/modernjvs/webui-password
+              /etc/modernjvs/webui-password \
+              /etc/modernjvs/webui-audit.log
+
+        # Remove any user-created profile files (WebUI profile editor).
+        rm -rf /etc/modernjvs/games \
+               /etc/modernjvs/devices \
+               /etc/modernjvs/ios
 
         # Remove the directory itself if nothing else remains inside it.
         rmdir /etc/modernjvs 2>/dev/null || true
