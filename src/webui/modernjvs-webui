@@ -58,7 +58,7 @@ WEBUI_BG_MIME_PATH   = "/etc/modernjvs/webui-bg.mime"
 WEBUI_FONT_PATH      = "/etc/modernjvs/webui-font"
 WEBUI_FONT_NAME_PATH = "/etc/modernjvs/webui-font-name"
 WEBUI_PASSWORD_PATH  = "/etc/modernjvs/webui-password"
-AUDIT_LOG_PATH       = "/etc/modernjvs/webui-audit.log"
+AUDIT_LOG_PATH       = "/var/log/modernjvs-webui-audit.log"
 MAX_AUDIT_LOG_LINES  = 1000
 
 # Session cookie settings
@@ -4654,6 +4654,7 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
             with open(tmp, "w") as f:
                 f.write(text)
             os.replace(tmp, fpath)
+            audit_log("Profile upload", f"{type_}/{name}", ip=self.client_address[0])
             self._json({"ok": True, "size": len(raw)})
         except OSError as e:
             self._json({"error": str(e)}, HTTPStatus.INTERNAL_SERVER_ERROR)
