@@ -3433,6 +3433,21 @@ def get_sysinfo():
             libgpiod_version = m.group(1)
     except Exception:
         pass
+    # Fallback: ask dpkg (works on Pi OS Bullseye where gpiodetect lacks --version)
+    if not libgpiod_version:
+        for pkg in ("libgpiod2", "libgpiod-dev", "libgpiod3"):
+            try:
+                r = subprocess.run(
+                    ["dpkg-query", "-W", "-f=${Version}", pkg],
+                    capture_output=True, text=True, timeout=5,
+                )
+                v = (r.stdout or "").strip()
+                if v and not v.startswith("dpkg"):
+                    # Strip Debian revision suffix (e.g. "1.6.3-1+rpt1" -> "1.6.3")
+                    libgpiod_version = v.split("-")[0]
+                    break
+            except Exception:
+                pass
 
     # --- Raspberry Pi model ---
     pi_model_sysinfo = ""
