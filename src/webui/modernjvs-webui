@@ -1540,6 +1540,16 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
     </div>
 
     <div class="card">
+      <h2>&#x23FB; System Power</h2>
+      <p style="font-size:0.82rem;color:var(--muted);margin-bottom:0.75rem;">Restart or shut down the Raspberry Pi. The WebUI will become unreachable until the Pi boots again.</p>
+      <div class="control-row">
+        <button class="btn btn-restart" onclick="systemReboot()">&#x21BA; Restart Pi</button>
+        <button class="btn btn-stop" onclick="systemShutdown()">&#x23FB; Shutdown Pi</button>
+      </div>
+      <div id="systemPowerMsg" style="font-size:0.85rem;min-height:1.2em;margin-top:0.5rem;"></div>
+    </div>
+
+    <div class="card">
       <h2>&#128274; Active Sessions</h2>
       <p style="font-size:0.82rem;color:var(--muted);margin-bottom:0.75rem;">Each entry is a logged-in browser. Token shown as first 8 characters only.</p>
       <div id="sessionsList" style="margin-bottom:0.75rem;"></div>
@@ -2941,6 +2951,23 @@ async function loadAuditLog() {
   }
   el.textContent = lines.join('');
   el.scrollTop = el.scrollHeight;
+}
+
+// ---- System Power ----
+async function systemReboot() {
+  if (!confirm('Restart the Raspberry Pi now?\n\nThe WebUI will be unreachable for ~30 seconds.')) return;
+  const msg = document.getElementById('systemPowerMsg');
+  msg.style.color = 'var(--muted)';
+  msg.textContent = 'Rebooting…';
+  fetch('/api/system/reboot', {method: 'POST'}).catch(() => {});
+}
+
+async function systemShutdown() {
+  if (!confirm('Shut down the Raspberry Pi now?\n\nYou will need physical access to turn it back on.')) return;
+  const msg = document.getElementById('systemPowerMsg');
+  msg.style.color = 'var(--muted)';
+  msg.textContent = 'Shutting down…';
+  fetch('/api/system/shutdown', {method: 'POST'}).catch(() => {});
 }
 
 // ---- Init ----
@@ -4384,6 +4411,20 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
                 if not ok:
                     print(f"[webui] WARNING: WebUI restart failed: {msg}", flush=True)
             threading.Timer(0.5, _do_restart).start()
+            self._json({"ok": True})
+
+        elif path == "/api/system/reboot":
+            audit_log("System reboot requested", ip=self.client_address[0])
+            def _do_reboot():
+                subprocess.run(["systemctl", "reboot"], check=False)
+            threading.Timer(0.5, _do_reboot).start()
+            self._json({"ok": True})
+
+        elif path == "/api/system/shutdown":
+            audit_log("System shutdown requested", ip=self.client_address[0])
+            def _do_shutdown():
+                subprocess.run(["systemctl", "poweroff"], check=False)
+            threading.Timer(0.5, _do_shutdown).start()
             self._json({"ok": True})
 
         elif path == "/api/webui/settings":
