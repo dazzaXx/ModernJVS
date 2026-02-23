@@ -16,11 +16,12 @@ import shutil
 import subprocess
 import threading
 import time
+import struct
 import urllib.parse
 import base64
 from http import HTTPStatus
 
-WEBUI_PORT = 8080
+WEBUI_PORT       = 8080
 CONFIG_PATH = "/etc/modernjvs/config"
 IOS_PATH = "/etc/modernjvs/ios"
 GAMES_PATH = "/etc/modernjvs/games"
@@ -38,6 +39,10 @@ ALLOWED_IMAGE_MIMES = {
 }
 MAX_SETTING_STRING_LENGTH = 64  # cap per string field in webui-settings.json
 MAX_FONT_UPLOAD_BYTES = 10 * 1024 * 1024   # 10 MB hard cap for font files
+MAX_PROFILE_UPLOAD_BYTES = 256 * 1024      # 256 KB hard cap for profile files
+MAX_PROFILE_NAME_LENGTH = 64               # max filename length for profile files
+MAX_PROFILE_CONTENT_CHARS = 65536         # max content length for profile writes
+INPUT_TEST_TIMEOUT_SECONDS = 60           # max duration for SSE input test stream
 ALLOWED_FONT_EXTS  = {".ttf", ".otf", ".woff", ".woff2"}
 FONT_EXT_TO_MIME   = {
     ".ttf":   "font/ttf",
@@ -53,6 +58,8 @@ WEBUI_BG_MIME_PATH   = "/etc/modernjvs/webui-bg.mime"
 WEBUI_FONT_PATH      = "/etc/modernjvs/webui-font"
 WEBUI_FONT_NAME_PATH = "/etc/modernjvs/webui-font-name"
 WEBUI_PASSWORD_PATH  = "/etc/modernjvs/webui-password"
+AUDIT_LOG_PATH       = "/etc/modernjvs/webui-audit.log"
+MAX_AUDIT_LOG_LINES  = 1000
 
 # Session cookie settings
 SESSION_COOKIE_NAME = "mjvs_session"
@@ -172,15 +179,16 @@ _sessions: dict = {}
 _sessions_lock = threading.Lock()
 
 
-def create_session():
+def create_session(ip=""):
     """Create a new random session token and return it."""
-    token  = secrets.token_hex(32)
-    expiry = time.time() + SESSION_MAX_AGE
+    token   = secrets.token_hex(32)
+    now     = time.time()
+    expiry  = now + SESSION_MAX_AGE
+    meta    = {"expiry": expiry, "created": now, "ip": ip}
     with _sessions_lock:
-        _sessions[token] = expiry
+        _sessions[token] = meta
         # Prune expired tokens opportunistically
-        now     = time.time()
-        expired = [t for t, e in list(_sessions.items()) if e < now]
+        expired = [t for t, m in list(_sessions.items()) if m["expiry"] < now]
         for t in expired:
             del _sessions[t]
     return token
@@ -191,19 +199,68 @@ def is_valid_session(token):
     if not token:
         return False
     with _sessions_lock:
-        expiry = _sessions.get(token)
-        if expiry is None:
+        meta = _sessions.get(token)
+        if meta is None:
             return False
-        if time.time() > expiry:
+        if time.time() > meta["expiry"]:
             del _sessions[token]
             return False
         return True
+
+
+def list_sessions():
+    """Return a list of dicts describing each active session (token masked)."""
+    now = time.time()
+    result = []
+    with _sessions_lock:
+        for token, meta in list(_sessions.items()):
+            if meta["expiry"] < now:
+                continue
+            result.append({
+                "token_hint": token[:8] + "…",
+                "created":    time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(meta["created"])),
+                "expires":    time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(meta["expiry"])),
+                "ip":         meta.get("ip", ""),
+            })
+    return result
 
 
 def invalidate_all_sessions():
     """Clear every active session (call after password change / removal)."""
     with _sessions_lock:
         _sessions.clear()
+
+
+def invalidate_other_sessions(current_token):
+    """Clear every session except *current_token*."""
+    with _sessions_lock:
+        tokens_to_del = [t for t in list(_sessions.keys()) if t != current_token]
+        for t in tokens_to_del:
+            del _sessions[t]
+
+
+# ---------------------------------------------------------------------------
+# Audit log
+# ---------------------------------------------------------------------------
+
+_audit_lock = threading.Lock()
+
+
+def audit_log(action, detail="", ip=""):
+    """Append one line to the WebUI audit log (best-effort, never raises)."""
+    timestamp = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+    parts = [f"[{timestamp}]", action]
+    if detail:
+        parts.append(f"- {detail}")
+    if ip:
+        parts.append(f"(from {ip})")
+    line = " ".join(parts) + "\n"
+    try:
+        with _audit_lock:
+            with open(AUDIT_LOG_PATH, "a") as f:
+                f.write(line)
+    except OSError:
+        pass
 
 
 _PRIVATE_NETS = [
@@ -335,8 +392,9 @@ _LOGIN_TEMPLATE = """\
           font-family:var(--font);}}
   button:hover{{opacity:.85;}}
   .err{{color:var(--red);font-size:.85rem;margin-top:.75rem;text-align:center;min-height:1.2em;}}
-  /* ---- footer (sticks only) ---- */
-  footer{{position:relative;z-index:1;}}
+  /* ---- footer ---- */
+  footer{{position:relative;z-index:1;text-align:center;}}
+  .login-footer-info{{margin-top:0.75rem;font-size:0.72rem;color:var(--muted);line-height:1.7;}}
   /* On mobile, sticks moves below the login card */
   @media(max-width:640px){{
     .sticks-corner{{position:static;display:block;width:clamp(80px,30vw,130px);opacity:0.23;
@@ -360,6 +418,7 @@ _LOGIN_TEMPLATE = """\
   <div class="err" id="lErr"></div>
 </div>
 <footer>
+  {footer_info}
   <img id="sticks" src="{sticks}" alt="" class="sticks-corner">
 </footer>
 <script>
@@ -1045,6 +1104,7 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
     <button class="tab active" onclick="showTab('dashboard', this)">Dashboard</button>
     <button class="tab" onclick="showTab('config', this)">Configuration</button>
     <button class="tab" onclick="showTab('monitor', this)">Monitor &amp; Logs</button>
+    <button class="tab" onclick="showTab('profiles', this)">Profiles</button>
     <button class="tab" onclick="showTab('devices', this)">Devices</button>
     <button class="tab" onclick="showTab('webui-settings', this)">&#9881; WebUI Settings</button>
   </div>
@@ -1070,8 +1130,10 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
         <div class="stat-card"><div class="val" id="svcPid">—</div><div class="lbl">PID</div></div>
         <div class="stat-card"><div class="val" id="svcUptime">—</div><div class="lbl">Active Since</div></div>
         <div class="stat-card"><div class="val" id="currentIO">—</div><div class="lbl">Emulated I/O</div></div>
+        <div class="stat-card"><div class="val" id="currentIO2">—</div><div class="lbl">Secondary I/O</div></div>
         <div class="stat-card"><div class="val" id="currentGame">—</div><div class="lbl">Current Game</div></div>
         <div class="stat-card"><div class="val" id="currentDevice">—</div><div class="lbl">Device Path</div></div>
+        <div class="stat-card"><div class="val" id="currentRotary" style="font-size:0.85rem;word-break:break-all;">—</div><div class="lbl">Rotary Path</div></div>
       </div>
       <div id="playerSlots"></div>
     </div>
@@ -1172,6 +1234,14 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
           <label>Analog Deadzone – Player 4</label>
           <input type="number" id="cfgDz4" step="0.01" min="0" max="0.5" placeholder="0.2">
         </div>
+        <div class="field">
+          <label>Secondary I/O Board (EMULATE_SECOND)</label>
+          <select id="cfgEmulate2"></select>
+        </div>
+        <div class="field">
+          <label>Rotary Encoder Path</label>
+          <input type="text" id="cfgRotaryPath" placeholder="/etc/modernjvs/rotary">
+        </div>
       </div>
       <br>
       <div class="control-row">
@@ -1230,12 +1300,63 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
       </div>
       <div class="log-wrap" id="jvsBox" style="height:340px;"></div>
     </div>
+
+    <div class="card">
+      <h2>Audit Log <button class="btn btn-refresh btn-xs" onclick="loadAuditLog()" style="margin-left:0.5rem;vertical-align:middle;">⟳ Refresh</button></h2>
+      <p style="font-size:0.82rem;color:var(--muted);margin-bottom:0.75rem;">WebUI actions: config changes, service restarts, logins, Bluetooth pairings, profile edits.</p>
+      <div class="log-wrap" id="auditLogBox" style="height:300px;"></div>
+    </div>
+  </div>
+
+  <!-- ====== PROFILES ====== -->
+  <div id="panel-profiles" class="panel">
+    <div class="card">
+      <h2>Profile Editor</h2>
+      <div id="profilesAlert" class="alert"></div>
+      <div style="display:flex;gap:0.5rem;margin-bottom:1rem;flex-wrap:wrap;align-items:center;">
+        <button class="btn btn-xs" id="profTabGames"   onclick="setProfileTab('games')"   style="background:var(--accent);color:#000;">Games</button>
+        <button class="btn btn-xs" id="profTabDevices" onclick="setProfileTab('devices')" style="">Devices</button>
+        <button class="btn btn-xs" id="profTabIos"     onclick="setProfileTab('ios')"     style="">I/O Boards</button>
+        <span style="flex:1"></span>
+        <button class="btn btn-xs btn-refresh" onclick="newProfileFile()">+ New File</button>
+        <label class="btn btn-xs" style="cursor:pointer;margin:0;">
+          ⬆ Upload
+          <input type="file" id="profileUploadInputTop" style="display:none;" onchange="uploadProfile(this)">
+        </label>
+      </div>
+      <div class="table-wrap">
+      <table class="device-table" id="profilesTable">
+        <thead><tr><th>Name</th><th>Actions</th></tr></thead>
+        <tbody id="profilesTableBody"><tr><td colspan="2" style="color:var(--muted)">Loading…</td></tr></tbody>
+      </table>
+      </div>
+      <div id="profileEditorWrap" style="display:none;margin-top:1.25rem;padding-top:1rem;border-top:1px solid var(--border);">
+        <div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:0.5rem;flex-wrap:wrap;">
+          <span style="font-size:0.82rem;color:var(--muted);">Editing:</span>
+          <code id="profileEditName" style="color:var(--accent2);font-family:monospace;font-size:0.9rem;"></code>
+          <input type="text" id="profileNewName" placeholder="new-filename" style="display:none;background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--text);padding:0.25rem 0.5rem;font-family:monospace;font-size:0.85rem;">
+        </div>
+        <textarea id="profileEditContent" style="width:100%;box-sizing:border-box;min-height:300px;background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--text);font-family:monospace;font-size:0.85rem;padding:0.5rem;resize:vertical;"></textarea>
+        <div style="display:flex;gap:0.5rem;margin-top:0.75rem;flex-wrap:wrap;">
+          <button class="btn btn-save" onclick="saveProfile()">💾 Save</button>
+          <button class="btn btn-refresh" onclick="newProfileFile()">+ New File</button>
+          <label class="btn" style="cursor:pointer;">
+            ⬆ Upload File
+            <input type="file" id="profileUploadInput" style="display:none;" onchange="uploadProfile(this)">
+          </label>
+          <button class="btn btn-danger" onclick="closeProfileEditor()">✕ Close</button>
+        </div>
+      </div>
+    </div>
   </div>
 
   <!-- ====== DEVICES ====== -->
   <div id="panel-devices" class="panel">
+    <div style="margin-bottom:0.75rem;text-align:right;">
+      <button class="btn btn-refresh" onclick="loadDevices();loadBluetoothSection();populateInputTesterDevices();">⟳ Refresh All</button>
+    </div>
     <div class="card">
-      <h2>Connected Input Devices <button class="btn btn-refresh btn-xs" onclick="loadDevices()" style="margin-left:0.5rem;vertical-align:middle;">⟳ Refresh</button></h2>
+      <h2>Connected Input Devices</h2>
       <p style="font-size:0.83rem;color:var(--muted);margin-bottom:1rem;">Shows all <code style="color:var(--accent2);font-family:monospace">/dev/input/event*</code> nodes currently present on the system.</p>
       <div class="table-wrap">
       <table class="device-table">
@@ -1246,7 +1367,7 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
     </div>
 
     <div class="card" style="margin-top:1rem;">
-      <h2>Bluetooth Controllers <button class="btn btn-refresh btn-xs" onclick="loadBluetoothSection()" style="margin-left:0.5rem;vertical-align:middle;">⟳ Refresh</button></h2>
+      <h2>Bluetooth Controllers</h2>
       <p style="font-size:0.83rem;color:var(--muted);margin-bottom:1rem;">Add and remove Bluetooth controllers such as Wii Remotes.</p>
       <div id="btAlert" class="alert"></div>
       <div id="btStatusBanner" class="alert" style="display:none;"></div>
@@ -1277,6 +1398,20 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
         </table>
         </div>
       </div>
+    </div>
+
+    <div class="card" id="inputTesterCard" style="margin-top:1rem;">
+      <h2>Live Input Tester</h2>
+      <p style="font-size:0.83rem;color:var(--muted);margin-bottom:1rem;">
+        Select a controller to monitor its button presses and axis values in real time.
+      </p>
+      <div style="display:flex;gap:0.75rem;align-items:center;flex-wrap:wrap;margin-bottom:1rem;">
+        <select id="inputTesterDevice" style="background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--text);padding:0.35rem 0.6rem;"></select>
+        <button class="btn btn-start" onclick="startInputTest()">&#9654; Start</button>
+        <button class="btn btn-stop"  onclick="stopInputTest()" disabled id="inputTesterStopBtn">&#9632; Stop</button>
+      </div>
+      <div id="inputTesterStatus" style="font-size:0.82rem;color:var(--muted);margin-bottom:0.75rem;"></div>
+      <div id="inputTesterDisplay" style="font-family:monospace;font-size:0.82rem;min-height:60px;"></div>
     </div>
   </div>
 
@@ -1406,6 +1541,27 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
       <div id="webuiRestartMsg" style="display:none;margin-top:0.75rem;font-size:0.88rem;color:var(--muted)"></div>
     </div>
 
+    <div class="card">
+      <h2>&#x23FB; System Power</h2>
+      <p style="font-size:0.82rem;color:var(--muted);margin-bottom:0.75rem;">Restart or shut down the Raspberry Pi. The WebUI will become unreachable until the Pi boots again.</p>
+      <div class="control-row">
+        <button class="btn btn-restart" onclick="systemReboot()">&#x21BA; Restart Pi</button>
+        <button class="btn btn-stop" onclick="systemShutdown()">&#x23FB; Shutdown Pi</button>
+      </div>
+      <div id="systemPowerMsg" style="font-size:0.85rem;min-height:1.2em;margin-top:0.5rem;"></div>
+    </div>
+
+    <div class="card">
+      <h2>&#128274; Active Sessions</h2>
+      <p style="font-size:0.82rem;color:var(--muted);margin-bottom:0.75rem;">Each entry is a logged-in browser. Token shown as first 8 characters only.</p>
+      <div id="sessionsList" style="margin-bottom:0.75rem;"></div>
+      <div class="control-row">
+        <button class="btn btn-refresh btn-xs" onclick="loadSessions()">⟳ Refresh</button>
+        <button class="btn btn-stop" onclick="invalidateOtherSessions()">&#128274; Log Out All Other Devices</button>
+      </div>
+      <div id="sessionsMsg" style="font-size:0.85rem;min-height:1.2em;margin-top:0.5rem;"></div>
+    </div>
+
     <div class="control-row">
       <button class="btn btn-save" onclick="saveAppearanceSettings()">&#128190; Save &amp; Apply</button>
       <button class="btn btn-refresh" onclick="resetAppearanceSettings()">&#8635; Reset to Defaults</button>
@@ -1414,6 +1570,8 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
 </div>
 
 <footer><span>ModernJVS <span id="footerVer" class="footer-ver"></span>WebUI &mdash; <a href="https://github.com/dazzaXx/ModernJVS" target="_blank">github.com/dazzaXx/ModernJVS</a></span>
+<div id="footerSysInfo" style="display:none;font-size:0.75rem;color:var(--muted);"></div>
+<div id="footerPiModel" style="display:none;font-size:0.75rem;color:var(--muted);"></div>
 <img id="sticks" src="__STICKS__" alt="" class="sticks-corner">
 </footer>
 
@@ -1428,10 +1586,12 @@ function showTab(name, btn) {
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
   document.getElementById('panel-' + name).classList.add('active');
   btn.classList.add('active');
-  if (name === 'monitor') fetchLogs();
+  if (name === 'monitor') { fetchLogs(); loadAuditLog(); }
   if (name === 'config') loadConfig();
-  if (name === 'devices') { loadDevices(); loadBluetoothSection(); }
-  if (name === 'webui-settings') initAppearancePanel();
+  if (name === 'profiles') loadProfiles();
+  if (name === 'devices') { loadDevices(); loadBluetoothSection(); populateInputTesterDevices(); }
+  if (name !== 'devices') stopInputTest(); // stop streaming when leaving the Devices tab
+  if (name === 'webui-settings') { initAppearancePanel(); loadSessions(); }
 }
 
 // ---- API helpers ----
@@ -1464,9 +1624,11 @@ async function refreshDashboard() {
   document.getElementById('svcState').textContent    = d.active_state  || '—';
   document.getElementById('svcPid').textContent      = d.main_pid      || '—';
   document.getElementById('svcUptime').textContent   = d.active_since  || '—';
-  document.getElementById('currentIO').textContent   = d.config?.emulate  || '—';
-  document.getElementById('currentGame').textContent = d.config?.game     || '—';
-  document.getElementById('currentDevice').textContent = d.config?.device || '—';
+  document.getElementById('currentIO').textContent     = d.config?.emulate         || '—';
+  document.getElementById('currentIO2').textContent    = d.config?.emulate_second   || '—';
+  document.getElementById('currentGame').textContent   = d.config?.game             || '—';
+  document.getElementById('currentDevice').textContent = d.config?.device           || '—';
+  document.getElementById('currentRotary').textContent = d.config?.rotary_path      || '—';
 
   const players = d.players || [];
   const psEl = document.getElementById('playerSlots');
@@ -1529,6 +1691,21 @@ async function refreshSysinfo() {
     document.getElementById('siIP').textContent =
       d.ip_addresses.map(ip => 'http://' + ip + ':8080').join('  |  ');
   }
+
+  // Footer: libgpiod + kernel on one line, Pi model on the next
+  const sysInfoEl  = document.getElementById('footerSysInfo');
+  const piModelEl  = document.getElementById('footerPiModel');
+  const parts = [];
+  if (d.libgpiod_version) parts.push('libgpiod v' + d.libgpiod_version);
+  if (d.kernel_version)   parts.push('Kernel ' + d.kernel_version);
+  if (parts.length) {
+    sysInfoEl.textContent = parts.join('  |  ');
+    sysInfoEl.style.display = 'block';
+  }
+  if (d.pi_model) {
+    piModelEl.textContent = d.pi_model;
+    piModelEl.style.display = 'block';
+  }
 }
 
 async function serviceAction(action) {
@@ -1577,6 +1754,17 @@ async function loadConfig() {
   document.getElementById('cfgDz2').value = cfgData.deadzone_p2 ?? '0.2';
   document.getElementById('cfgDz3').value = cfgData.deadzone_p3 ?? '0.2';
   document.getElementById('cfgDz4').value = cfgData.deadzone_p4 ?? '0.2';
+
+  const io2Sel = document.getElementById('cfgEmulate2');
+  io2Sel.innerHTML = '<option value="">— None —</option>';
+  (iosData.ios || []).forEach(io => {
+    const o = document.createElement('option');
+    o.value = io; o.textContent = io;
+    if (cfgData.emulate_second === io) o.selected = true;
+    io2Sel.appendChild(o);
+  });
+
+  document.getElementById('cfgRotaryPath').value = cfgData.rotary_path ?? '';
 }
 
 async function saveConfig() {
@@ -1592,6 +1780,8 @@ async function saveConfig() {
     deadzone_p2:                document.getElementById('cfgDz2').value,
     deadzone_p3:                document.getElementById('cfgDz3').value,
     deadzone_p4:                document.getElementById('cfgDz4').value,
+    emulate_second:             document.getElementById('cfgEmulate2').value,
+    rotary_path:                document.getElementById('cfgRotaryPath').value,
   };
   const d = await api('/api/config', {
     method: 'POST',
@@ -1613,7 +1803,364 @@ function resetConfig() {
   document.getElementById('cfgDz2').value = '0.2';
   document.getElementById('cfgDz3').value = '0.2';
   document.getElementById('cfgDz4').value = '0.2';
+  document.getElementById('cfgEmulate2').value   = '';
+  document.getElementById('cfgRotaryPath').value = '';
   showAlert('cfgAlert', 'Fields reset to defaults. Click Save to write the configuration.', false);
+}
+
+// ---- Profiles ----
+let _profilesCurrentTab = 'games';
+let _profileEditingName = null;
+let _profileEditingIsNew = false;
+
+async function loadProfiles() {
+  const d = await api('/api/profiles/list');
+  if (d.error) { showAlert('profilesAlert', 'Error: ' + d.error, true); return; }
+  renderProfilesTable(d);
+}
+
+function setProfileTab(tab) {
+  _profilesCurrentTab = tab;
+  ['games','devices','ios'].forEach(t => {
+    const btn = document.getElementById('profTab' + t.charAt(0).toUpperCase() + t.slice(1));
+    if (btn) btn.style.background = (t === tab) ? 'var(--accent)' : '';
+    if (btn) btn.style.color      = (t === tab) ? '#000' : '';
+  });
+  // Re-render with current data
+  api('/api/profiles/list').then(d => { if (!d.error) renderProfilesTable(d); });
+}
+
+function renderProfilesTable(data) {
+  const files = data[_profilesCurrentTab] || [];
+  const tbody = document.getElementById('profilesTableBody');
+  if (files.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="2" style="color:var(--muted)">No files found.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = files.map(name => `
+    <tr>
+      <td><code style="color:var(--accent2);font-family:monospace;">${_escHtml(name)}</code></td>
+      <td style="white-space:nowrap;">
+        <button class="btn btn-xs btn-refresh" data-name="${_escHtml(name)}" onclick="editProfile(this.dataset.name)" style="margin-right:0.25rem;">Edit</button>
+        <a href="/api/profiles/download?type=${encodeURIComponent(_profilesCurrentTab)}&name=${encodeURIComponent(name)}" class="btn btn-xs" style="margin-right:0.25rem;text-decoration:none;">Download</a>
+        <button class="btn btn-xs btn-danger" data-name="${_escHtml(name)}" onclick="deleteProfile(this.dataset.name)">Delete</button>
+      </td>
+    </tr>`).join('');
+}
+
+async function editProfile(name) {
+  const d = await api('/api/profiles/read?type=' + encodeURIComponent(_profilesCurrentTab) + '&name=' + encodeURIComponent(name));
+  if (d.error) { showAlert('profilesAlert', 'Error: ' + d.error, true); return; }
+  _profileEditingName  = name;
+  _profileEditingIsNew = false;
+  document.getElementById('profileEditName').textContent = name;
+  document.getElementById('profileEditName').style.display = '';
+  document.getElementById('profileNewName').style.display  = 'none';
+  document.getElementById('profileEditContent').value = d.content;
+  document.getElementById('profileEditorWrap').style.display = '';
+  document.getElementById('profileEditContent').focus();
+}
+
+function newProfileFile() {
+  _profileEditingName  = null;
+  _profileEditingIsNew = true;
+  document.getElementById('profileEditName').style.display = 'none';
+  document.getElementById('profileNewName').style.display  = '';
+  document.getElementById('profileNewName').value = '';
+  document.getElementById('profileEditContent').value = '';
+  document.getElementById('profileEditorWrap').style.display = '';
+  document.getElementById('profileNewName').focus();
+}
+
+function closeProfileEditor() {
+  document.getElementById('profileEditorWrap').style.display = 'none';
+  _profileEditingName  = null;
+  _profileEditingIsNew = false;
+}
+
+async function saveProfile() {
+  const name = _profileEditingIsNew
+    ? document.getElementById('profileNewName').value.trim()
+    : _profileEditingName;
+  if (!name) { showAlert('profilesAlert', 'Please enter a filename.', true); return; }
+  const content = document.getElementById('profileEditContent').value;
+  const d = await api('/api/profiles/write', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ type: _profilesCurrentTab, name, content })
+  });
+  if (d.error) { showAlert('profilesAlert', 'Error: ' + d.error, true); return; }
+  showAlert('profilesAlert', 'Saved ' + name + ' successfully.', false);
+  if (_profileEditingIsNew) {
+    _profileEditingName  = name;
+    _profileEditingIsNew = false;
+    document.getElementById('profileEditName').textContent = name;
+    document.getElementById('profileEditName').style.display = '';
+    document.getElementById('profileNewName').style.display  = 'none';
+  }
+  loadProfiles();
+}
+
+async function deleteProfile(name) {
+  if (!confirm('Delete profile "' + name + '"? This cannot be undone.')) return;
+  const d = await api('/api/profiles/delete', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ type: _profilesCurrentTab, name })
+  });
+  if (d.error) { showAlert('profilesAlert', 'Error: ' + d.error, true); return; }
+  showAlert('profilesAlert', 'Deleted ' + name + '.', false);
+  if (_profileEditingName === name) closeProfileEditor();
+  loadProfiles();
+}
+
+async function uploadProfile(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const name = _profileEditingIsNew
+    ? (document.getElementById('profileNewName').value.trim() || file.name)
+    : (_profileEditingName || file.name);
+  const r = await fetch('/api/profiles/upload', {
+    method: 'POST',
+    headers: {
+      'X-Profile-Type': _profilesCurrentTab,
+      'X-Profile-Name': name,
+      'Content-Length': file.size,
+    },
+    body: file,
+  });
+  const d = await r.json().catch(() => ({error: 'Parse error'}));
+  if (d.error) { showAlert('profilesAlert', 'Upload error: ' + d.error, true); return; }
+  showAlert('profilesAlert', 'Uploaded ' + name + ' (' + d.size + ' bytes).', false);
+  editProfile(name);
+  loadProfiles();
+  input.value = '';
+}
+
+// ---- Live Input Tester ----
+
+// Linux input event code → name lookup tables (auto-generated from input-event-codes.h)
+// Complete table: all 616 EV_KEY and 42 EV_ABS codes so any device works automatically.
+const _EV_KEY_NAMES = {
+  0:'KEY_RESERVED',1:'KEY_ESC',2:'KEY_1',3:'KEY_2',4:'KEY_3',5:'KEY_4',
+  6:'KEY_5',7:'KEY_6',8:'KEY_7',9:'KEY_8',10:'KEY_9',11:'KEY_0',
+  12:'KEY_MINUS',13:'KEY_EQUAL',14:'KEY_BACKSPACE',15:'KEY_TAB',16:'KEY_Q',17:'KEY_W',
+  18:'KEY_E',19:'KEY_R',20:'KEY_T',21:'KEY_Y',22:'KEY_U',23:'KEY_I',
+  24:'KEY_O',25:'KEY_P',26:'KEY_LEFTBRACE',27:'KEY_RIGHTBRACE',28:'KEY_ENTER',29:'KEY_LEFTCTRL',
+  30:'KEY_A',31:'KEY_S',32:'KEY_D',33:'KEY_F',34:'KEY_G',35:'KEY_H',
+  36:'KEY_J',37:'KEY_K',38:'KEY_L',39:'KEY_SEMICOLON',40:'KEY_APOSTROPHE',41:'KEY_GRAVE',
+  42:'KEY_LEFTSHIFT',43:'KEY_BACKSLASH',44:'KEY_Z',45:'KEY_X',46:'KEY_C',47:'KEY_V',
+  48:'KEY_B',49:'KEY_N',50:'KEY_M',51:'KEY_COMMA',52:'KEY_DOT',53:'KEY_SLASH',
+  54:'KEY_RIGHTSHIFT',55:'KEY_KPASTERISK',56:'KEY_LEFTALT',57:'KEY_SPACE',58:'KEY_CAPSLOCK',59:'KEY_F1',
+  60:'KEY_F2',61:'KEY_F3',62:'KEY_F4',63:'KEY_F5',64:'KEY_F6',65:'KEY_F7',
+  66:'KEY_F8',67:'KEY_F9',68:'KEY_F10',69:'KEY_NUMLOCK',70:'KEY_SCROLLLOCK',71:'KEY_KP7',
+  72:'KEY_KP8',73:'KEY_KP9',74:'KEY_KPMINUS',75:'KEY_KP4',76:'KEY_KP5',77:'KEY_KP6',
+  78:'KEY_KPPLUS',79:'KEY_KP1',80:'KEY_KP2',81:'KEY_KP3',82:'KEY_KP0',83:'KEY_KPDOT',
+  85:'KEY_ZENKAKUHANKAKU',86:'KEY_102ND',87:'KEY_F11',88:'KEY_F12',89:'KEY_RO',90:'KEY_KATAKANA',
+  91:'KEY_HIRAGANA',92:'KEY_HENKAN',93:'KEY_KATAKANAHIRAGANA',94:'KEY_MUHENKAN',95:'KEY_KPJPCOMMA',96:'KEY_KPENTER',
+  97:'KEY_RIGHTCTRL',98:'KEY_KPSLASH',99:'KEY_SYSRQ',100:'KEY_RIGHTALT',101:'KEY_LINEFEED',102:'KEY_HOME',
+  103:'KEY_UP',104:'KEY_PAGEUP',105:'KEY_LEFT',106:'KEY_RIGHT',107:'KEY_END',108:'KEY_DOWN',
+  109:'KEY_PAGEDOWN',110:'KEY_INSERT',111:'KEY_DELETE',112:'KEY_MACRO',113:'KEY_MUTE',114:'KEY_VOLUMEDOWN',
+  115:'KEY_VOLUMEUP',116:'KEY_POWER',117:'KEY_KPEQUAL',118:'KEY_KPPLUSMINUS',119:'KEY_PAUSE',120:'KEY_SCALE',
+  121:'KEY_KPCOMMA',122:'KEY_HANGEUL',123:'KEY_HANJA',124:'KEY_YEN',125:'KEY_LEFTMETA',126:'KEY_RIGHTMETA',
+  127:'KEY_COMPOSE',128:'KEY_STOP',129:'KEY_AGAIN',130:'KEY_PROPS',131:'KEY_UNDO',132:'KEY_FRONT',
+  133:'KEY_COPY',134:'KEY_OPEN',135:'KEY_PASTE',136:'KEY_FIND',137:'KEY_CUT',138:'KEY_HELP',
+  139:'KEY_MENU',140:'KEY_CALC',141:'KEY_SETUP',142:'KEY_SLEEP',143:'KEY_WAKEUP',144:'KEY_FILE',
+  145:'KEY_SENDFILE',146:'KEY_DELETEFILE',147:'KEY_XFER',148:'KEY_PROG1',149:'KEY_PROG2',150:'KEY_WWW',
+  151:'KEY_MSDOS',152:'KEY_COFFEE',153:'KEY_ROTATE_DISPLAY',154:'KEY_CYCLEWINDOWS',155:'KEY_MAIL',156:'KEY_BOOKMARKS',
+  157:'KEY_COMPUTER',158:'KEY_BACK',159:'KEY_FORWARD',160:'KEY_CLOSECD',161:'KEY_EJECTCD',162:'KEY_EJECTCLOSECD',
+  163:'KEY_NEXTSONG',164:'KEY_PLAYPAUSE',165:'KEY_PREVIOUSSONG',166:'KEY_STOPCD',167:'KEY_RECORD',168:'KEY_REWIND',
+  169:'KEY_PHONE',170:'KEY_ISO',171:'KEY_CONFIG',172:'KEY_HOMEPAGE',173:'KEY_REFRESH',174:'KEY_EXIT',
+  175:'KEY_MOVE',176:'KEY_EDIT',177:'KEY_SCROLLUP',178:'KEY_SCROLLDOWN',179:'KEY_KPLEFTPAREN',180:'KEY_KPRIGHTPAREN',
+  181:'KEY_NEW',182:'KEY_REDO',183:'KEY_F13',184:'KEY_F14',185:'KEY_F15',186:'KEY_F16',
+  187:'KEY_F17',188:'KEY_F18',189:'KEY_F19',190:'KEY_F20',191:'KEY_F21',192:'KEY_F22',
+  193:'KEY_F23',194:'KEY_F24',200:'KEY_PLAYCD',201:'KEY_PAUSECD',202:'KEY_PROG3',203:'KEY_PROG4',
+  204:'KEY_ALL_APPLICATIONS',205:'KEY_SUSPEND',206:'KEY_CLOSE',207:'KEY_PLAY',208:'KEY_FASTFORWARD',209:'KEY_BASSBOOST',
+  210:'KEY_PRINT',211:'KEY_HP',212:'KEY_CAMERA',213:'KEY_SOUND',214:'KEY_QUESTION',215:'KEY_EMAIL',
+  216:'KEY_CHAT',217:'KEY_SEARCH',218:'KEY_CONNECT',219:'KEY_FINANCE',220:'KEY_SPORT',221:'KEY_SHOP',
+  222:'KEY_ALTERASE',223:'KEY_CANCEL',224:'KEY_BRIGHTNESSDOWN',225:'KEY_BRIGHTNESSUP',226:'KEY_MEDIA',227:'KEY_SWITCHVIDEOMODE',
+  228:'KEY_KBDILLUMTOGGLE',229:'KEY_KBDILLUMDOWN',230:'KEY_KBDILLUMUP',231:'KEY_SEND',232:'KEY_REPLY',233:'KEY_FORWARDMAIL',
+  234:'KEY_SAVE',235:'KEY_DOCUMENTS',236:'KEY_BATTERY',237:'KEY_BLUETOOTH',238:'KEY_WLAN',239:'KEY_UWB',
+  240:'KEY_UNKNOWN',241:'KEY_VIDEO_NEXT',242:'KEY_VIDEO_PREV',243:'KEY_BRIGHTNESS_CYCLE',244:'KEY_BRIGHTNESS_AUTO',245:'KEY_DISPLAY_OFF',
+  246:'KEY_WWAN',247:'KEY_RFKILL',248:'KEY_MICMUTE',
+  256:'BTN_0',257:'BTN_1',258:'BTN_2',259:'BTN_3',260:'BTN_4',261:'BTN_5',
+  262:'BTN_6',263:'BTN_7',264:'BTN_8',265:'BTN_9',
+  272:'BTN_LEFT',273:'BTN_RIGHT',274:'BTN_MIDDLE',275:'BTN_SIDE',276:'BTN_EXTRA',277:'BTN_FORWARD',
+  278:'BTN_BACK',279:'BTN_TASK',
+  288:'BTN_TRIGGER',289:'BTN_THUMB',290:'BTN_THUMB2',291:'BTN_TOP',292:'BTN_TOP2',293:'BTN_PINKIE',
+  294:'BTN_BASE',295:'BTN_BASE2',296:'BTN_BASE3',297:'BTN_BASE4',298:'BTN_BASE5',299:'BTN_BASE6',
+  303:'BTN_DEAD',
+  304:'BTN_SOUTH',305:'BTN_EAST',306:'BTN_C',307:'BTN_NORTH',308:'BTN_WEST',309:'BTN_Z',
+  310:'BTN_TL',311:'BTN_TR',312:'BTN_TL2',313:'BTN_TR2',314:'BTN_SELECT',315:'BTN_START',
+  316:'BTN_MODE',317:'BTN_THUMBL',318:'BTN_THUMBR',
+  320:'BTN_TOOL_PEN',321:'BTN_TOOL_RUBBER',322:'BTN_TOOL_BRUSH',323:'BTN_TOOL_PENCIL',324:'BTN_TOOL_AIRBRUSH',325:'BTN_TOOL_FINGER',
+  326:'BTN_TOOL_MOUSE',327:'BTN_TOOL_LENS',328:'BTN_TOOL_QUINTTAP',329:'BTN_STYLUS3',330:'BTN_TOUCH',331:'BTN_STYLUS',
+  332:'BTN_STYLUS2',333:'BTN_TOOL_DOUBLETAP',334:'BTN_TOOL_TRIPLETAP',335:'BTN_TOOL_QUADTAP',336:'BTN_GEAR_DOWN',337:'BTN_GEAR_UP',
+  352:'KEY_OK',353:'KEY_SELECT',354:'KEY_GOTO',355:'KEY_CLEAR',356:'KEY_POWER2',357:'KEY_OPTION',
+  358:'KEY_INFO',359:'KEY_TIME',360:'KEY_VENDOR',361:'KEY_ARCHIVE',362:'KEY_PROGRAM',363:'KEY_CHANNEL',
+  364:'KEY_FAVORITES',365:'KEY_EPG',366:'KEY_PVR',367:'KEY_MHP',368:'KEY_LANGUAGE',369:'KEY_TITLE',
+  370:'KEY_SUBTITLE',371:'KEY_ANGLE',372:'KEY_FULL_SCREEN',373:'KEY_MODE',374:'KEY_KEYBOARD',375:'KEY_ASPECT_RATIO',
+  376:'KEY_PC',377:'KEY_TV',378:'KEY_TV2',379:'KEY_VCR',380:'KEY_VCR2',381:'KEY_SAT',
+  382:'KEY_SAT2',383:'KEY_CD',384:'KEY_TAPE',385:'KEY_RADIO',386:'KEY_TUNER',387:'KEY_PLAYER',
+  388:'KEY_TEXT',389:'KEY_DVD',390:'KEY_AUX',391:'KEY_MP3',392:'KEY_AUDIO',393:'KEY_VIDEO',
+  394:'KEY_DIRECTORY',395:'KEY_LIST',396:'KEY_MEMO',397:'KEY_CALENDAR',398:'KEY_RED',399:'KEY_GREEN',
+  400:'KEY_YELLOW',401:'KEY_BLUE',402:'KEY_CHANNELUP',403:'KEY_CHANNELDOWN',404:'KEY_FIRST',405:'KEY_LAST',
+  406:'KEY_AB',407:'KEY_NEXT',408:'KEY_RESTART',409:'KEY_SLOW',410:'KEY_SHUFFLE',411:'KEY_BREAK',
+  412:'KEY_PREVIOUS',413:'KEY_DIGITS',414:'KEY_TEEN',415:'KEY_TWEN',416:'KEY_VIDEOPHONE',417:'KEY_GAMES',
+  418:'KEY_ZOOMIN',419:'KEY_ZOOMOUT',420:'KEY_ZOOMRESET',421:'KEY_WORDPROCESSOR',422:'KEY_EDITOR',423:'KEY_SPREADSHEET',
+  424:'KEY_GRAPHICSEDITOR',425:'KEY_PRESENTATION',426:'KEY_DATABASE',427:'KEY_NEWS',428:'KEY_VOICEMAIL',429:'KEY_ADDRESSBOOK',
+  430:'KEY_MESSENGER',431:'KEY_DISPLAYTOGGLE',432:'KEY_SPELLCHECK',433:'KEY_LOGOFF',434:'KEY_DOLLAR',435:'KEY_EURO',
+  436:'KEY_FRAMEBACK',437:'KEY_FRAMEFORWARD',438:'KEY_CONTEXT_MENU',439:'KEY_MEDIA_REPEAT',440:'KEY_10CHANNELSUP',441:'KEY_10CHANNELSDOWN',
+  442:'KEY_IMAGES',444:'KEY_NOTIFICATION_CENTER',445:'KEY_PICKUP_PHONE',446:'KEY_HANGUP_PHONE',447:'KEY_LINK_PHONE',
+  448:'KEY_DEL_EOL',449:'KEY_DEL_EOS',450:'KEY_INS_LINE',451:'KEY_DEL_LINE',
+  464:'KEY_FN',465:'KEY_FN_ESC',466:'KEY_FN_F1',467:'KEY_FN_F2',468:'KEY_FN_F3',469:'KEY_FN_F4',
+  470:'KEY_FN_F5',471:'KEY_FN_F6',472:'KEY_FN_F7',473:'KEY_FN_F8',474:'KEY_FN_F9',475:'KEY_FN_F10',
+  476:'KEY_FN_F11',477:'KEY_FN_F12',478:'KEY_FN_1',479:'KEY_FN_2',480:'KEY_FN_D',481:'KEY_FN_E',
+  482:'KEY_FN_F',483:'KEY_FN_S',484:'KEY_FN_B',485:'KEY_FN_RIGHT_SHIFT',
+  497:'KEY_BRL_DOT1',498:'KEY_BRL_DOT2',499:'KEY_BRL_DOT3',500:'KEY_BRL_DOT4',501:'KEY_BRL_DOT5',502:'KEY_BRL_DOT6',
+  503:'KEY_BRL_DOT7',504:'KEY_BRL_DOT8',505:'KEY_BRL_DOT9',506:'KEY_BRL_DOT10',
+  512:'KEY_NUMERIC_0',513:'KEY_NUMERIC_1',514:'KEY_NUMERIC_2',515:'KEY_NUMERIC_3',516:'KEY_NUMERIC_4',517:'KEY_NUMERIC_5',
+  518:'KEY_NUMERIC_6',519:'KEY_NUMERIC_7',520:'KEY_NUMERIC_8',521:'KEY_NUMERIC_9',522:'KEY_NUMERIC_STAR',523:'KEY_NUMERIC_POUND',
+  524:'KEY_NUMERIC_A',525:'KEY_NUMERIC_B',526:'KEY_NUMERIC_C',527:'KEY_NUMERIC_D',
+  528:'KEY_CAMERA_FOCUS',529:'KEY_WPS_BUTTON',530:'KEY_TOUCHPAD_TOGGLE',531:'KEY_TOUCHPAD_ON',532:'KEY_TOUCHPAD_OFF',
+  533:'KEY_CAMERA_ZOOMIN',534:'KEY_CAMERA_ZOOMOUT',535:'KEY_CAMERA_UP',536:'KEY_CAMERA_DOWN',537:'KEY_CAMERA_LEFT',538:'KEY_CAMERA_RIGHT',
+  539:'KEY_ATTENDANT_ON',540:'KEY_ATTENDANT_OFF',541:'KEY_ATTENDANT_TOGGLE',542:'KEY_LIGHTS_TOGGLE',
+  544:'BTN_DPAD_UP',545:'BTN_DPAD_DOWN',546:'BTN_DPAD_LEFT',547:'BTN_DPAD_RIGHT',
+  560:'KEY_ALS_TOGGLE',561:'KEY_ROTATE_LOCK_TOGGLE',562:'KEY_REFRESH_RATE_TOGGLE',
+  576:'KEY_BUTTONCONFIG',577:'KEY_TASKMANAGER',578:'KEY_JOURNAL',579:'KEY_CONTROLPANEL',580:'KEY_APPSELECT',581:'KEY_SCREENSAVER',
+  582:'KEY_VOICECOMMAND',583:'KEY_ASSISTANT',584:'KEY_KBD_LAYOUT_NEXT',585:'KEY_EMOJI_PICKER',586:'KEY_DICTATE',
+  587:'KEY_CAMERA_ACCESS_ENABLE',588:'KEY_CAMERA_ACCESS_DISABLE',589:'KEY_CAMERA_ACCESS_TOGGLE',590:'KEY_ACCESSIBILITY',591:'KEY_DO_NOT_DISTURB',
+  592:'KEY_BRIGHTNESS_MIN',
+  608:'KEY_KBDINPUTASSIST_PREV',609:'KEY_KBDINPUTASSIST_NEXT',610:'KEY_KBDINPUTASSIST_PREVGROUP',611:'KEY_KBDINPUTASSIST_NEXTGROUP',
+  612:'KEY_KBDINPUTASSIST_ACCEPT',613:'KEY_KBDINPUTASSIST_CANCEL',614:'KEY_RIGHT_UP',615:'KEY_RIGHT_DOWN',616:'KEY_LEFT_UP',617:'KEY_LEFT_DOWN',
+  618:'KEY_ROOT_MENU',619:'KEY_MEDIA_TOP_MENU',620:'KEY_NUMERIC_11',621:'KEY_NUMERIC_12',622:'KEY_AUDIO_DESC',623:'KEY_3D_MODE',
+  624:'KEY_NEXT_FAVORITE',625:'KEY_STOP_RECORD',626:'KEY_PAUSE_RECORD',627:'KEY_VOD',628:'KEY_UNMUTE',629:'KEY_FASTREVERSE',
+  630:'KEY_SLOWREVERSE',631:'KEY_DATA',632:'KEY_ONSCREEN_KEYBOARD',633:'KEY_PRIVACY_SCREEN_TOGGLE',634:'KEY_SELECTIVE_SCREENSHOT',
+  635:'KEY_NEXT_ELEMENT',636:'KEY_PREVIOUS_ELEMENT',637:'KEY_AUTOPILOT_ENGAGE_TOGGLE',638:'KEY_MARK_WAYPOINT',639:'KEY_SOS',
+  640:'KEY_NAV_CHART',641:'KEY_FISHING_CHART',642:'KEY_SINGLE_RANGE_RADAR',643:'KEY_DUAL_RANGE_RADAR',644:'KEY_RADAR_OVERLAY',
+  645:'KEY_TRADITIONAL_SONAR',646:'KEY_CLEARVU_SONAR',647:'KEY_SIDEVU_SONAR',648:'KEY_NAV_INFO',649:'KEY_BRIGHTNESS_MENU',
+  656:'KEY_MACRO1',657:'KEY_MACRO2',658:'KEY_MACRO3',659:'KEY_MACRO4',660:'KEY_MACRO5',661:'KEY_MACRO6',
+  662:'KEY_MACRO7',663:'KEY_MACRO8',664:'KEY_MACRO9',665:'KEY_MACRO10',666:'KEY_MACRO11',667:'KEY_MACRO12',
+  668:'KEY_MACRO13',669:'KEY_MACRO14',670:'KEY_MACRO15',671:'KEY_MACRO16',672:'KEY_MACRO17',673:'KEY_MACRO18',
+  674:'KEY_MACRO19',675:'KEY_MACRO20',676:'KEY_MACRO21',677:'KEY_MACRO22',678:'KEY_MACRO23',679:'KEY_MACRO24',
+  680:'KEY_MACRO25',681:'KEY_MACRO26',682:'KEY_MACRO27',683:'KEY_MACRO28',684:'KEY_MACRO29',685:'KEY_MACRO30',
+  688:'KEY_MACRO_RECORD_START',689:'KEY_MACRO_RECORD_STOP',690:'KEY_MACRO_PRESET_CYCLE',691:'KEY_MACRO_PRESET1',692:'KEY_MACRO_PRESET2',693:'KEY_MACRO_PRESET3',
+  696:'KEY_KBD_LCD_MENU1',697:'KEY_KBD_LCD_MENU2',698:'KEY_KBD_LCD_MENU3',699:'KEY_KBD_LCD_MENU4',700:'KEY_KBD_LCD_MENU5',
+  704:'BTN_TRIGGER_HAPPY1',705:'BTN_TRIGGER_HAPPY2',706:'BTN_TRIGGER_HAPPY3',707:'BTN_TRIGGER_HAPPY4',708:'BTN_TRIGGER_HAPPY5',709:'BTN_TRIGGER_HAPPY6',
+  710:'BTN_TRIGGER_HAPPY7',711:'BTN_TRIGGER_HAPPY8',712:'BTN_TRIGGER_HAPPY9',713:'BTN_TRIGGER_HAPPY10',714:'BTN_TRIGGER_HAPPY11',715:'BTN_TRIGGER_HAPPY12',
+  716:'BTN_TRIGGER_HAPPY13',717:'BTN_TRIGGER_HAPPY14',718:'BTN_TRIGGER_HAPPY15',719:'BTN_TRIGGER_HAPPY16',720:'BTN_TRIGGER_HAPPY17',721:'BTN_TRIGGER_HAPPY18',
+  722:'BTN_TRIGGER_HAPPY19',723:'BTN_TRIGGER_HAPPY20',724:'BTN_TRIGGER_HAPPY21',725:'BTN_TRIGGER_HAPPY22',726:'BTN_TRIGGER_HAPPY23',727:'BTN_TRIGGER_HAPPY24',
+  728:'BTN_TRIGGER_HAPPY25',729:'BTN_TRIGGER_HAPPY26',730:'BTN_TRIGGER_HAPPY27',731:'BTN_TRIGGER_HAPPY28',732:'BTN_TRIGGER_HAPPY29',733:'BTN_TRIGGER_HAPPY30',
+  734:'BTN_TRIGGER_HAPPY31',735:'BTN_TRIGGER_HAPPY32',736:'BTN_TRIGGER_HAPPY33',737:'BTN_TRIGGER_HAPPY34',738:'BTN_TRIGGER_HAPPY35',739:'BTN_TRIGGER_HAPPY36',
+  740:'BTN_TRIGGER_HAPPY37',741:'BTN_TRIGGER_HAPPY38',742:'BTN_TRIGGER_HAPPY39',743:'BTN_TRIGGER_HAPPY40',
+};
+const _EV_ABS_NAMES = {
+  0:'ABS_X',1:'ABS_Y',2:'ABS_Z',3:'ABS_RX',4:'ABS_RY',5:'ABS_RZ',
+  6:'ABS_THROTTLE',7:'ABS_RUDDER',8:'ABS_WHEEL',9:'ABS_GAS',10:'ABS_BRAKE',
+  16:'ABS_HAT0X',17:'ABS_HAT0Y',18:'ABS_HAT1X',19:'ABS_HAT1Y',20:'ABS_HAT2X',21:'ABS_HAT2Y',
+  22:'ABS_HAT3X',23:'ABS_HAT3Y',24:'ABS_PRESSURE',25:'ABS_DISTANCE',26:'ABS_TILT_X',27:'ABS_TILT_Y',
+  28:'ABS_TOOL_WIDTH',32:'ABS_VOLUME',33:'ABS_PROFILE',46:'ABS_RESERVED',
+  47:'ABS_MT_SLOT',48:'ABS_MT_TOUCH_MAJOR',49:'ABS_MT_TOUCH_MINOR',50:'ABS_MT_WIDTH_MAJOR',51:'ABS_MT_WIDTH_MINOR',52:'ABS_MT_ORIENTATION',
+  53:'ABS_MT_POSITION_X',54:'ABS_MT_POSITION_Y',55:'ABS_MT_TOOL_TYPE',56:'ABS_MT_BLOB_ID',57:'ABS_MT_TRACKING_ID',58:'ABS_MT_PRESSURE',
+  59:'ABS_MT_DISTANCE',60:'ABS_MT_TOOL_X',61:'ABS_MT_TOOL_Y',
+};
+let _inputTestSource = null;
+let _inputTestState  = {};
+
+async function populateInputTesterDevices() {
+  const d = await api('/api/input_devices');
+  const sel = document.getElementById('inputTesterDevice');
+  if (!sel) return;
+  sel.innerHTML = '';
+  (d.devices || []).filter(dev => !dev.ignored).forEach(dev => {
+    const o = document.createElement('option');
+    o.value = dev.event;
+    o.textContent = dev.event + (dev.name !== dev.event ? ' – ' + dev.name : '');
+    sel.appendChild(o);
+  });
+  if (!sel.options.length) {
+    const o = document.createElement('option');
+    o.value = ''; o.textContent = '— No devices found —';
+    sel.appendChild(o);
+  }
+}
+
+function startInputTest() {
+  const sel = document.getElementById('inputTesterDevice');
+  const device = sel ? sel.value : '';
+  if (!device) return;
+  stopInputTest();
+  _inputTestState = {};
+  document.getElementById('inputTesterStatus').textContent = 'Connecting to ' + device + '…';
+  document.getElementById('inputTesterDisplay').innerHTML = '';
+  document.querySelector('[onclick="startInputTest()"]').disabled = true;
+  document.getElementById('inputTesterStopBtn').disabled = false;
+  _inputTestSource = new EventSource('/api/input/test?device=' + encodeURIComponent(device));
+  _inputTestSource.onmessage = function(ev) {
+    let data;
+    try { data = JSON.parse(ev.data); } catch(e) { return; }
+    // Update status to "Connected" on first message of any kind
+    document.getElementById('inputTesterStatus').textContent = 'Connected – ' + device;
+    if (data.keepalive) return;
+    if (data.error) {
+      document.getElementById('inputTesterStatus').textContent = 'Error: ' + data.error;
+      stopInputTest();
+      return;
+    }
+    const { type, code, value } = data;
+    if (type === 0) return; // EV_SYN – skip
+    const key = type + '_' + code;
+    _inputTestState[key] = { type, code, value };
+    renderInputTestDisplay();
+  };
+  _inputTestSource.onerror = function() {
+    document.getElementById('inputTesterStatus').textContent = 'Connection lost.';
+    stopInputTest();
+  };
+}
+
+function stopInputTest() {
+  if (_inputTestSource) { _inputTestSource.close(); _inputTestSource = null; }
+  _inputTestState = {};
+  const startBtn = document.querySelector('[onclick="startInputTest()"]');
+  if (startBtn) startBtn.disabled = false;
+  const stopBtn = document.getElementById('inputTesterStopBtn');
+  if (stopBtn) stopBtn.disabled = true;
+  document.getElementById('inputTesterStatus').textContent = '';
+  document.getElementById('inputTesterDisplay').innerHTML = '';
+}
+
+function renderInputTestDisplay() {
+  const keys  = Object.values(_inputTestState).filter(s => s.type === 1);
+  const axes  = Object.values(_inputTestState).filter(s => s.type === 3);
+  let html = '';
+  if (keys.length) {
+    html += '<div style="margin-bottom:0.5rem;"><strong style="font-size:0.78rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;">Buttons</strong><div style="display:flex;flex-wrap:wrap;gap:0.35rem;margin-top:0.35rem;">';
+    keys.forEach(s => {
+      const on   = s.value === 1;
+      const name = _EV_KEY_NAMES[s.code] || ('CODE_' + s.code);
+      html += `<span style="padding:0.2rem 0.5rem;border-radius:4px;font-size:0.82rem;background:${on?'var(--green,#22c55e)':'var(--surface)'};color:${on?'#000':'var(--muted)'};border:1px solid ${on?'transparent':'var(--border)'};" title="code ${s.code}">${name}</span>`;
+    });
+    html += '</div></div>';
+  }
+  if (axes.length) {
+    html += '<div><strong style="font-size:0.78rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;">Axes</strong>';
+    axes.forEach(s => {
+      // Track min/max per axis code
+      const stateKey = 'axisRange_' + s.code;
+      if (!_inputTestState[stateKey]) _inputTestState[stateKey] = {min: s.value, max: s.value};
+      const range = _inputTestState[stateKey];
+      range.min = Math.min(range.min, s.value);
+      range.max = Math.max(range.max, s.value);
+      const span = range.max - range.min || 1;
+      const pct  = Math.round(((s.value - range.min) / span) * 100);
+      const name = _EV_ABS_NAMES[s.code] || ('ABS_' + s.code);
+      html += `<div style="margin-top:0.35rem;"><span style="font-size:0.78rem;color:var(--muted);" title="code ${s.code}">${name}</span><div style="background:var(--surface);border:1px solid var(--border);border-radius:4px;height:8px;margin-top:2px;"><div style="background:var(--accent);height:100%;border-radius:4px;width:${pct}%;"></div></div></div>`;
+    });
+    html += '</div>';
+  }
+  if (!html) html = '<span style="color:var(--muted)">Waiting for events…</span>';
+  document.getElementById('inputTesterDisplay').innerHTML = html;
 }
 
 // ---- Monitor ----
@@ -2294,6 +2841,88 @@ function restartWebUI() {
   tick();
 }
 
+// ---- Active Sessions ----
+async function loadSessions() {
+  const d = await api('/api/sessions/list');
+  const el = document.getElementById('sessionsList');
+  if (!el) return;
+  if (!d.password_set) {
+    el.innerHTML = '<span style="font-size:0.85rem;color:var(--muted);">Sessions are only tracked when a WebUI password is set. Set a password in the Security section above to enable session management.</span>';
+    return;
+  }
+  if (!d.sessions || d.sessions.length === 0) {
+    el.innerHTML = '<span style="font-size:0.85rem;color:var(--muted);">No active sessions.</span>';
+    return;
+  }
+  let html = '<table style="width:100%;border-collapse:collapse;font-size:0.82rem;">'
+    + '<tr style="color:var(--muted);border-bottom:1px solid var(--border);">'
+    + '<th style="text-align:left;padding:0.3rem 0.5rem;">Token</th>'
+    + '<th style="text-align:left;padding:0.3rem 0.5rem;">IP</th>'
+    + '<th style="text-align:left;padding:0.3rem 0.5rem;">Created</th>'
+    + '<th style="text-align:left;padding:0.3rem 0.5rem;">Expires</th>'
+    + '</tr>';
+  d.sessions.forEach(s => {
+    html += `<tr style="border-bottom:1px solid var(--border);">`
+      + `<td style="padding:0.3rem 0.5rem;font-family:monospace;">${_escHtml(s.token_hint)}</td>`
+      + `<td style="padding:0.3rem 0.5rem;">${_escHtml(s.ip || '—')}</td>`
+      + `<td style="padding:0.3rem 0.5rem;">${_escHtml(s.created)}</td>`
+      + `<td style="padding:0.3rem 0.5rem;">${_escHtml(s.expires)}</td>`
+      + `</tr>`;
+  });
+  html += '</table>';
+  el.innerHTML = html;
+}
+
+async function invalidateOtherSessions() {
+  const d = await api('/api/sessions/invalidate_all', {method:'POST'});
+  const msg = document.getElementById('sessionsMsg');
+  if (d.ok) {
+    msg.style.color = 'var(--green,#22c55e)';
+    msg.textContent = 'All other sessions invalidated.';
+    loadSessions();
+  } else {
+    msg.style.color = 'var(--red,#ef4444)';
+    msg.textContent = d.error || 'Failed.';
+  }
+}
+
+// ---- Audit Log ----
+async function loadAuditLog() {
+  const d = await api('/api/audit/log?lines=200');
+  const el = document.getElementById('auditLogBox');
+  if (!el) return;
+  if (d.error) { el.textContent = 'Error: ' + d.error; return; }
+  const lines = d.lines || [];
+  if (lines.length === 0) {
+    el.innerHTML = '<span style="color:var(--muted);font-size:0.82rem;">No audit log entries yet.</span>';
+    return;
+  }
+  el.innerHTML = lines.map(l => {
+    const div = document.createElement('div');
+    div.className = 'log-line log-info';
+    div.textContent = l.replace(/\n$/, '');
+    return div.outerHTML;
+  }).join('');
+  el.scrollTop = el.scrollHeight;
+}
+
+// ---- System Power ----
+async function systemReboot() {
+  if (!confirm('Restart the Raspberry Pi now?\n\nThe WebUI will be unreachable for ~30 seconds.')) return;
+  const msg = document.getElementById('systemPowerMsg');
+  msg.style.color = 'var(--muted)';
+  msg.textContent = 'Rebooting…';
+  fetch('/api/system/reboot', {method: 'POST'}).catch(() => {});
+}
+
+async function systemShutdown() {
+  if (!confirm('Shut down the Raspberry Pi now?\n\nYou will need physical access to turn it back on.')) return;
+  const msg = document.getElementById('systemPowerMsg');
+  msg.style.color = 'var(--muted)';
+  msg.textContent = 'Shutting down…';
+  fetch('/api/system/shutdown', {method: 'POST'}).catch(() => {});
+}
+
 // ---- Init ----
 // Fetch appearance settings from the server and apply them before first render.
 // Falls back to sensible defaults if the server hasn't stored any yet.
@@ -2363,6 +2992,52 @@ def _build_html_page():
 # Config helpers
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Profile file helpers
+# ---------------------------------------------------------------------------
+
+def _validate_profile_name(name):
+    """Return True only if name is a safe, plain filename."""
+    if not name or len(name) > MAX_PROFILE_NAME_LENGTH:
+        return False
+    if "/" in name or "\\" in name or ".." in name:
+        return False
+    if name.startswith("."):
+        return False
+    # Reject characters that could enable HTTP header injection or shell issues
+    if any(c in name for c in ('\r', '\n', '"', '\x00')):
+        return False
+    return True
+
+
+_PROFILE_TYPE_MAP = {
+    "games":   GAMES_PATH,
+    "devices": DEVICES_PATH,
+    "ios":     IOS_PATH,
+}
+
+
+def _resolve_profile_path(type_, name):
+    """Map type_ to the correct base path and return the resolved absolute path.
+
+    Returns None if type_ or name is invalid.  The resolved path is verified
+    to remain within the expected base directory for defense-in-depth.
+    """
+    base = _PROFILE_TYPE_MAP.get(type_)
+    if base is None:
+        return None
+    # os.path.basename is the CodeQL-recognised sanitizer for path injection:
+    # it strips all directory components, making traversal impossible.
+    clean = os.path.basename(name)
+    if not _validate_profile_name(clean):
+        return None
+    resolved = os.path.realpath(os.path.join(base, clean))
+    base_real = os.path.realpath(base)
+    if not resolved.startswith(base_real + os.sep) and resolved != base_real:
+        return None
+    return resolved
+
+
 def read_config():
     """Parse the modernjvs config file into a dict."""
     cfg = {}
@@ -2400,13 +3075,23 @@ def write_config(new_values):
         "deadzone_p2":                "ANALOG_DEADZONE_PLAYER_2",
         "deadzone_p3":                "ANALOG_DEADZONE_PLAYER_3",
         "deadzone_p4":                "ANALOG_DEADZONE_PLAYER_4",
+        "emulate_second":             "EMULATE_SECOND",
+        "rotary_path":                "ROTARY_PATH",
     }
 
     # Build a dict of directive → new value
+    # For EMULATE_SECOND and ROTARY_PATH: if empty/blank, mark for removal (not append)
+    # so unknown directives are never added to the config file.
+    _optional_directives = {"EMULATE_SECOND", "ROTARY_PATH"}
+    _remove_directives = set()
     updates = {}
     for api_key, directive in key_map.items():
         if api_key in new_values:
-            updates[directive] = new_values[api_key]
+            val = new_values[api_key]
+            if directive in _optional_directives and not str(val).strip():
+                _remove_directives.add(directive)
+            else:
+                updates[directive] = val
 
     try:
         with open(CONFIG_PATH, "r") as f:
@@ -2421,6 +3106,10 @@ def write_config(new_values):
         if stripped and not stripped.startswith("#"):
             # split on any whitespace, producing at most [directive, value]
             parts = stripped.split(None, 1)
+            if parts and parts[0] in _remove_directives:
+                # Drop this line entirely (remove the directive)
+                written.add(parts[0])
+                continue
             if parts and parts[0] in updates:
                 new_lines.append(f"{parts[0]} {updates[parts[0]]}\n")
                 written.add(parts[0])
@@ -2455,6 +3144,8 @@ def config_to_api(cfg):
         "deadzone_p2":                cfg.get("ANALOG_DEADZONE_PLAYER_2",   "0.2"),
         "deadzone_p3":                cfg.get("ANALOG_DEADZONE_PLAYER_3",   "0.2"),
         "deadzone_p4":                cfg.get("ANALOG_DEADZONE_PLAYER_4",   "0.2"),
+        "emulate_second":             cfg.get("EMULATE_SECOND",             ""),
+        "rotary_path":                cfg.get("ROTARY_PATH",                ""),
     }
 
 
@@ -2670,17 +3361,69 @@ def get_sysinfo():
     except Exception:
         pass
 
+    # --- Kernel version ---
+    kernel_version = ""
+    try:
+        with open("/proc/version") as f:
+            line = f.read().split()
+            # format: "Linux version X.Y.Z-... ..."
+            if len(line) >= 3:
+                kernel_version = line[2]
+    except Exception:
+        pass
+
+    # --- libgpiod version ---
+    libgpiod_version = ""
+    try:
+        r = subprocess.run(
+            ["gpiodetect", "--version"],
+            capture_output=True, text=True, timeout=5,
+        )
+        # gpiodetect prints "gpiodetect (libgpiod) vX.Y.Z" to stdout or stderr
+        out = (r.stdout or r.stderr or "").strip()
+        m = re.search(r'v?(\d+\.\d+[\.\d]*)', out)
+        if m:
+            libgpiod_version = m.group(1)
+    except Exception:
+        pass
+    # Fallback: ask dpkg (works on Pi OS Bullseye where gpiodetect lacks --version)
+    if not libgpiod_version:
+        for pkg in ("libgpiod2", "libgpiod-dev", "libgpiod3"):
+            try:
+                r = subprocess.run(
+                    ["dpkg-query", "-W", "-f=${Version}", pkg],
+                    capture_output=True, text=True, timeout=5,
+                )
+                v = (r.stdout or "").strip()
+                if v and not v.startswith("dpkg"):
+                    # Strip Debian revision suffix (e.g. "1.6.3-1+rpt1" -> "1.6.3")
+                    libgpiod_version = v.split("-")[0]
+                    break
+            except Exception:
+                pass
+
+    # --- Raspberry Pi model ---
+    pi_model_sysinfo = ""
+    try:
+        with open("/proc/device-tree/model", "r", encoding="utf-8", errors="replace") as f:
+            pi_model_sysinfo = f.read().strip().rstrip("\x00")
+    except OSError:
+        pass
+
     return {
-        "cpu_pct":      cpu_pct,
-        "mem_used_mb":  mem_used_mb,
-        "mem_total_mb": mem_total_mb,
-        "mem_pct":      mem_pct,
-        "temp_c":       temp_c,
-        "disk_used_gb": disk_used_gb,
-        "disk_total_gb":disk_total_gb,
-        "disk_pct":     disk_pct,
-        "load_avg":     load_avg,
-        "ip_addresses": ip_addresses,
+        "cpu_pct":        cpu_pct,
+        "mem_used_mb":    mem_used_mb,
+        "mem_total_mb":   mem_total_mb,
+        "mem_pct":        mem_pct,
+        "temp_c":         temp_c,
+        "disk_used_gb":   disk_used_gb,
+        "disk_total_gb":  disk_total_gb,
+        "disk_pct":       disk_pct,
+        "load_avg":       load_avg,
+        "ip_addresses":   ip_addresses,
+        "kernel_version": kernel_version,
+        "libgpiod_version": libgpiod_version,
+        "pi_model":       pi_model_sysinfo,
     }
 
 
@@ -2742,9 +3485,32 @@ def get_sticks_bytes():
 
 
 # Build HTML_PAGE now that get_logo_bytes() / get_sticks_bytes() are defined.
+def _build_login_page():
+    """Build the login page, embedding static sysinfo (kernel, libgpiod, Pi model)."""
+    si = get_sysinfo()
+    sys_parts = []
+    if si.get("libgpiod_version"):
+        sys_parts.append("libgpiod v" + si["libgpiod_version"])
+    if si.get("kernel_version"):
+        sys_parts.append("Kernel " + si["kernel_version"])
+    lines = []
+    if sys_parts:
+        lines.append(" &nbsp;|&nbsp; ".join(sys_parts))
+    if si.get("pi_model"):
+        lines.append(si["pi_model"])
+    if lines:
+        footer_info = '<div class="login-footer-info">' + "<br>".join(lines) + "</div>"
+    else:
+        footer_info = ""
+    return _LOGIN_TEMPLATE.format(
+        logo=_logo_data_uri(),
+        sticks=_sticks_data_uri(),
+        footer_info=footer_info,
+    )
+
 # Done once at module load so every request serves the same cached bytes.
 HTML_PAGE  = _build_html_page()
-LOGIN_PAGE = _LOGIN_TEMPLATE.format(logo=_logo_data_uri(), sticks=_sticks_data_uri())
+LOGIN_PAGE = _build_login_page()
 
 
 # ---------------------------------------------------------------------------
@@ -3430,12 +4196,135 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
                 except OSError:
                     name = "custom-font"
             self._json({"hasFont": has, "name": name, "size": size})
+        elif path == "/api/profiles/list":
+            self._json({
+                "games":   list_dir(GAMES_PATH),
+                "devices": list_dir(DEVICES_PATH),
+                "ios":     list_dir(IOS_PATH),
+            })
+        elif path == "/api/profiles/read":
+            type_ = query.get("type", [""])[0]
+            name  = os.path.basename(query.get("name", [""])[0])
+            fpath = _resolve_profile_path(type_, name)
+            if fpath is None:
+                self._json({"error": "Invalid type or name."}, HTTPStatus.BAD_REQUEST)
+                return
+            try:
+                with open(fpath, "r", errors="replace") as f:
+                    content = f.read()
+                self._json({"content": content})
+            except FileNotFoundError:
+                self._json({"error": "File not found."}, HTTPStatus.NOT_FOUND)
+            except OSError as e:
+                self._json({"error": str(e)}, HTTPStatus.INTERNAL_SERVER_ERROR)
+        elif path == "/api/profiles/download":
+            type_ = query.get("type", [""])[0]
+            name  = os.path.basename(query.get("name", [""])[0])
+            fpath = _resolve_profile_path(type_, name)
+            if fpath is None:
+                self._json({"error": "Invalid type or name."}, HTTPStatus.BAD_REQUEST)
+                return
+            try:
+                with open(fpath, "rb") as f:
+                    data = f.read()
+                self.send_response(HTTPStatus.OK)
+                self.send_header("Content-Type", "text/plain; charset=utf-8")
+                # Derive filename from the resolved path (not raw user input) and
+                # strip CRLF/quotes to prevent HTTP response splitting (py/header-injection).
+                safe_dl_name = re.sub(r'[\r\n"]', '', os.path.basename(fpath))
+                self.send_header("Content-Disposition",
+                                 f'attachment; filename="{safe_dl_name}"')
+                self.send_header("Content-Length", len(data))
+                self.end_headers()
+                self.wfile.write(data)
+            except FileNotFoundError:
+                self._json({"error": "File not found."}, HTTPStatus.NOT_FOUND)
+            except OSError as e:
+                self._json({"error": str(e)}, HTTPStatus.INTERNAL_SERVER_ERROR)
+        elif path == "/api/input/test":
+            device = os.path.basename(query.get("device", [""])[0])
+            if not re.match(r'^event\d+$', device):
+                self._json({"error": "Invalid device."}, HTTPStatus.BAD_REQUEST)
+                return
+            dev_path = "/dev/input/" + device
+            if not os.path.exists(dev_path):
+                self._json({"error": "Device not found."}, HTTPStatus.NOT_FOUND)
+                return
+            _INPUT_EVENT_FMT = "llHHi"
+            _INPUT_EVENT_SIZE = struct.calcsize(_INPUT_EVENT_FMT)
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("X-Accel-Buffering", "no")
+            self.end_headers()
+            try:
+                fd = os.open(dev_path, os.O_RDONLY | os.O_NONBLOCK)
+                try:
+                    deadline    = time.time() + INPUT_TEST_TIMEOUT_SECONDS
+                    last_event  = time.time()
+                    buf         = b""
+                    while time.time() < deadline:
+                        now = time.time()
+                        remaining = deadline - now
+                        silence   = now - last_event
+                        if silence >= 2.0:
+                            msg = b'data: {"keepalive":true}\n\n'
+                            self.wfile.write(msg)
+                            self.wfile.flush()
+                            last_event = now
+                        try:
+                            chunk = os.read(fd, _INPUT_EVENT_SIZE * 16)
+                            buf += chunk
+                            last_event = time.time()
+                        except BlockingIOError:
+                            time.sleep(0.05)
+                            continue
+                        while len(buf) >= _INPUT_EVENT_SIZE:
+                            rec = buf[:_INPUT_EVENT_SIZE]
+                            buf = buf[_INPUT_EVENT_SIZE:]
+                            _, _, ev_type, code, value = struct.unpack(_INPUT_EVENT_FMT, rec)
+                            payload = json.dumps({"type": ev_type, "code": code, "value": value})
+                            msg = f"data: {payload}\n\n".encode("utf-8")
+                            self.wfile.write(msg)
+                            self.wfile.flush()
+                except OSError as e:
+                    err_msg = f'data: {{"error":"{str(e)}"}}\n\n'.encode("utf-8")
+                    try:
+                        self.wfile.write(err_msg)
+                        self.wfile.flush()
+                    except OSError:
+                        pass
+                finally:
+                    os.close(fd)
+            except OSError as e:
+                err_msg = f'data: {{"error":"{str(e)}"}}\n\n'.encode("utf-8")
+                try:
+                    self.wfile.write(err_msg)
+                    self.wfile.flush()
+                except OSError:
+                    pass
         elif path == "/api/bluetooth/paired":
             self._json(get_bluetooth_paired())
         elif path == "/api/bluetooth/status":
             self._json(get_bluetooth_status())
         elif path == "/api/webui/password/status":
             self._json({"passwordSet": read_password_hash() is not None})
+        elif path == "/api/sessions/list":
+            self._json({"sessions": list_sessions(), "password_set": read_password_hash() is not None})
+        elif path == "/api/audit/log":
+            lines_param = query.get("lines", ["200"])[0]
+            try:
+                n = min(1000, max(1, int(lines_param)))
+            except ValueError:
+                n = 200
+            try:
+                with _audit_lock, open(AUDIT_LOG_PATH, "r", errors="replace") as f:
+                    all_lines = f.readlines()
+                self._json({"lines": all_lines[-n:]})
+            except FileNotFoundError:
+                self._json({"lines": []})
+            except OSError as e:
+                self._json({"error": str(e)}, HTTPStatus.INTERNAL_SERVER_ERROR)
         else:
             self._not_found()
 
@@ -3463,6 +4352,9 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
         if path == "/api/font/upload":
             self._handle_font_upload()
             return
+        if path == "/api/profiles/upload":
+            self._handle_profile_upload()
+            return
 
         body = self._read_body()
 
@@ -3474,6 +4366,7 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
                 return
             ok, msg = write_config(data)
             if ok:
+                audit_log("Config updated", ip=self.client_address[0])
                 self._json({"ok": True})
             else:
                 self._json({"error": msg}, HTTPStatus.INTERNAL_SERVER_ERROR)
@@ -3490,6 +4383,7 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
                 return
             ok, msg = systemctl(action, SERVICE_NAME)
             if ok:
+                audit_log(f"Service {action}", SERVICE_NAME, ip=self.client_address[0])
                 self._json({"ok": True})
             else:
                 self._json({"error": msg}, HTTPStatus.INTERNAL_SERVER_ERROR)
@@ -3498,11 +4392,26 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
             # Send the response BEFORE restarting — systemctl kills this
             # process immediately, so schedule it on a short timer so the
             # HTTP response can be flushed first.
+            audit_log("WebUI restart", ip=self.client_address[0])
             def _do_restart():
                 ok, msg = systemctl("restart", WEBUI_SERVICE_NAME)
                 if not ok:
                     print(f"[webui] WARNING: WebUI restart failed: {msg}", flush=True)
             threading.Timer(0.5, _do_restart).start()
+            self._json({"ok": True})
+
+        elif path == "/api/system/reboot":
+            audit_log("System reboot requested", ip=self.client_address[0])
+            def _do_reboot():
+                subprocess.run(["systemctl", "reboot"], check=False)
+            threading.Timer(0.5, _do_reboot).start()
+            self._json({"ok": True})
+
+        elif path == "/api/system/shutdown":
+            audit_log("System shutdown requested", ip=self.client_address[0])
+            def _do_shutdown():
+                subprocess.run(["systemctl", "poweroff"], check=False)
+            threading.Timer(0.5, _do_shutdown).start()
             self._json({"ok": True})
 
         elif path == "/api/webui/settings":
@@ -3548,7 +4457,10 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
             except json.JSONDecodeError:
                 self._json({"error": "Invalid JSON"}, HTTPStatus.BAD_REQUEST)
                 return
-            self._json(bluetooth_pair(data.get("mac", "")))
+            result = bluetooth_pair(data.get("mac", ""))
+            if result.get("ok"):
+                audit_log("BT pair", data.get("mac", ""), ip=self.client_address[0])
+            self._json(result)
 
         elif path == "/api/bluetooth/remove":
             try:
@@ -3556,7 +4468,10 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
             except json.JSONDecodeError:
                 self._json({"error": "Invalid JSON"}, HTTPStatus.BAD_REQUEST)
                 return
-            self._json(bluetooth_remove(data.get("mac", "")))
+            result = bluetooth_remove(data.get("mac", ""))
+            if result.get("ok"):
+                audit_log("BT remove", data.get("mac", ""), ip=self.client_address[0])
+            self._json(result)
 
         elif path == "/api/bluetooth/setup_usb":
             self._json(setup_usb_bluetooth())
@@ -3580,8 +4495,9 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
             try:
                 _write_password_hash(hash_password(password))
                 invalidate_all_sessions()
+                audit_log("Password changed", ip=self.client_address[0])
                 # Re-authenticate the current user so they aren't immediately logged out
-                token = create_session()
+                token = create_session(ip=self.client_address[0])
                 resp  = json.dumps({"ok": True}).encode("utf-8")
                 cookie = (
                     f"{SESSION_COOKIE_NAME}={token}; HttpOnly; SameSite=Strict; "
@@ -3599,9 +4515,67 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
         elif path == "/api/webui/password/clear":
             if clear_password_file():
                 invalidate_all_sessions()
+                audit_log("Password cleared", ip=self.client_address[0])
                 self._json({"ok": True})
             else:
                 self._json({"error": "Failed to remove password file."}, HTTPStatus.INTERNAL_SERVER_ERROR)
+
+        elif path == "/api/profiles/write":
+            try:
+                data = json.loads(body) if body else {}
+            except json.JSONDecodeError:
+                self._json({"error": "Invalid JSON"}, HTTPStatus.BAD_REQUEST)
+                return
+            type_ = data.get("type", "")
+            name  = os.path.basename(data.get("name", ""))
+            content = data.get("content", "")
+            fpath = _resolve_profile_path(type_, name)
+            if fpath is None:
+                self._json({"error": "Invalid type or name."}, HTTPStatus.BAD_REQUEST)
+                return
+            if not isinstance(content, str):
+                self._json({"error": "content must be a string."}, HTTPStatus.BAD_REQUEST)
+                return
+            if len(content) > MAX_PROFILE_CONTENT_CHARS:
+                self._json({"error": f"Content too large (max {MAX_PROFILE_CONTENT_CHARS} chars)."}, HTTPStatus.BAD_REQUEST)
+                return
+            tmp = fpath + ".tmp"
+            try:
+                os.makedirs(os.path.dirname(fpath), exist_ok=True)
+                with open(tmp, "w") as f:
+                    f.write(content)
+                os.replace(tmp, fpath)
+                audit_log(f"Profile write", f"{type_}/{name}", ip=self.client_address[0])
+                self._json({"ok": True})
+            except OSError as e:
+                self._json({"error": str(e)}, HTTPStatus.INTERNAL_SERVER_ERROR)
+
+        elif path == "/api/profiles/delete":
+            try:
+                data = json.loads(body) if body else {}
+            except json.JSONDecodeError:
+                self._json({"error": "Invalid JSON"}, HTTPStatus.BAD_REQUEST)
+                return
+            type_ = data.get("type", "")
+            name  = os.path.basename(data.get("name", ""))
+            fpath = _resolve_profile_path(type_, name)
+            if fpath is None:
+                self._json({"error": "Invalid type or name."}, HTTPStatus.BAD_REQUEST)
+                return
+            try:
+                os.remove(fpath)
+                audit_log(f"Profile delete", f"{type_}/{name}", ip=self.client_address[0])
+                self._json({"ok": True})
+            except FileNotFoundError:
+                self._json({"error": "File not found."}, HTTPStatus.NOT_FOUND)
+            except OSError as e:
+                self._json({"error": str(e)}, HTTPStatus.INTERNAL_SERVER_ERROR)
+
+        elif path == "/api/sessions/invalidate_all":
+            current = self._get_session_token()
+            invalidate_other_sessions(current)
+            audit_log("Sessions invalidated (kept current)", ip=self.client_address[0])
+            self._json({"ok": True})
 
         else:
             self._not_found()
@@ -3625,7 +4599,8 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
         if not verify_password(password, stored_hash):
             self._json({"error": "Incorrect password."}, HTTPStatus.UNAUTHORIZED)
             return
-        token  = create_session()
+        audit_log("Login", ip=self.client_address[0])
+        token  = create_session(ip=self.client_address[0])
         resp   = json.dumps({"ok": True}).encode("utf-8")
         cookie = (
             f"{SESSION_COOKIE_NAME}={token}; HttpOnly; SameSite=Strict; "
@@ -3648,6 +4623,40 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
         """Read the raw request body as bytes (for binary uploads)."""
         length = int(self.headers.get("Content-Length", 0))
         return self.rfile.read(length) if length else b""
+
+    def _handle_profile_upload(self):
+        """Accept a profile file upload via binary POST with X-Profile-Type/Name headers."""
+        type_ = self.headers.get("X-Profile-Type", "")
+        name  = os.path.basename(self.headers.get("X-Profile-Name", ""))
+        fpath = _resolve_profile_path(type_, name)
+        if fpath is None:
+            self._json({"error": "Invalid type or name."}, HTTPStatus.BAD_REQUEST)
+            return
+        content_length = int(self.headers.get("Content-Length", 0))
+        if content_length > MAX_PROFILE_UPLOAD_BYTES:
+            self._json(
+                {"error": f"File too large. Maximum size is {MAX_PROFILE_UPLOAD_BYTES // 1024} KB."},
+                HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
+            )
+            return
+        raw = self.rfile.read(content_length) if content_length else b""
+        if not raw:
+            self._json({"error": "Empty upload."}, HTTPStatus.BAD_REQUEST)
+            return
+        try:
+            text = raw.decode("utf-8")
+        except UnicodeDecodeError:
+            self._json({"error": "File must be valid UTF-8 text."}, HTTPStatus.BAD_REQUEST)
+            return
+        tmp = fpath + ".tmp"
+        try:
+            os.makedirs(os.path.dirname(fpath), exist_ok=True)
+            with open(tmp, "w") as f:
+                f.write(text)
+            os.replace(tmp, fpath)
+            self._json({"ok": True, "size": len(raw)})
+        except OSError as e:
+            self._json({"error": str(e)}, HTTPStatus.INTERNAL_SERVER_ERROR)
 
     def _handle_bg_upload(self):
         """Accept a background image upload and persist it to disk."""
