@@ -22,7 +22,8 @@ import urllib.parse
 import base64
 from http import HTTPStatus
 
-WEBUI_PORT = 8080
+WEBUI_PORT       = 8080
+WEBUI_HTTPS_PORT = 8443
 CONFIG_PATH = "/etc/modernjvs/config"
 IOS_PATH = "/etc/modernjvs/ios"
 GAMES_PATH = "/etc/modernjvs/games"
@@ -1571,7 +1572,7 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
       </div>
       <div id="httpsMsg" style="font-size:0.85rem;min-height:1.2em;margin-top:0.5rem;"></div>
       <div class="settings-preview" style="margin-top:0.75rem;">
-        Generates a self-signed certificate via <code style="color:var(--muted)">openssl</code>. After setup, restart the WebUI to activate HTTPS on port 8080.
+        Generates a self-signed certificate via <code style="color:var(--muted)">openssl</code>. After setup, restart the WebUI. The WebUI will be available on port 8443 (HTTPS); visiting port 8080 will redirect automatically. Your browser will warn about the self-signed cert — click Advanced → Proceed.
         Your browser will show a security warning for self-signed certs — this is expected on a local network.
       </div>
     </div>
@@ -2903,7 +2904,8 @@ async function loadHttpsStatus() {
   const removeBtn = document.getElementById('httpsRemoveBtn');
   if (!statusEl) return;
   if (d.enabled) {
-    statusEl.innerHTML = '<span style="color:var(--green,#22c55e);">&#128274; HTTPS is enabled</span> — certificate at <code style="color:var(--muted);">' + _escHtml(d.cert) + '</code>. Restart WebUI to activate if recently changed.';
+    const httpsUrl = 'https://' + window.location.hostname + ':' + (d.https_port || 8443) + '/';
+    statusEl.innerHTML = '<span style="color:var(--green,#22c55e);">&#128274; HTTPS is enabled</span> — access the WebUI at <a href="' + _escHtml(httpsUrl) + '" style="color:var(--accent);">' + _escHtml(httpsUrl) + '</a>. HTTP on port ' + (d.http_port || 8080) + ' redirects automatically. Restart WebUI to activate if recently changed.';
     if (removeBtn) removeBtn.style.display = '';
   } else {
     statusEl.innerHTML = '<span style="color:var(--muted);">HTTPS is not configured.</span> Generate a self-signed certificate to enable it.';
@@ -2918,7 +2920,8 @@ async function setupHttps() {
   const d = await api('/api/https/setup', {method:'POST'});
   if (d.ok) {
     msgEl.style.color = 'var(--green,#22c55e)';
-    msgEl.textContent = d.note || 'Certificate generated.';
+    const httpsUrl = 'https://' + window.location.hostname + ':' + (d.https_port || 8443) + '/';
+    msgEl.innerHTML = (d.note || 'Certificate generated.') + ' After restarting the WebUI, use <a href="' + _escHtml(httpsUrl) + '" style="color:var(--accent);">' + _escHtml(httpsUrl) + '</a>.';
     loadHttpsStatus();
   } else {
     msgEl.style.color = 'var(--red,#ef4444)';
@@ -4368,7 +4371,9 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
         elif path == "/api/https/status":
             cert_exists = os.path.isfile(HTTPS_CERT_PATH) and os.path.isfile(HTTPS_KEY_PATH)
             self._json({"enabled": cert_exists,
-                        "cert": HTTPS_CERT_PATH if cert_exists else ""})
+                        "cert": HTTPS_CERT_PATH if cert_exists else "",
+                        "https_port": WEBUI_HTTPS_PORT,
+                        "http_port": WEBUI_PORT})
         elif path == "/api/audit/log":
             lines_param = query.get("lines", ["200"])[0]
             try:
@@ -4652,7 +4657,7 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
                     self._json({"error": r.stderr.strip() or "openssl failed."}, HTTPStatus.INTERNAL_SERVER_ERROR)
                     return
                 audit_log("HTTPS cert generated", ip=self.client_address[0])
-                self._json({"ok": True, "note": "Restart the WebUI to activate HTTPS."})
+                self._json({"ok": True, "note": "Restart the WebUI to activate HTTPS.", "https_port": WEBUI_HTTPS_PORT})
             except FileNotFoundError:
                 self._json({"error": "openssl not found. Install it with: sudo apt install openssl"}, HTTPStatus.INTERNAL_SERVER_ERROR)
             except subprocess.TimeoutExpired:
@@ -4922,15 +4927,34 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
 # Entry point
 # ---------------------------------------------------------------------------
 
+class _HttpsRedirectHandler(http.server.BaseHTTPRequestHandler):
+    """Redirect all plain-HTTP requests to the HTTPS port."""
+    def _redirect(self):
+        host = self.headers.get("Host", "").split(":")[0] or "localhost"
+        dest = f"https://{host}:{WEBUI_HTTPS_PORT}{self.path}"
+        self.send_response(301)
+        self.send_header("Location", dest)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+    do_GET = do_POST = do_HEAD = do_PUT = do_DELETE = _redirect
+    def log_message(self, fmt, *args):  # suppress redirect noise
+        pass
+
+
 def main():
-    server = http.server.ThreadingHTTPServer(("0.0.0.0", WEBUI_PORT), WebUIHandler)
-    if os.path.isfile(HTTPS_CERT_PATH) and os.path.isfile(HTTPS_KEY_PATH):
+    https_active = os.path.isfile(HTTPS_CERT_PATH) and os.path.isfile(HTTPS_KEY_PATH)
+    listen_port  = WEBUI_HTTPS_PORT if https_active else WEBUI_PORT
+    server = http.server.ThreadingHTTPServer(("0.0.0.0", listen_port), WebUIHandler)
+    if https_active:
         ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         ctx.load_cert_chain(HTTPS_CERT_PATH, HTTPS_KEY_PATH)
         server.socket = ctx.wrap_socket(server.socket, server_side=True)
-        print(f"ModernJVS WebUI running on https://0.0.0.0:{WEBUI_PORT} (HTTPS)")
+        # HTTP → HTTPS redirect on the original port so existing bookmarks still work
+        redir = http.server.HTTPServer(("0.0.0.0", WEBUI_PORT), _HttpsRedirectHandler)
+        threading.Thread(target=redir.serve_forever, daemon=True).start()
+        print(f"ModernJVS WebUI running on https://0.0.0.0:{listen_port} (HTTPS, HTTP:{WEBUI_PORT} redirects)")
     else:
-        print(f"ModernJVS WebUI running on http://0.0.0.0:{WEBUI_PORT}")
+        print(f"ModernJVS WebUI running on http://0.0.0.0:{listen_port}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
