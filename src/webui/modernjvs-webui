@@ -21,7 +21,7 @@ import urllib.parse
 import base64
 from http import HTTPStatus
 
-WEBUI_PORT       = 8080
+WEBUI_PORT = 8080
 CONFIG_PATH = "/etc/modernjvs/config"
 IOS_PATH = "/etc/modernjvs/ios"
 GAMES_PATH = "/etc/modernjvs/games"
