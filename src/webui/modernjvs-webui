@@ -395,8 +395,9 @@ _LOGIN_TEMPLATE = """\
           font-family:var(--font);}}
   button:hover{{opacity:.85;}}
   .err{{color:var(--red);font-size:.85rem;margin-top:.75rem;text-align:center;min-height:1.2em;}}
-  /* ---- footer (sticks only) ---- */
-  footer{{position:relative;z-index:1;}}
+  /* ---- footer ---- */
+  footer{{position:relative;z-index:1;text-align:center;}}
+  .login-footer-info{{margin-top:0.75rem;font-size:0.72rem;color:var(--muted);line-height:1.7;}}
   /* On mobile, sticks moves below the login card */
   @media(max-width:640px){{
     .sticks-corner{{position:static;display:block;width:clamp(80px,30vw,130px);opacity:0.23;
@@ -421,6 +422,7 @@ _LOGIN_TEMPLATE = """\
 </div>
 <footer>
   <img id="sticks" src="{sticks}" alt="" class="sticks-corner">
+  {footer_info}
 </footer>
 <script>
 async function doLogin(){{
@@ -2949,7 +2951,12 @@ async function loadAuditLog() {
     el.innerHTML = '<span style="color:var(--muted);font-size:0.82rem;">No audit log entries yet.</span>';
     return;
   }
-  el.textContent = lines.join('');
+  el.innerHTML = lines.map(l => {
+    const div = document.createElement('div');
+    div.className = 'log-line log-info';
+    div.textContent = l.replace(/\n$/, '');
+    return div.outerHTML;
+  }).join('');
   el.scrollTop = el.scrollHeight;
 }
 
@@ -3532,9 +3539,32 @@ def get_sticks_bytes():
 
 
 # Build HTML_PAGE now that get_logo_bytes() / get_sticks_bytes() are defined.
+def _build_login_page():
+    """Build the login page, embedding static sysinfo (kernel, libgpiod, Pi model)."""
+    si = get_sysinfo()
+    sys_parts = []
+    if si.get("libgpiod_version"):
+        sys_parts.append("libgpiod v" + si["libgpiod_version"])
+    if si.get("kernel_version"):
+        sys_parts.append("Kernel " + si["kernel_version"])
+    lines = []
+    if sys_parts:
+        lines.append(" &nbsp;|&nbsp; ".join(sys_parts))
+    if si.get("pi_model"):
+        lines.append(si["pi_model"])
+    if lines:
+        footer_info = '<div class="login-footer-info">' + "<br>".join(lines) + "</div>"
+    else:
+        footer_info = ""
+    return _LOGIN_TEMPLATE.format(
+        logo=_logo_data_uri(),
+        sticks=_sticks_data_uri(),
+        footer_info=footer_info,
+    )
+
 # Done once at module load so every request serves the same cached bytes.
 HTML_PAGE  = _build_html_page()
-LOGIN_PAGE = _LOGIN_TEMPLATE.format(logo=_logo_data_uri(), sticks=_sticks_data_uri())
+LOGIN_PAGE = _build_login_page()
 
 
 # ---------------------------------------------------------------------------
