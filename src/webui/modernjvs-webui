@@ -1843,6 +1843,7 @@ function renderProfilesTable(data) {
       <td style="white-space:nowrap;">
         <button class="btn btn-xs btn-refresh" data-name="${_escHtml(name)}" onclick="editProfile(this.dataset.name)" style="margin-right:0.25rem;">Edit</button>
         <a href="/api/profiles/download?type=${encodeURIComponent(_profilesCurrentTab)}&name=${encodeURIComponent(name)}" class="btn btn-xs" style="margin-right:0.25rem;text-decoration:none;">Download</a>
+        <button class="btn btn-xs" data-name="${_escHtml(name)}" onclick="renameProfile(this.dataset.name)" style="margin-right:0.25rem;">Rename</button>
         <button class="btn btn-xs btn-danger" data-name="${_escHtml(name)}" onclick="deleteProfile(this.dataset.name)">Delete</button>
       </td>
     </tr>`).join('');
@@ -1911,6 +1912,23 @@ async function deleteProfile(name) {
   if (d.error) { showAlert('profilesAlert', 'Error: ' + d.error, true); return; }
   showAlert('profilesAlert', 'Deleted ' + name + '.', false);
   if (_profileEditingName === name) closeProfileEditor();
+  loadProfiles();
+}
+
+async function renameProfile(name) {
+  const newName = prompt('Rename "' + name + '" to:', name);
+  if (!newName || newName === name) return;
+  const d = await api('/api/profiles/rename', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ type: _profilesCurrentTab, name, new_name: newName })
+  });
+  if (d.error) { showAlert('profilesAlert', 'Error: ' + d.error, true); return; }
+  showAlert('profilesAlert', 'Renamed "' + name + '" to "' + newName + '".', false);
+  if (_profileEditingName === name) {
+    _profileEditingName = newName;
+    document.getElementById('profileEditName').textContent = newName;
+  }
   loadProfiles();
 }
 
@@ -2407,11 +2425,14 @@ async function loadBluetoothPaired() {
     const statusHtml = dev.connected
       ? '<span style="color:var(--green);font-size:0.8rem;">✓ Connected</span>'
       : '<span style="color:var(--muted);font-size:0.8rem;">● Paired</span>';
+    const connectBtn = dev.connected
+      ? ''
+      : `<button class="btn btn-xs" style="margin-right:0.25rem;background:var(--green);border-color:var(--green);color:#000;" data-mac="${_escHtml(dev.mac)}" onclick="btConnect(this.dataset.mac, this)">&#x1F517; Connect</button>`;
     return `<tr>
       <td>${_escHtml(dev.name)}</td>
       <td><code>${_escHtml(dev.mac)}</code></td>
       <td>${statusHtml}</td>
-      <td><button class="btn btn-xs" style="background:var(--red);border-color:var(--red);" data-mac="${_escHtml(dev.mac)}" onclick="btRemove(this.dataset.mac, this)">✕ Remove</button></td>
+      <td style="white-space:nowrap;">${connectBtn}<button class="btn btn-xs" style="background:var(--red);border-color:var(--red);" data-mac="${_escHtml(dev.mac)}" onclick="btRemove(this.dataset.mac, this)">✕ Remove</button></td>
     </tr>`;
   }).join('');
 }
@@ -2508,6 +2529,30 @@ async function btRemove(mac, btn) {
   showAlert('btAlert', '✓ Device removed successfully.', false);
   await loadBluetoothPaired();
 }
+async function btConnect(mac, btn) {
+  btn.disabled = true;
+  btn.textContent = 'Connecting…';
+
+  const d = await api('/api/bluetooth/connect', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({mac}),
+  });
+
+  if (d.error) {
+    showAlert('btAlert', 'Error connecting: ' + d.error, true);
+    btn.disabled = false;
+    btn.textContent = '🔗 Connect';
+    return;
+  }
+  if (d.warning) {
+    showAlert('btAlert', d.warning, true);
+  } else {
+    showAlert('btAlert', '✓ Connected successfully.', false);
+  }
+  await loadBluetoothPaired();
+}
+
 function downloadLogs() {
   const lines = document.getElementById('logLines').value;
   const a = document.createElement('a');
@@ -3601,6 +3646,7 @@ BT_SCAN_DURATION   = 8   # seconds bluetoothctl scans before exiting (--timeout 
 BT_PAIR_TIMEOUT    = 30  # pairing can be slow on first attempt
 BT_CONNECT_TIMEOUT = 20  # connection attempt timeout
 BT_INFO_TIMEOUT    = 10  # info / trust / remove commands
+BT_WIIMOTE_RETRY_DELAY = 2  # seconds to wait before retrying connection for Wii Remotes
 
 
 def _validate_bt_mac(mac):
@@ -3788,7 +3834,7 @@ def bluetooth_pair(mac):
 
         # Wiimotes frequently need a second connect attempt after pairing
         if not conn_ok and wiimote:
-            time.sleep(2)
+            time.sleep(BT_WIIMOTE_RETRY_DELAY)
             conn_result = _run_bt("connect", mac, timeout=BT_CONNECT_TIMEOUT)
             conn_out = (conn_result.stdout + conn_result.stderr).lower()
             conn_ok = conn_result.returncode == 0 or "successful" in conn_out
@@ -3829,6 +3875,59 @@ def bluetooth_remove(mac):
         if result.returncode == 0 or "removed" in out:
             return {"ok": True}
         return {"error": (result.stdout + result.stderr).strip()}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def bluetooth_connect(mac):
+    """Connect to an already-paired Bluetooth device by MAC address.
+
+    Retries once for Wii Remotes, which often need a second attempt.
+    Returns {"ok": True} on success, or {"ok": True, "warning": ...} if the
+    connection attempt did not succeed but the device is still paired.
+    """
+    if not _validate_bt_mac(mac):
+        return {"error": "Invalid Bluetooth MAC address"}
+    try:
+        # Resolve device name for type-specific handling
+        info = _run_bt("info", mac)
+        name = ""
+        for line in info.stdout.splitlines():
+            nm = re.match(r'\s*Name:\s+(.*)', line)
+            if nm:
+                name = nm.group(1).strip()
+                break
+        wiimote = _is_wiimote(name)
+        xbox    = _is_xbox(name)
+
+        conn_result = _run_bt("connect", mac, timeout=BT_CONNECT_TIMEOUT)
+        conn_out = (conn_result.stdout + conn_result.stderr).lower()
+        conn_ok = conn_result.returncode == 0 or "successful" in conn_out
+
+        # Wiimotes frequently need a second connect attempt
+        if not conn_ok and wiimote:
+            time.sleep(BT_WIIMOTE_RETRY_DELAY)
+            conn_result = _run_bt("connect", mac, timeout=BT_CONNECT_TIMEOUT)
+            conn_out = (conn_result.stdout + conn_result.stderr).lower()
+            conn_ok = conn_result.returncode == 0 or "successful" in conn_out
+
+        if conn_ok:
+            return {"ok": True}
+
+        if wiimote:
+            reconnect_tip = "Try pressing 1+2 on the Wii Remote to reconnect."
+        elif xbox:
+            reconnect_tip = (
+                "Press the Xbox button to reconnect. "
+                "If that fails, press the Pair button to force reconnection."
+            )
+        else:
+            reconnect_tip = "Try turning the controller off and on again to reconnect."
+
+        return {
+            "ok": True,
+            "warning": f"Connection attempt failed. {reconnect_tip}",
+        }
     except Exception as e:
         return {"error": str(e)}
 
@@ -4473,6 +4572,17 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
                 audit_log("BT remove", data.get("mac", ""), ip=self.client_address[0])
             self._json(result)
 
+        elif path == "/api/bluetooth/connect":
+            try:
+                data = json.loads(body) if body else {}
+            except json.JSONDecodeError:
+                self._json({"error": "Invalid JSON"}, HTTPStatus.BAD_REQUEST)
+                return
+            result = bluetooth_connect(data.get("mac", ""))
+            if result.get("ok") and not result.get("warning"):
+                audit_log("BT connect", data.get("mac", ""), ip=self.client_address[0])
+            self._json(result)
+
         elif path == "/api/bluetooth/setup_usb":
             self._json(setup_usb_bluetooth())
 
@@ -4568,6 +4678,36 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
                 self._json({"ok": True})
             except FileNotFoundError:
                 self._json({"error": "File not found."}, HTTPStatus.NOT_FOUND)
+            except OSError as e:
+                self._json({"error": str(e)}, HTTPStatus.INTERNAL_SERVER_ERROR)
+
+        elif path == "/api/profiles/rename":
+            try:
+                data = json.loads(body) if body else {}
+            except json.JSONDecodeError:
+                self._json({"error": "Invalid JSON"}, HTTPStatus.BAD_REQUEST)
+                return
+            type_    = data.get("type", "")
+            name     = os.path.basename(data.get("name", ""))
+            new_name = os.path.basename(data.get("new_name", ""))
+            fpath     = _resolve_profile_path(type_, name)
+            new_fpath = _resolve_profile_path(type_, new_name)
+            if fpath is None or new_fpath is None:
+                self._json({"error": "Invalid type or name."}, HTTPStatus.BAD_REQUEST)
+                return
+            if fpath == new_fpath:
+                self._json({"error": "New name is the same as the old name."}, HTTPStatus.BAD_REQUEST)
+                return
+            try:
+                if not os.path.exists(fpath):
+                    self._json({"error": "File not found."}, HTTPStatus.NOT_FOUND)
+                    return
+                if os.path.exists(new_fpath):
+                    self._json({"error": "A file with that name already exists."}, HTTPStatus.CONFLICT)
+                    return
+                os.rename(fpath, new_fpath)
+                audit_log(f"Profile rename", f"{type_}/{name} -> {new_name}", ip=self.client_address[0])
+                self._json({"ok": True})
             except OSError as e:
                 self._json({"error": str(e)}, HTTPStatus.INTERNAL_SERVER_ERROR)
 
