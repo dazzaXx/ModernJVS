@@ -2843,6 +2843,10 @@ async function loadSessions() {
   const d = await api('/api/sessions/list');
   const el = document.getElementById('sessionsList');
   if (!el) return;
+  if (!d.password_set) {
+    el.innerHTML = '<span style="font-size:0.85rem;color:var(--muted);">Sessions are only tracked when a WebUI password is set. Set a password in the Security section above to enable session management.</span>';
+    return;
+  }
   if (!d.sessions || d.sessions.length === 0) {
     el.innerHTML = '<span style="font-size:0.85rem;color:var(--muted);">No active sessions.</span>';
     return;
@@ -4303,7 +4307,7 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
         elif path == "/api/webui/password/status":
             self._json({"passwordSet": read_password_hash() is not None})
         elif path == "/api/sessions/list":
-            self._json({"sessions": list_sessions()})
+            self._json({"sessions": list_sessions(), "password_set": read_password_hash() is not None})
         elif path == "/api/audit/log":
             lines_param = query.get("lines", ["200"])[0]
             try:
