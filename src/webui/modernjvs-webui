@@ -1352,8 +1352,11 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
 
   <!-- ====== DEVICES ====== -->
   <div id="panel-devices" class="panel">
+    <div style="margin-bottom:0.75rem;text-align:right;">
+      <button class="btn btn-refresh" onclick="loadDevices();loadBluetoothSection();populateInputTesterDevices();">⟳ Refresh All</button>
+    </div>
     <div class="card">
-      <h2>Connected Input Devices <button class="btn btn-refresh btn-xs" onclick="loadDevices()" style="margin-left:0.5rem;vertical-align:middle;">⟳ Refresh</button></h2>
+      <h2>Connected Input Devices</h2>
       <p style="font-size:0.83rem;color:var(--muted);margin-bottom:1rem;">Shows all <code style="color:var(--accent2);font-family:monospace">/dev/input/event*</code> nodes currently present on the system.</p>
       <div class="table-wrap">
       <table class="device-table">
@@ -1364,7 +1367,7 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
     </div>
 
     <div class="card" style="margin-top:1rem;">
-      <h2>Bluetooth Controllers <button class="btn btn-refresh btn-xs" onclick="loadBluetoothSection()" style="margin-left:0.5rem;vertical-align:middle;">⟳ Refresh</button></h2>
+      <h2>Bluetooth Controllers</h2>
       <p style="font-size:0.83rem;color:var(--muted);margin-bottom:1rem;">Add and remove Bluetooth controllers such as Wii Remotes.</p>
       <div id="btAlert" class="alert"></div>
       <div id="btStatusBanner" class="alert" style="display:none;"></div>
