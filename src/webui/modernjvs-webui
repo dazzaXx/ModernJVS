@@ -421,8 +421,8 @@ _LOGIN_TEMPLATE = """\
   <div class="err" id="lErr"></div>
 </div>
 <footer>
-  <img id="sticks" src="{sticks}" alt="" class="sticks-corner">
   {footer_info}
+  <img id="sticks" src="{sticks}" alt="" class="sticks-corner">
 </footer>
 <script>
 async function doLogin(){{
