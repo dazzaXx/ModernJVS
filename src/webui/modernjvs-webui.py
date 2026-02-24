@@ -1474,6 +1474,29 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
       <div id="diagSerialResult" style="font-family:monospace;font-size:0.84rem;min-height:2rem;"></div>
     </div>
 
+    <!-- JVS Bus Probe -->
+    <div class="card" style="margin-top:1rem;">
+      <h2>JVS Bus Probe</h2>
+      <p style="font-size:0.83rem;color:var(--muted);margin-bottom:1rem;">
+        Sends a JVS <code style="color:var(--accent2);font-family:monospace">RESET</code> +
+        <code style="color:var(--accent2);font-family:monospace">ASSIGN_ADDR</code> broadcast on
+        the selected port and listens for 500&nbsp;ms. Any response bytes indicate a connected,
+        powered-on arcade board. Silence means nothing is connected, the wrong port is selected, or
+        there is a wiring fault.
+        <strong>Stop the ModernJVS service before running this probe</strong> to avoid port conflicts.
+      </p>
+      <div id="diagJvsAlert" class="alert"></div>
+      <div style="display:flex;gap:0.6rem;align-items:center;flex-wrap:wrap;margin-bottom:0.75rem;">
+        <select id="diagJvsPort" style="background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--text);padding:0.35rem 0.6rem;min-width:180px;">
+          <option value="">— loading ports… —</option>
+        </select>
+        <input type="text" id="diagJvsCustom" placeholder="or type a path, e.g. /dev/ttyUSB0"
+               style="flex:1;min-width:200px;background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--text);padding:0.35rem 0.6rem;">
+        <button class="btn btn-start" onclick="runJvsBusProbe()">&#9654; Probe Bus</button>
+      </div>
+      <div id="diagJvsResult" style="font-family:monospace;font-size:0.84rem;min-height:2rem;"></div>
+    </div>
+
     <!-- GPIO Sense Line Test -->
     <div class="card" style="margin-top:1rem;">
       <h2>GPIO Sense Line Test</h2>
@@ -3150,9 +3173,26 @@ async function loadDiagnostics() {
     });
   }
 
+  // Mirror the same port list into the JVS probe dropdown
+  const jvsSel = document.getElementById('diagJvsPort');
+  jvsSel.innerHTML = '';
+  if (ports.length === 0) {
+    jvsSel.innerHTML = '<option value="">— no serial ports found —</option>';
+  } else {
+    jvsSel.innerHTML = '<option value="">— select a port —</option>';
+    ports.forEach(p => {
+      const o = document.createElement('option');
+      o.value = p;
+      o.textContent = p;
+      if (!cfg.error && cfg.device && cfg.device === p) o.selected = true;
+      jvsSel.appendChild(o);
+    });
+  }
+
   // Also fill the custom input with configured device if not in the dropdown
   if (!cfg.error && cfg.device) {
     document.getElementById('diagSerialCustom').placeholder = cfg.device;
+    document.getElementById('diagJvsCustom').placeholder = cfg.device;
   }
 
   // Render port list card
@@ -3216,6 +3256,54 @@ async function runGpioTest() {
     const stateColor = d.state === 'HIGH' ? 'var(--accent2, #61afef)' : (d.state === 'LOW' ? 'var(--yellow, #e5c07b)' : 'var(--text)');
     resultEl.innerHTML = `✓ <span style="color:${stateColor};font-weight:bold;">${_escHtml(d.state || '')}</span> — ${_escHtml(d.message)}`;
     resultEl.style.color = 'var(--text)';
+  } else {
+    resultEl.textContent = '✗ ' + d.message;
+    resultEl.style.color = 'var(--red, #e06c75)';
+  }
+}
+
+async function runJvsBusProbe() {
+  const custom = document.getElementById('diagJvsCustom').value.trim();
+  const sel    = document.getElementById('diagJvsPort').value;
+  const device = custom || sel;
+  if (!device) {
+    showAlert('diagJvsAlert', 'No device selected or typed.', true);
+    return;
+  }
+  const resultEl = document.getElementById('diagJvsResult');
+  resultEl.innerHTML = '⏳ Sending RESET + ASSIGN_ADDR broadcast, listening for 500 ms…';
+  resultEl.style.color = 'var(--muted)';
+  const d = await api('/api/diag/jvs/probe', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({device})
+  });
+  if (d.error) {
+    resultEl.textContent = '✗ ' + d.error;
+    resultEl.style.color = 'var(--red, #e06c75)';
+    return;
+  }
+  if (!d.ok) {
+    resultEl.textContent = '✗ ' + d.message;
+    resultEl.style.color = 'var(--red, #e06c75)';
+    return;
+  }
+  if (d.activity) {
+    resultEl.style.color = 'var(--text)';
+    let html = `<div style="color:var(--green,#98c379);font-weight:bold;">✓ ${_escHtml(d.message)}</div>`;
+    if (d.raw_hex) {
+      html += `<div style="margin-top:0.4rem;color:var(--muted);">Raw bytes: <code style="color:var(--accent2);word-break:break-all;">${_escHtml(d.raw_hex)}${d.truncated ? '…' : ''}</code></div>`;
+    }
+    if (d.packets && d.packets.length > 0) {
+      html += '<div style="margin-top:0.5rem;">Parsed JVS packets:</div>'
+            + '<ul style="margin:0.25rem 0 0 1rem;padding:0;">'
+            + d.packets.map(p =>
+                `<li><code style="color:var(--accent2);">${_escHtml(p.name)}</code>`
+                + ` <span style="color:var(--muted);">→ ${_escHtml(p.dest)}</span></li>`
+              ).join('')
+            + '</ul>';
+    }
+    resultEl.innerHTML = html;
   } else {
     resultEl.textContent = '✗ ' + d.message;
     resultEl.style.color = 'var(--red, #e06c75)';
@@ -3836,6 +3924,278 @@ def diag_serial_test(device_path):
         return {
             "ok": True,
             "message": f"Opened {device_path} successfully at 115200 8N1.",
+        }
+    finally:
+        os.close(fd)
+
+
+# JVS protocol constants used by the bus probe
+_JVS_SYNC   = 0xE0
+_JVS_ESCAPE = 0xD0
+
+# Human-readable names for JVS command bytes (master → slave direction)
+_JVS_CMD_NAMES = {
+    0xF0: "RESET",
+    0xF1: "ASSIGN_ADDR",
+    0xF2: "SET_COMMS_MODE",
+    0x10: "REQUEST_ID",
+    0x11: "COMMAND_VERSION",
+    0x12: "JVS_VERSION",
+    0x13: "COMMS_VERSION",
+    0x14: "CAPABILITIES",
+    0x15: "CONVEY_ID",
+    0x20: "READ_SWITCHES",
+    0x21: "READ_COINS",
+    0x22: "READ_ANALOGS",
+    0x23: "READ_ROTARY",
+    0x24: "READ_KEYPAD",
+    0x25: "READ_LIGHTGUN",
+    0x26: "READ_GPI",
+    0x2E: "REMAINING_PAYOUT",
+    0x2F: "RETRANSMIT",
+    0x30: "DECREASE_COINS",
+    0x31: "SET_PAYOUT",
+    0x32: "WRITE_GPO",
+    0x33: "WRITE_ANALOG",
+    0x34: "WRITE_DISPLAY",
+    0x35: "WRITE_COINS",
+    0x36: "SUBTRACT_PAYOUT",
+    0x37: "WRITE_GPO_BYTE",
+    0x38: "WRITE_GPO_BIT",
+    0x70: "NAMCO_SPECIFIC",
+}
+
+# JVS status/report bytes that appear in slave → master responses
+_JVS_STATUS_NAMES = {
+    0x01: "STATUS_SUCCESS",
+    0x02: "STATUS_UNSUPPORTED",
+    0x03: "STATUS_CHECKSUM_FAILURE",
+    0x04: "STATUS_OVERFLOW",
+}
+
+
+def _parse_jvs_packets(data):
+    """Parse a raw byte sequence and return a list of identified JVS packets.
+
+    Each entry is a dict:
+        name   – command/status name string
+        dest   – human-readable destination ("BROADCAST", "MASTER", or "0xNN")
+        length – declared packet length field value
+
+    This is best-effort: malformed bytes are silently skipped.
+    """
+    packets = []
+    raw = bytes(data)
+    i = 0
+
+    while i < len(raw) and len(packets) < 16:
+        # Scan for SYNC byte
+        if raw[i] != _JVS_SYNC:
+            i += 1
+            continue
+
+        i += 1  # consume SYNC
+
+        # Read destination (with un-escaping)
+        if i >= len(raw):
+            break
+        if raw[i] == _JVS_ESCAPE:
+            i += 1
+            if i >= len(raw):
+                break
+            dest = raw[i] + 1
+        else:
+            dest = raw[i]
+        i += 1
+
+        # Read length (with un-escaping)
+        if i >= len(raw):
+            break
+        if raw[i] == _JVS_ESCAPE:
+            i += 1
+            if i >= len(raw):
+                break
+            length = raw[i] + 1
+        else:
+            length = raw[i]
+        i += 1
+
+        if length < 2:
+            continue  # length must cover at least 1 data byte + 1 checksum
+
+        # Read payload bytes (length − 1 data bytes; last byte is checksum)
+        payload_len = length - 1
+        payload = []
+        for _ in range(payload_len):
+            if i >= len(raw):
+                break
+            if raw[i] == _JVS_ESCAPE:
+                i += 1
+                if i >= len(raw):
+                    break
+                payload.append(raw[i] + 1)
+            else:
+                payload.append(raw[i])
+            i += 1
+
+        if not payload:
+            continue
+
+        first_byte = payload[0]
+        # Destination 0x00 = BUS_MASTER (slave → master response)
+        # Destination 0xFF = BROADCAST (master → all slaves)
+        # Destination 0x01–0xFE = specific slave address
+        if dest == 0xFF:
+            dest_str = "BROADCAST"
+        elif dest == 0x00:
+            dest_str = "MASTER"
+        else:
+            dest_str = f"0x{dest:02X}"
+
+        # For slave→master packets the first payload byte is the status code;
+        # for master→slave the first payload byte is the first command.
+        if dest == 0x00:
+            name = _JVS_STATUS_NAMES.get(first_byte, f"0x{first_byte:02X}")
+        else:
+            name = _JVS_CMD_NAMES.get(first_byte, f"0x{first_byte:02X}")
+
+        packets.append({"name": name, "dest": dest_str, "length": length})
+
+    return packets
+
+
+def diag_jvs_probe(device_path):
+    """Send a JVS RESET + ASSIGN_ADDR broadcast and listen for 500 ms.
+
+    Opens device_path at 115200 8N1, flushes stale input, sends:
+      1. JVS RESET broadcast (SYNC | 0xFF | 0x03 | CMD_RESET(0xF0) | 0xD9 | checksum)
+      2. JVS ASSIGN_ADDR broadcast (SYNC | 0xFF | 0x03 | CMD_ASSIGN_ADDR(0xF1) | 0x01 | checksum)
+    then collects any bytes received within 500 ms.
+
+    Returns a dict:
+        ok            – False on OS/TTY errors, True otherwise
+        activity      – True if any bytes were received
+        bytes_received – count of received bytes
+        raw_hex       – space-separated hex of up to 64 bytes
+        truncated     – True when more than 64 bytes were received
+        packets       – list of parsed JVS packet dicts (see _parse_jvs_packets)
+        message       – human-readable summary
+    """
+    import termios
+    import select as _select
+
+    device_path = device_path.strip()
+    if not device_path:
+        return {"ok": False, "message": "No device path configured."}
+
+    # Only allow /dev/ paths to prevent path traversal
+    if not device_path.startswith("/dev/"):
+        return {"ok": False, "message": f"Refusing to probe non-/dev/ path: {device_path}"}
+
+    try:
+        fd = os.open(device_path, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
+    except OSError as e:
+        return {"ok": False, "message": f"Cannot open {device_path}: {e.strerror} (errno {e.errno})"}
+
+    try:
+        if not os.isatty(fd):
+            return {"ok": False, "message": f"{device_path} is not a TTY device."}
+
+        # Configure 115200 8N1 raw mode (mirrors what the C daemon does)
+        try:
+            attrs = termios.tcgetattr(fd)
+        except termios.error as e:
+            return {"ok": False, "message": f"tcgetattr failed on {device_path}: {e}"}
+
+        attrs[4] = termios.B115200   # c_ispeed
+        attrs[5] = termios.B115200   # c_ospeed
+        attrs[2] = termios.CS8 | termios.CREAD | termios.CLOCAL  # c_cflag
+        attrs[0] = 0                 # c_iflag – disable all input processing
+        attrs[1] = 0                 # c_oflag – disable all output processing
+        attrs[3] = 0                 # c_lflag – disable echo / canonical mode
+        attrs[6][termios.VMIN]  = 0
+        attrs[6][termios.VTIME] = 0
+
+        try:
+            termios.tcsetattr(fd, termios.TCSAFLUSH, attrs)
+        except termios.error as e:
+            return {"ok": False, "message": f"tcsetattr failed on {device_path}: {e}"}
+
+        # Flush any stale input/output
+        try:
+            termios.tcflush(fd, termios.TCIOFLUSH)
+        except termios.error:
+            pass
+
+        # ----------------------------------------------------------------
+        # Build probe packets (master → all slaves, broadcast addr 0xFF)
+        #
+        # RESET broadcast:
+        #   SYNC(0xE0) | dest(0xFF) | len(0x03) | CMD_RESET(0xF0) | 0xD9 | chk
+        #   checksum = (0xFF + 0x03 + 0xF0 + 0xD9) & 0xFF = 0x2CB & 0xFF = 0xCB
+        #
+        # ASSIGN_ADDR broadcast (assign address 0x01):
+        #   SYNC(0xE0) | dest(0xFF) | len(0x03) | CMD_ASSIGN_ADDR(0xF1) | 0x01 | chk
+        #   checksum = (0xFF + 0x03 + 0xF1 + 0x01) & 0xFF = 0x1F4 & 0xFF = 0xF4
+        #
+        # None of these bytes equal SYNC(0xE0) or ESCAPE(0xD0) so no escaping
+        # is needed in the data portion.
+        # ----------------------------------------------------------------
+        reset_packet       = bytes([0xE0, 0xFF, 0x03, 0xF0, 0xD9, 0xCB])
+        assign_addr_packet = bytes([0xE0, 0xFF, 0x03, 0xF1, 0x01, 0xF4])
+
+        try:
+            os.write(fd, reset_packet)
+        except OSError:
+            pass  # write failure is non-fatal; we still listen for traffic
+
+        time.sleep(0.005)  # 5 ms gap between packets
+
+        try:
+            os.write(fd, assign_addr_packet)
+        except OSError:
+            pass
+
+        # Collect bytes for up to 500 ms
+        deadline  = time.monotonic() + 0.5
+        received  = bytearray()
+
+        while time.monotonic() < deadline:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            r, _, _ = _select.select([fd], [], [], min(remaining, 0.05))
+            if fd in r:
+                try:
+                    chunk = os.read(fd, 256)
+                    if chunk:
+                        received.extend(chunk)
+                except OSError:
+                    break
+
+        # Parse any JVS packets found in the received bytes
+        packets   = _parse_jvs_packets(received)
+        hex_str   = received[:64].hex(' ') if received else ''
+        truncated = len(received) > 64
+
+        if received:
+            msg = f"Bus activity detected — {len(received)} byte(s) received"
+            if packets:
+                names = ', '.join(p['name'] for p in packets[:3])
+                msg += f" ({names})"
+            if truncated:
+                msg += " (showing first 64 bytes)"
+        else:
+            msg = "No response after 500 ms — silence on bus (nothing connected, wrong port, or wiring fault)"
+
+        return {
+            "ok":             True,
+            "activity":       bool(received),
+            "bytes_received": len(received),
+            "raw_hex":        hex_str,
+            "truncated":      truncated,
+            "packets":        packets,
+            "message":        msg,
         }
     finally:
         os.close(fd)
@@ -5400,6 +5760,18 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
                 # Fall back to the currently configured DEVICE_PATH
                 device = read_config().get("DEVICE_PATH", "")
             self._json(diag_serial_test(device))
+
+        elif path == "/api/diag/jvs/probe":
+            try:
+                data = json.loads(body) if body else {}
+            except json.JSONDecodeError:
+                self._json({"error": "Invalid JSON"}, HTTPStatus.BAD_REQUEST)
+                return
+            device = data.get("device", "").strip()
+            if not device:
+                # Fall back to the currently configured DEVICE_PATH
+                device = read_config().get("DEVICE_PATH", "")
+            self._json(diag_jvs_probe(device))
 
         elif path == "/api/diag/gpio":
             try:
