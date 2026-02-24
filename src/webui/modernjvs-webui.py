@@ -1903,7 +1903,10 @@ async function saveConfig() {
 
 async function saveConfigAndRestart() {
   const saved = await saveConfig();
-  if (saved) await serviceAction('restart');
+  if (saved) {
+    showAlert('cfgAlert', 'Configuration saved. Restarting service\u2026', false);
+    await serviceAction('restart');
+  }
 }
 
 function resetConfig() {
