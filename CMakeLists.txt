@@ -93,7 +93,8 @@ option(ENABLE_WEBUI "Include the WebUI server in the installation" ON)
 if(ENABLE_WEBUI)
     message(STATUS "WebUI: enabled (use -DENABLE_WEBUI=OFF to exclude)")
     install(PROGRAMS
-        ${CMAKE_SOURCE_DIR}/src/webui/modernjvs-webui
+        ${CMAKE_SOURCE_DIR}/src/webui/modernjvs-webui.py
+        RENAME modernjvs-webui
         COMPONENT ${PROJECT_NAME}
         DESTINATION "bin/"
     )
