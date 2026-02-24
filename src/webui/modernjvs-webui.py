@@ -1735,6 +1735,7 @@ function showTab(name, btn) {
   if (name === 'profiles') loadProfiles();
   if (name === 'devices') { loadDevices(); loadBluetoothSection(); populateInputTesterDevices(); }
   if (name !== 'devices') stopInputTest(); // stop streaming when leaving the Devices tab
+  if (name !== 'diagnostics') cancelDiagTests(); // abort any in-flight diag tests when leaving
   if (name === 'diagnostics') loadDiagnostics();
   if (name === 'webui-settings') { initAppearancePanel(); loadSessions(); }
 }
@@ -3225,6 +3226,23 @@ async function loadDiagnostics() {
   loadUsbDevices();
 }
 
+// ---- Diagnostics abort / cleanup ----
+let _diagAbortCtrl = null;
+
+function _diagAbortCurrent() {
+  if (_diagAbortCtrl) { try { _diagAbortCtrl.abort(); } catch(_) {} }
+  _diagAbortCtrl = new AbortController();
+  return _diagAbortCtrl;
+}
+
+function cancelDiagTests() {
+  if (_diagAbortCtrl) { try { _diagAbortCtrl.abort(); } catch(_) {} _diagAbortCtrl = null; }
+  ['diagSerialResult', 'diagGpioResult', 'diagJvsResult'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) { el.textContent = ''; el.style.color = ''; }
+  });
+}
+
 async function runSerialTest() {
   const custom = document.getElementById('diagSerialCustom').value.trim();
   const sel    = document.getElementById('diagSerialPort').value;
@@ -3233,14 +3251,17 @@ async function runSerialTest() {
     showAlert('diagSerialAlert', 'No device selected or typed.', true);
     return;
   }
+  const ac = _diagAbortCurrent();
   const resultEl = document.getElementById('diagSerialResult');
   resultEl.textContent = '⏳ Testing…';
   resultEl.style.color = 'var(--muted)';
   const d = await api('/api/diag/serial', {
     method: 'POST',
     headers: {'Content-Type':'application/json'},
-    body: JSON.stringify({device})
+    body: JSON.stringify({device}),
+    signal: ac.signal
   });
+  if (ac.signal.aborted) return;
   if (d.error) {
     resultEl.textContent = '✗ ' + d.error;
     resultEl.style.color = 'var(--red, #e06c75)';
@@ -3259,14 +3280,17 @@ async function runGpioTest() {
     showAlert('diagGpioAlert', 'Enter a pin number.', true);
     return;
   }
+  const ac = _diagAbortCurrent();
   const resultEl = document.getElementById('diagGpioResult');
   resultEl.textContent = '⏳ Reading…';
   resultEl.style.color = 'var(--muted)';
   const d = await api('/api/diag/gpio', {
     method: 'POST',
     headers: {'Content-Type':'application/json'},
-    body: JSON.stringify({pin})
+    body: JSON.stringify({pin}),
+    signal: ac.signal
   });
+  if (ac.signal.aborted) return;
   if (d.error) {
     resultEl.textContent = '✗ ' + d.error;
     resultEl.style.color = 'var(--red, #e06c75)';
@@ -3288,14 +3312,17 @@ async function setGpioPin(level) {
   }
   const durRaw = parseInt(document.getElementById('diagGpioDuration').value, 10);
   const duration = (!isNaN(durRaw) && durRaw >= 1) ? Math.min(durRaw, 60) : 3;
+  const ac = _diagAbortCurrent();
   const resultEl = document.getElementById('diagGpioResult');
   resultEl.textContent = `⏳ Driving pin ${level.toUpperCase()} for ${duration} s…`;
   resultEl.style.color = 'var(--muted)';
   const d = await api('/api/diag/gpio/set', {
     method: 'POST',
     headers: {'Content-Type':'application/json'},
-    body: JSON.stringify({pin, level, duration})
+    body: JSON.stringify({pin, level, duration}),
+    signal: ac.signal
   });
+  if (ac.signal.aborted) return;
   if (d.error) {
     resultEl.textContent = '✗ ' + d.error;
     resultEl.style.color = 'var(--red, #e06c75)';
@@ -3317,14 +3344,17 @@ async function runJvsBusProbe() {
     showAlert('diagJvsAlert', 'No device selected or typed.', true);
     return;
   }
+  const ac = _diagAbortCurrent();
   const resultEl = document.getElementById('diagJvsResult');
   resultEl.innerHTML = '⏳ Checking service state and probing bus…';
   resultEl.style.color = 'var(--muted)';
   const d = await api('/api/diag/jvs/probe', {
     method: 'POST',
     headers: {'Content-Type':'application/json'},
-    body: JSON.stringify({device})
+    body: JSON.stringify({device}),
+    signal: ac.signal
   });
+  if (ac.signal.aborted) return;
   if (d.error) {
     resultEl.textContent = '✗ ' + d.error;
     resultEl.style.color = 'var(--red, #e06c75)';
@@ -3374,14 +3404,17 @@ async function runJvsBusMonitor() {
     showAlert('diagJvsAlert', 'No device selected or typed.', true);
     return;
   }
+  const ac = _diagAbortCurrent();
   const resultEl = document.getElementById('diagJvsResult');
   resultEl.innerHTML = '⏳ Listening on bus for 5 seconds…';
   resultEl.style.color = 'var(--muted)';
   const d = await api('/api/diag/jvs/monitor', {
     method: 'POST',
     headers: {'Content-Type':'application/json'},
-    body: JSON.stringify({device})
+    body: JSON.stringify({device}),
+    signal: ac.signal
   });
+  if (ac.signal.aborted) return;
   if (d.error) {
     resultEl.textContent = '✗ ' + d.error;
     resultEl.style.color = 'var(--red, #e06c75)';
