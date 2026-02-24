@@ -1167,7 +1167,16 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
         <div class="stat-card"><div class="val" id="currentGame">—</div><div class="lbl">Current Game</div></div>
         <div class="stat-card"><div class="val" id="currentDevice">—</div><div class="lbl">Device Path</div></div>
       </div>
-      <div id="playerSlots"></div>
+    </div>
+
+    <div class="card">
+      <h2>Player Assignments</h2>
+      <div class="stat-grid" id="playerSlots">
+        <div class="stat-card"><div class="val" style="font-size:0.85rem;word-break:break-all;">—</div><div class="lbl">Player 1</div></div>
+        <div class="stat-card"><div class="val" style="font-size:0.85rem;word-break:break-all;">—</div><div class="lbl">Player 2</div></div>
+        <div class="stat-card"><div class="val" style="font-size:0.85rem;word-break:break-all;">—</div><div class="lbl">Player 3</div></div>
+        <div class="stat-card"><div class="val" style="font-size:0.85rem;word-break:break-all;">—</div><div class="lbl">Player 4</div></div>
+      </div>
     </div>
 
     <div class="card">
@@ -1494,6 +1503,19 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
       <div id="diagPortListWrap" style="font-family:monospace;font-size:0.84rem;"></div>
     </div>
 
+    <!-- USB Device Inspector -->
+    <div class="card" style="margin-top:1rem;">
+      <h2>USB Device Inspector <button class="btn btn-refresh btn-xs" onclick="loadUsbDevices()" style="margin-left:0.5rem;vertical-align:middle;">⟳</button></h2>
+      <p style="font-size:0.83rem;color:var(--muted);margin-bottom:1rem;">
+        All connected USB devices read from
+        <code style="color:var(--accent2);font-family:monospace">/sys/bus/usb/devices/</code>.
+        Known RS-485/serial adapters are highlighted. Shows the currently bound kernel driver —
+        useful when a <code style="color:var(--accent2);font-family:monospace">/dev/ttyUSB*</code>
+        node is not appearing.
+      </p>
+      <div id="diagUsbWrap" style="font-size:0.84rem;"></div>
+    </div>
+
   </div>
 
   <!-- ====== APPEARANCE ====== -->
@@ -1713,15 +1735,11 @@ async function refreshDashboard() {
 
   const players = d.players || [];
   const psEl = document.getElementById('playerSlots');
-  if (players.length > 0) {
-    psEl.innerHTML = '<div class="stat-grid" style="margin-top:0.75rem;">'
-      + players.map(p =>
-          `<div class="stat-card"><div class="val" style="font-size:0.85rem;word-break:break-all;">${_escHtml(p.profile)}</div><div class="lbl">Player ${p.player}</div></div>`
-        ).join('')
-      + '</div>';
-  } else {
-    psEl.innerHTML = '';
-  }
+  const playerMap = {};
+  players.forEach(p => { playerMap[p.player] = p.profile; });
+  psEl.innerHTML = [1, 2, 3, 4].map(n =>
+    `<div class="stat-card"><div class="val" style="font-size:0.85rem;word-break:break-all;">${_escHtml(playerMap[n] || 'Not assigned')}</div><div class="lbl">Player ${n}</div></div>`
+  ).join('');
 }
 
 async function refreshSysinfo() {
@@ -3145,6 +3163,8 @@ async function loadDiagnostics() {
   } else {
     wrap.innerHTML = ports.map(p => `<div style="padding:0.15rem 0;color:var(--accent2);">${_escHtml(p)}</div>`).join('');
   }
+
+  loadUsbDevices();
 }
 
 async function runSerialTest() {
@@ -3200,6 +3220,47 @@ async function runGpioTest() {
     resultEl.textContent = '✗ ' + d.message;
     resultEl.style.color = 'var(--red, #e06c75)';
   }
+}
+
+async function loadUsbDevices() {
+  const wrap = document.getElementById('diagUsbWrap');
+  wrap.textContent = '⏳ Scanning…';
+  wrap.style.color = 'var(--muted)';
+  const d = await api('/api/diag/usb/devices');
+  if (d.error) {
+    wrap.textContent = '✗ ' + d.error;
+    wrap.style.color = 'var(--red, #e06c75)';
+    return;
+  }
+  const devices = d.devices || [];
+  if (devices.length === 0) {
+    wrap.textContent = 'No USB devices found.';
+    wrap.style.color = 'var(--muted)';
+    return;
+  }
+  wrap.style.color = '';
+  wrap.innerHTML = devices.map(dev => {
+    const vidpid = dev.vid + ':' + dev.pid;
+    const label  = dev.product || dev.manufacturer || vidpid;
+    const mfgStr = dev.manufacturer ? `<span style="color:var(--muted);margin-right:0.25rem;">${_escHtml(dev.manufacturer)}</span>` : '';
+    let driverBadge;
+    if (dev.driver) {
+      const dc = dev.is_serial_driver ? 'var(--accent2, #61afef)' : 'var(--muted)';
+      driverBadge = `<span style="font-size:0.75rem;padding:0.1rem 0.4rem;background:var(--surface2,#2c313a);border-radius:3px;color:${dc};">${_escHtml(dev.driver)}</span>`;
+    } else {
+      driverBadge = `<span style="font-size:0.75rem;padding:0.1rem 0.4rem;background:var(--surface2,#2c313a);border-radius:3px;color:var(--red,#e06c75);">unbound</span>`;
+    }
+    const rs485Badge = dev.is_rs485
+      ? `<span style="font-size:0.75rem;padding:0.1rem 0.4rem;background:var(--yellow,#e5c07b);color:#1a1a1a;border-radius:3px;">RS-485/Serial: ${_escHtml(dev.rs485_chip)}</span>`
+      : '';
+    return `<div style="padding:0.35rem 0;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:0.4rem;flex-wrap:wrap;">`
+      + `<code style="color:var(--accent2);font-family:monospace;">${_escHtml(vidpid)}</code>`
+      + mfgStr
+      + `<strong>${_escHtml(label)}</strong>`
+      + (rs485Badge ? ' ' + rs485Badge : '')
+      + ' ' + driverBadge
+      + `</div>`;
+  }).join('');
 }
 
 // ---- Init ----
@@ -3780,6 +3841,83 @@ def diag_serial_test(device_path):
         os.close(fd)
 
 
+def diag_usb_devices():
+    """List connected USB devices by reading /sys/bus/usb/devices/.
+
+    For each device that exposes idVendor/idProduct (i.e. actual devices,
+    not USB interfaces or root hubs), returns:
+      path        – sysfs entry name (e.g. "1-1.2")
+      vid / pid   – vendor/product ID (4-char hex strings, lower-case)
+      manufacturer / product – human-readable strings (may be empty)
+      driver      – kernel driver currently bound to the first interface,
+                    or "" if unbound
+      is_rs485    – True when the VID:PID matches a known RS-485/serial adapter
+      rs485_chip  – friendly chip name when is_rs485 is True, else ""
+      is_serial_driver – True when the bound driver is a serial/CDC driver
+    """
+    usb_base = "/sys/bus/usb/devices"
+    devices = []
+
+    try:
+        entries = os.listdir(usb_base)
+    except OSError as e:
+        return {"error": f"Cannot read {usb_base}: {e.strerror}"}
+
+    for entry in sorted(entries):
+        dev_path = os.path.join(usb_base, entry)
+
+        def _read_attr(fname, base_path=dev_path):
+            try:
+                with open(os.path.join(base_path, fname), errors="replace") as f:
+                    return f.read().strip()
+            except OSError:
+                return None
+
+        vid = _read_attr("idVendor")
+        pid = _read_attr("idProduct")
+        # Skip USB interfaces (e.g. "1-1.2:1.0") and entries without VID/PID
+        if not vid or not pid:
+            continue
+
+        manufacturer = _read_attr("manufacturer") or ""
+        product      = _read_attr("product")      or ""
+
+        # Find the first interface sub-directory that has a bound driver
+        driver = ""
+        try:
+            for iface in sorted(os.listdir(dev_path)):
+                iface_path = os.path.join(dev_path, iface)
+                if not os.path.isdir(iface_path):
+                    continue
+                drv_link = os.path.join(iface_path, "driver")
+                if os.path.islink(drv_link):
+                    driver = os.path.basename(os.readlink(drv_link))
+                    break
+        except OSError:
+            pass
+
+        vid_lower = vid.lower()
+        pid_lower = pid.lower()
+        key = (vid_lower, pid_lower)
+        is_rs485   = key in _USB_RS485_KNOWN
+        rs485_chip = _USB_RS485_KNOWN.get(key, "")
+        is_serial_driver = driver in _USB_SERIAL_DRIVERS
+
+        devices.append({
+            "path":             entry,
+            "vid":              vid_lower,
+            "pid":              pid_lower,
+            "manufacturer":     manufacturer,
+            "product":          product,
+            "driver":           driver,
+            "is_rs485":         is_rs485,
+            "rs485_chip":       rs485_chip,
+            "is_serial_driver": is_serial_driver,
+        })
+
+    return {"devices": devices}
+
+
 def _gpio_read_line(chip_path, line_offset):
     """Read a GPIO line value using ctypes and the Linux GPIO character device ioctl.
 
@@ -4148,6 +4286,25 @@ BT_CONNECT_TIMEOUT = 20  # connection attempt timeout
 BT_INFO_TIMEOUT    = 10  # info / trust / remove commands
 BT_CONNECT_RETRY_DELAY = 2  # seconds to wait before retrying a failed connection attempt
 BT_CONNECT_MAX_RETRIES = 5  # number of automatic retries after an initial failed connect
+
+# Known RS-485 / serial adapter VID:PID → human-readable chip name.
+# Used by diag_usb_devices() to highlight adapters in the USB inspector.
+_USB_RS485_KNOWN = {
+    ("0403", "6001"): "FTDI FT232R",
+    ("0403", "6010"): "FTDI FT2232",
+    ("0403", "6011"): "FTDI FT4232",
+    ("0403", "6014"): "FTDI FT232H",
+    ("0403", "6015"): "FTDI FT-X",
+    ("1a86", "7523"): "CH340",
+    ("1a86", "55d4"): "CH343P",
+    ("10c4", "ea60"): "CP2102/CP2104",
+    ("10c4", "ea70"): "CP210x",
+    ("067b", "2303"): "PL2303",
+    ("04e2", "1410"): "XR21V1410",
+}
+
+# Kernel drivers that expose serial TTY nodes (/dev/ttyUSB* or /dev/ttyACM*).
+_USB_SERIAL_DRIVERS = {"ftdi_sio", "ch341", "cdc_acm", "cp210x", "xr_serial", "pl2303"}
 
 
 def _validate_bt_mac(mac):
@@ -4937,6 +5094,8 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
                 _glob.glob("/dev/ttyS*")
             )
             self._json({"ports": ports})
+        elif path == "/api/diag/usb/devices":
+            self._json(diag_usb_devices())
         else:
             self._not_found()
 
