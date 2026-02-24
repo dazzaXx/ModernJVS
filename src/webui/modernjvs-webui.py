@@ -443,8 +443,38 @@ async function doLogin(){{
   }}catch(e){{err.textContent='Network error: '+e;}}
 }}
 // Apply saved theme
+function updateFavicon(theme){{
+  var filters={{
+    dark:'hue-rotate(330deg) saturate(1.1) brightness(0.75)',
+    black:'hue-rotate(330deg) saturate(1.1) brightness(0.75)',
+    light:'grayscale(1) brightness(0.5)',
+    midnight:'hue-rotate(182deg) saturate(1.1)',
+    dracula:'hue-rotate(238deg) saturate(1.2)',
+    terminal:'hue-rotate(118deg) saturate(1.2)',
+    ocean:'hue-rotate(178deg) saturate(1.2)',
+    sunset:'hue-rotate(6deg) saturate(1.2)',
+    forest:'hue-rotate(118deg) saturate(1.2)',
+    purple:'hue-rotate(248deg) saturate(1.2)',
+    neon:'hue-rotate(166deg) saturate(1.2)',
+    rose:'hue-rotate(334deg) saturate(1.1)',
+    amber:'hue-rotate(20deg) saturate(1.2)',
+    solarized:'hue-rotate(162deg) saturate(0.9)'
+  }};
+  var src=document.getElementById('sticks');
+  var link=document.querySelector("link[rel='icon']");
+  if(!src||!link)return;
+  var c=document.createElement('canvas');
+  c.width=c.height=32;
+  var ctx=c.getContext('2d');
+  ctx.filter=filters[theme]||filters.black;
+  ctx.drawImage(src,0,0,32,32);
+  link.href=c.toDataURL();
+}}
 fetch('/api/webui/settings').then(r=>r.json()).then(s=>{{
-  if(s&&s.theme)document.documentElement.setAttribute('data-theme',s.theme);
+  if(s&&s.theme){{
+    document.documentElement.setAttribute('data-theme',s.theme);
+    updateFavicon(s.theme);
+  }}
 }}).catch(()=>{{}});
 // Show version badge
 fetch('/api/version').then(r=>r.json()).then(d=>{{
@@ -2669,6 +2699,34 @@ const THEME_NAMES = {
 // Seconds to wait for the WebUI service to come back up after a restart
 const WEBUI_RESTART_WAIT_SECS = 8;
 
+function updateFavicon(theme) {
+  const filters = {
+    dark:      'hue-rotate(330deg) saturate(1.1) brightness(0.75)',
+    black:     'hue-rotate(330deg) saturate(1.1) brightness(0.75)',
+    light:     'grayscale(1) brightness(0.5)',
+    midnight:  'hue-rotate(182deg) saturate(1.1)',
+    dracula:   'hue-rotate(238deg) saturate(1.2)',
+    terminal:  'hue-rotate(118deg) saturate(1.2)',
+    ocean:     'hue-rotate(178deg) saturate(1.2)',
+    sunset:    'hue-rotate(6deg) saturate(1.2)',
+    forest:    'hue-rotate(118deg) saturate(1.2)',
+    purple:    'hue-rotate(248deg) saturate(1.2)',
+    neon:      'hue-rotate(166deg) saturate(1.2)',
+    rose:      'hue-rotate(334deg) saturate(1.1)',
+    amber:     'hue-rotate(20deg) saturate(1.2)',
+    solarized: 'hue-rotate(162deg) saturate(0.9)',
+  };
+  const src  = document.getElementById('sticks');
+  const link = document.querySelector("link[rel='icon']");
+  if (!src || !link) return;
+  const c = document.createElement('canvas');
+  c.width = c.height = 32;
+  const ctx = c.getContext('2d');
+  ctx.filter = filters[theme] || filters.black;
+  ctx.drawImage(src, 0, 0, 32, 32);
+  link.href = c.toDataURL();
+}
+
 function applyAppearanceSettings(s) {
   const root = document.documentElement;
 
@@ -2686,6 +2744,8 @@ function applyAppearanceSettings(s) {
   // Background overlay (scrim) opacity
   const scrim = (typeof s.bgScrimOpacity === 'number') ? s.bgScrimOpacity : 0.70;
   document.documentElement.style.setProperty('--bg-scrim-opacity', scrim);
+
+  updateFavicon(s.theme || 'black');
 }
 
 // Apply the server-stored background image (if any) to the page body.
