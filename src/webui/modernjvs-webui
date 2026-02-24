@@ -3646,7 +3646,7 @@ BT_SCAN_DURATION   = 8   # seconds bluetoothctl scans before exiting (--timeout 
 BT_PAIR_TIMEOUT    = 30  # pairing can be slow on first attempt
 BT_CONNECT_TIMEOUT = 20  # connection attempt timeout
 BT_INFO_TIMEOUT    = 10  # info / trust / remove commands
-BT_WIIMOTE_RETRY_DELAY = 2  # seconds to wait before retrying connection for Wii Remotes
+BT_CONNECT_RETRY_DELAY = 2  # seconds to wait before retrying a failed connection attempt
 
 
 def _validate_bt_mac(mac):
@@ -3832,9 +3832,9 @@ def bluetooth_pair(mac):
         conn_out = (conn_result.stdout + conn_result.stderr).lower()
         conn_ok = conn_result.returncode == 0 or "successful" in conn_out
 
-        # Wiimotes frequently need a second connect attempt after pairing
-        if not conn_ok and wiimote:
-            time.sleep(BT_WIIMOTE_RETRY_DELAY)
+        # Some devices need a second connect attempt after pairing
+        if not conn_ok:
+            time.sleep(BT_CONNECT_RETRY_DELAY)
             conn_result = _run_bt("connect", mac, timeout=BT_CONNECT_TIMEOUT)
             conn_out = (conn_result.stdout + conn_result.stderr).lower()
             conn_ok = conn_result.returncode == 0 or "successful" in conn_out
@@ -3904,9 +3904,9 @@ def bluetooth_connect(mac):
         conn_out = (conn_result.stdout + conn_result.stderr).lower()
         conn_ok = conn_result.returncode == 0 or "successful" in conn_out
 
-        # Wiimotes frequently need a second connect attempt
-        if not conn_ok and wiimote:
-            time.sleep(BT_WIIMOTE_RETRY_DELAY)
+        # Some devices need a second connect attempt
+        if not conn_ok:
+            time.sleep(BT_CONNECT_RETRY_DELAY)
             conn_result = _run_bt("connect", mac, timeout=BT_CONNECT_TIMEOUT)
             conn_out = (conn_result.stdout + conn_result.stderr).lower()
             conn_ok = conn_result.returncode == 0 or "successful" in conn_out
