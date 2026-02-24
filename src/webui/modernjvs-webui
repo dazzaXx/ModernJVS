@@ -3731,9 +3731,10 @@ def diag_serial_test(device_path):
 def _gpio_read_line(chip_path, line_offset):
     """Read a GPIO line value using ctypes and the Linux GPIO character device ioctl.
 
-    Uses the v1 GPIO ABI (GPIO_GET_LINEHANDLE_IOCTL), available on all kernels
-    >= 4.8 with GPIO character device support.  No external CLI tools or Python
-    C extensions are required.
+    Tries the v1 GPIO ABI (GPIO_GET_LINEHANDLE_IOCTL, kernel >= 4.8) first, then
+    falls back to the v2 GPIO ABI (GPIO_V2_GET_LINE_IOCTL, kernel >= 5.10, used
+    by libgpiod v2) if the kernel does not recognise the v1 ioctl (ENOTTY).
+    No external CLI tools or Python C extensions are required.
 
     Returns 0 or 1 on success.
     Raises PermissionError if the caller lacks access to chip_path or the line.
@@ -3741,13 +3742,15 @@ def _gpio_read_line(chip_path, line_offset):
     line_offset is out of range (EINVAL).
     """
     import ctypes
+    import errno
     import fcntl
 
+    # ---- v1 ABI (used by libgpiod v1, kernel >= 4.8) ----
     GPIOHANDLES_MAX = 64
     GPIOHANDLE_REQUEST_INPUT = 1
     # _IOWR(0xB4, 0x03, struct gpiohandle_request)  sizeof = 364 bytes
     GPIO_GET_LINEHANDLE_IOCTL = 0xC16CB403
-    # _IOWR(0xB4, 0x08, struct gpiohandle_data)  sizeof = 64 bytes
+    # _IOWR(0xB4, 0x08, struct gpiohandle_data)     sizeof = 64 bytes
     GPIOHANDLE_GET_LINE_VALUES_IOCTL = 0xC040B408
 
     class GpiohandleRequest(ctypes.Structure):
@@ -3765,21 +3768,103 @@ def _gpio_read_line(chip_path, line_offset):
             ("values", ctypes.c_uint8 * GPIOHANDLES_MAX),
         ]
 
+    # ---- v2 ABI (used by libgpiod v2, kernel >= 5.10) ----
+    GPIO_V2_LINES_MAX        = 64
+    GPIO_MAX_NAME_SIZE       = 32
+    GPIO_V2_LINE_NUM_ATTRS_MAX = 10
+    GPIO_V2_LINE_FLAG_INPUT  = (1 << 3)
+    # _IOWR(0xB4, 0x0F, struct gpio_v2_line_request)  sizeof = 592 bytes
+    GPIO_V2_GET_LINE_IOCTL          = 0xC250B40F
+    # _IOWR(0xB4, 0x12, struct gpio_v2_line_values)   sizeof = 16 bytes
+    GPIO_V2_LINE_GET_VALUES_IOCTL   = 0xC010B412
+
+    class _GpioV2LineAttrUnion(ctypes.Union):
+        _fields_ = [
+            ("flags",              ctypes.c_uint64),
+            ("values",             ctypes.c_uint64),
+            ("debounce_period_us", ctypes.c_uint32),
+        ]
+
+    class GpioV2LineAttribute(ctypes.Structure):
+        _fields_ = [
+            ("id",      ctypes.c_uint32),
+            ("padding", ctypes.c_uint32),
+            ("u",       _GpioV2LineAttrUnion),
+        ]
+
+    class GpioV2LineConfigAttribute(ctypes.Structure):
+        _fields_ = [
+            ("attr", GpioV2LineAttribute),
+            ("mask", ctypes.c_uint64),
+        ]
+
+    class GpioV2LineConfig(ctypes.Structure):
+        _fields_ = [
+            ("flags",     ctypes.c_uint64),
+            ("num_attrs", ctypes.c_uint32),
+            ("padding",   ctypes.c_uint32 * 5),
+            ("attrs",     GpioV2LineConfigAttribute * GPIO_V2_LINE_NUM_ATTRS_MAX),
+        ]
+
+    class GpioV2LineRequest(ctypes.Structure):
+        _fields_ = [
+            ("offsets",           ctypes.c_uint32 * GPIO_V2_LINES_MAX),
+            ("consumer",          ctypes.c_char   * GPIO_MAX_NAME_SIZE),
+            ("config",            GpioV2LineConfig),
+            ("num_lines",         ctypes.c_uint32),
+            ("event_buffer_size", ctypes.c_uint32),
+            ("padding",           ctypes.c_uint32 * 5),
+            ("fd",                ctypes.c_int32),
+        ]
+
+    class GpioV2LineValues(ctypes.Structure):
+        _fields_ = [
+            ("bits", ctypes.c_uint64),
+            ("mask", ctypes.c_uint64),
+        ]
+
     chip_fd = os.open(chip_path, os.O_RDONLY)
     try:
+        # Try v1 ABI first (kernel >= 4.8, used by libgpiod v1).
+        # ENOTTY from the chip ioctl means the kernel doesn't support v1; any
+        # other error (e.g. EINVAL for a bad offset, EPERM) propagates normally.
         req = GpiohandleRequest()
         req.lineoffsets[0] = line_offset
         req.flags = GPIOHANDLE_REQUEST_INPUT
         req.consumer_label = b"modernjvs-webui"
         req.lines = 1
-        fcntl.ioctl(chip_fd, GPIO_GET_LINEHANDLE_IOCTL, req)  # OSError(EINVAL) if line_offset is out of range
-        line_fd = req.fd
+        _v1_line_fd = None
         try:
-            data = GpiohandleData()
-            fcntl.ioctl(line_fd, GPIOHANDLE_GET_LINE_VALUES_IOCTL, data)
-            return data.values[0]
+            fcntl.ioctl(chip_fd, GPIO_GET_LINEHANDLE_IOCTL, req)  # OSError(EINVAL) if line_offset is out of range
+            _v1_line_fd = req.fd
+        except OSError as e:
+            if e.errno != errno.ENOTTY:
+                raise
+            # v1 ioctl not supported by this kernel — fall through to v2
+
+        if _v1_line_fd is not None:
+            try:
+                data = GpiohandleData()
+                fcntl.ioctl(_v1_line_fd, GPIOHANDLE_GET_LINE_VALUES_IOCTL, data)
+                return data.values[0]
+            finally:
+                os.close(_v1_line_fd)
+
+        # v1 ioctl not supported — fall back to v2 ABI (kernel >= 5.10, used by libgpiod v2)
+        req2 = GpioV2LineRequest()
+        req2.offsets[0] = line_offset
+        req2.consumer = b"modernjvs-webui"
+        req2.config.flags = GPIO_V2_LINE_FLAG_INPUT
+        req2.num_lines = 1
+        fcntl.ioctl(chip_fd, GPIO_V2_GET_LINE_IOCTL, req2)  # OSError(EINVAL) if line_offset is out of range
+        _v2_line_fd = req2.fd
+        try:
+            vals = GpioV2LineValues()
+            vals.mask = 1  # bit 0 = first line in the request
+            fcntl.ioctl(_v2_line_fd, GPIO_V2_LINE_GET_VALUES_IOCTL, vals)
+            return int(vals.bits & 1)
         finally:
-            os.close(line_fd)
+            os.close(_v2_line_fd)
     finally:
         os.close(chip_fd)
 
