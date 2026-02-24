@@ -1474,17 +1474,20 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
       <div id="diagSerialResult" style="font-family:monospace;font-size:0.84rem;min-height:2rem;"></div>
     </div>
 
-    <!-- JVS Bus Monitor -->
+    <!-- JVS Bus -->
     <div class="card" style="margin-top:1rem;">
-      <h2>JVS Bus Monitor</h2>
+      <h2>JVS Bus</h2>
       <p style="font-size:0.83rem;color:var(--muted);margin-bottom:1rem;">
-        Listens passively on the selected port for 2&nbsp;seconds and reports any JVS
-        packets coming from the arcade board — no bytes are sent to the bus.
-        If the ModernJVS service is <strong>running</strong>, the monitor detects this
-        automatically and reports bus status without touching the port.
-        If the service is <strong>stopped</strong>, the sense line is floated and the
-        port is opened in listen-only mode; any traffic confirms a connected, powered-on
-        board while silence indicates nothing connected, the wrong port, or a wiring fault.
+        Two tools for inspecting the JVS bus.
+        <strong>Probe Bus</strong> sends a
+        <code style="color:var(--accent2);font-family:monospace">RESET</code> +
+        <code style="color:var(--accent2);font-family:monospace">ASSIGN_ADDR</code>
+        broadcast and listens for 500&nbsp;ms — any response bytes confirm a connected,
+        powered-on board.
+        <strong>Monitor Bus</strong> listens passively for 2&nbsp;seconds without sending
+        anything, showing whatever packets the arcade board is already transmitting.
+        Both tools auto-detect a running service and report bus status without touching
+        the port. When the service is stopped, the sense line is floated before listening.
       </p>
       <div id="diagJvsAlert" class="alert"></div>
       <div style="display:flex;gap:0.6rem;align-items:center;flex-wrap:wrap;margin-bottom:0.75rem;">
@@ -1493,6 +1496,7 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
         </select>
         <input type="text" id="diagJvsCustom" placeholder="or type a path, e.g. /dev/ttyUSB0"
                style="flex:1;min-width:200px;background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--text);padding:0.35rem 0.6rem;">
+        <button class="btn btn-start" onclick="runJvsBusProbe()">&#9654; Probe Bus</button>
         <button class="btn btn-start" onclick="runJvsBusMonitor()">&#128065; Monitor Bus</button>
         <button class="btn btn-stop"  onclick="jvsServiceAction('stop')">&#9632; Stop Service</button>
         <button class="btn btn-start" onclick="jvsServiceAction('start')">&#9654; Start Service</button>
@@ -3265,6 +3269,63 @@ async function runGpioTest() {
   }
 }
 
+async function runJvsBusProbe() {
+  const custom = document.getElementById('diagJvsCustom').value.trim();
+  const sel    = document.getElementById('diagJvsPort').value;
+  const device = custom || sel;
+  if (!device) {
+    showAlert('diagJvsAlert', 'No device selected or typed.', true);
+    return;
+  }
+  const resultEl = document.getElementById('diagJvsResult');
+  resultEl.innerHTML = '⏳ Checking service state and probing bus…';
+  resultEl.style.color = 'var(--muted)';
+  const d = await api('/api/diag/jvs/probe', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({device})
+  });
+  if (d.error) {
+    resultEl.textContent = '✗ ' + d.error;
+    resultEl.style.color = 'var(--red, #e06c75)';
+    return;
+  }
+  if (!d.ok) {
+    resultEl.textContent = '✗ ' + d.message;
+    resultEl.style.color = 'var(--red, #e06c75)';
+    return;
+  }
+  if (d.mode === 'service_running') {
+    resultEl.style.color = 'var(--text)';
+    resultEl.innerHTML =
+      `<div style="color:var(--accent2,#61afef);font-weight:bold;">ℹ ${_escHtml(d.message)}</div>`
+      + `<div style="margin-top:0.4rem;font-size:0.82rem;color:var(--muted);">`
+      + `Stop the ModernJVS service and probe again to send a RESET broadcast and inspect raw bus traffic.`
+      + `</div>`;
+    return;
+  }
+  if (d.activity) {
+    resultEl.style.color = 'var(--text)';
+    let html = `<div style="color:var(--green,#98c379);font-weight:bold;">✓ ${_escHtml(d.message)}</div>`;
+    if (d.raw_hex) {
+      html += `<div style="margin-top:0.4rem;color:var(--muted);">Raw bytes: <code style="color:var(--accent2);word-break:break-all;">${_escHtml(d.raw_hex)}${d.truncated ? '…' : ''}</code></div>`;
+    }
+    if (d.packets && d.packets.length > 0) {
+      html += '<div style="margin-top:0.5rem;">Parsed JVS packets:</div>'
+            + '<ul style="margin:0.25rem 0 0 1rem;padding:0;">'
+            + d.packets.map(p =>
+                `<li><code style="color:var(--accent2);">${_escHtml(p.name)}</code>`
+                + ` <span style="color:var(--muted);">→ ${_escHtml(p.dest)}</span></li>`
+              ).join('')
+            + '</ul>';
+    }
+    resultEl.innerHTML = html;
+  } else {
+    resultEl.textContent = '✗ ' + d.message;
+    resultEl.style.color = 'var(--red, #e06c75)';
+  }
+}
+
 async function runJvsBusMonitor() {
   const custom = document.getElementById('diagJvsCustom').value.trim();
   const sel    = document.getElementById('diagJvsPort').value;
@@ -4117,12 +4178,8 @@ def _service_owns_port(pid_str, device_path):
     return False
 
 
-def diag_jvs_monitor(device_path):
-    """Passively monitor the JVS bus on device_path.
-
-    No bytes are sent to the bus.  The function opens the port, floats the
-    sense line (if configured), and listens for 2 seconds, capturing whatever
-    the arcade board is transmitting.
+def diag_jvs_probe(device_path):
+    """Probe the JVS bus on device_path.
 
     Behaviour depends on whether the ModernJVS service is already running:
 
@@ -4134,11 +4191,14 @@ def diag_jvs_monitor(device_path):
 
     Service STOPPED:
         Opens device_path at 115200 8N1, floats the sense line GPIO (if
-        SENSE_LINE_TYPE == "1"), flushes stale input, then listens for 2 s.
+        SENSE_LINE_TYPE == "1"), flushes stale input, sends:
+          1. JVS RESET broadcast (SYNC | 0xFF | 0x03 | CMD_RESET(0xF0) | 0xD9 | checksum)
+          2. JVS ASSIGN_ADDR broadcast (SYNC | 0xFF | 0x03 | CMD_ASSIGN_ADDR(0xF1) | 0x01 | checksum)
+        then collects any bytes received within 500 ms.
 
     Returns a dict:
         ok             – False on OS/TTY errors, True otherwise
-        mode           – "service_running" | "monitor"
+        mode           – "service_running" | "active_probe"
         activity       – True if bus activity confirmed or bytes received
         bytes_received – count of received bytes (0 in service_running mode)
         raw_hex        – space-separated hex of up to 64 bytes
@@ -4342,6 +4402,187 @@ def diag_jvs_monitor(device_path):
         return {
             "ok":             True,
             "mode":           "active_probe",
+            "activity":       bool(received),
+            "bytes_received": len(received),
+            "raw_hex":        hex_str,
+            "truncated":      truncated,
+            "packets":        packets,
+            "message":        msg,
+        }
+    finally:
+        os.close(fd)
+
+
+def diag_jvs_monitor(device_path):
+    """Passively listen on device_path for 2 seconds without sending any bytes.
+
+    Behaviour depends on whether the ModernJVS service is already running:
+
+    Service RUNNING:
+        The daemon owns the port.  We confirm via /proc/<PID>/fd/ and return an
+        informational result without touching the port.
+
+    Service STOPPED:
+        Opens device_path at 115200 8N1, floats the sense line GPIO (if
+        SENSE_LINE_TYPE == "1"), flushes stale input, then listens for 2 s.
+        No bytes are written to the bus.
+
+    Returns a dict:
+        ok             – False on OS/TTY errors, True otherwise
+        mode           – "service_running" | "monitor"
+        activity       – True if bus activity detected or bytes received
+        bytes_received – count of received bytes (0 in service_running mode)
+        raw_hex        – space-separated hex of up to 64 bytes
+        truncated      – True when more than 64 bytes were received
+        packets        – list of parsed JVS packet dicts (see _parse_jvs_packets)
+        message        – human-readable summary
+    """
+    import termios
+    import select as _select
+
+    device_path = device_path.strip()
+    if not device_path:
+        return {"ok": False, "message": "No device path configured."}
+
+    if not device_path.startswith("/dev/"):
+        return {"ok": False, "message": f"Refusing to monitor non-/dev/ path: {device_path}"}
+
+    # Service-running check (same as diag_jvs_probe)
+    _, svc_out = systemctl("show", SERVICE_NAME,
+                           "--property=ActiveState,MainPID")
+    svc_props = {}
+    for line in svc_out.splitlines():
+        if "=" in line:
+            k, _, v = line.partition("=")
+            svc_props[k.strip()] = v.strip()
+
+    if svc_props.get("ActiveState") == "active":
+        pid_str  = svc_props.get("MainPID", "")
+        port_open = _service_owns_port(pid_str, device_path) if pid_str and pid_str != "0" else False
+        msg = (f"ModernJVS service is running and has {device_path} open — "
+               "the bus is actively in use by the daemon."
+               if port_open else
+               "ModernJVS service is running — the bus is in use by the daemon.")
+        return {
+            "ok":             True,
+            "mode":           "service_running",
+            "activity":       True,
+            "bytes_received": 0,
+            "raw_hex":        "",
+            "truncated":      False,
+            "packets":        [],
+            "message":        msg,
+        }
+
+    try:
+        fd = os.open(device_path, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
+    except OSError as e:
+        return {"ok": False, "message": f"Cannot open {device_path}: {e.strerror} (errno {e.errno})"}
+
+    try:
+        if not os.isatty(fd):
+            return {"ok": False, "message": f"{device_path} is not a TTY device."}
+
+        try:
+            attrs = termios.tcgetattr(fd)
+        except termios.error as e:
+            return {"ok": False, "message": f"tcgetattr failed on {device_path}: {e}"}
+
+        attrs[4] = termios.B115200
+        attrs[5] = termios.B115200
+        attrs[2] = termios.CS8 | termios.CREAD | termios.CLOCAL
+        attrs[0] = 0
+        attrs[1] = 0
+        attrs[3] = 0
+        attrs[6][termios.VMIN]  = 0
+        attrs[6][termios.VTIME] = 0
+
+        try:
+            termios.tcsetattr(fd, termios.TCSAFLUSH, attrs)
+        except termios.error as e:
+            return {"ok": False, "message": f"tcsetattr failed on {device_path}: {e}"}
+
+        try:
+            termios.tcflush(fd, termios.TCIOFLUSH)
+        except termios.error:
+            pass
+
+        # Float the sense line (same logic as diag_jvs_probe)
+        cfg = read_config()
+        sense_type    = cfg.get("SENSE_LINE_TYPE", "0").strip()
+        sense_pin_raw = cfg.get("SENSE_LINE_PIN", "26").strip()
+        sense_note    = ""
+        gpio_chip_fd  = None
+        gpio_line_fd  = None
+        if sense_type == "1":
+            try:
+                sense_pin = int(sense_pin_raw)
+            except ValueError:
+                sense_pin = -1
+            if sense_pin >= 0:
+                chips = sorted(_glob.glob("/dev/gpiochip*"))
+                if chips:
+                    gpio_chip_fd, gpio_line_fd = _gpio_open_input(chips[0], sense_pin)
+                    if gpio_line_fd is not None:
+                        time.sleep(0.01)
+                        sense_note = f" (sense line GPIO{sense_pin} floated)"
+                    else:
+                        if gpio_chip_fd is not None:
+                            try:
+                                os.close(gpio_chip_fd)
+                            except OSError:
+                                pass
+                            gpio_chip_fd = None
+                        sense_note = f" (warning: could not float sense line GPIO{sense_pin})"
+
+        try:
+            # Passive listen — no bytes sent to bus
+            deadline = time.monotonic() + 2.0
+            received = bytearray()
+
+            while time.monotonic() < deadline:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                r, _, _ = _select.select([fd], [], [], min(remaining, 0.05))
+                if fd in r:
+                    try:
+                        chunk = os.read(fd, 256)
+                        if chunk:
+                            received.extend(chunk)
+                    except OSError:
+                        break
+        finally:
+            if gpio_line_fd is not None:
+                try:
+                    os.close(gpio_line_fd)
+                except OSError:
+                    pass
+            if gpio_chip_fd is not None:
+                try:
+                    os.close(gpio_chip_fd)
+                except OSError:
+                    pass
+
+        packets   = _parse_jvs_packets(received)
+        hex_str   = received[:64].hex(' ') if received else ''
+        truncated = len(received) > 64
+
+        if received:
+            msg = f"Bus activity detected — {len(received)} byte(s) received"
+            if packets:
+                msg += f" ({', '.join(p['name'] for p in packets[:3])})"
+            if truncated:
+                msg += " (showing first 64 bytes)"
+            msg += sense_note
+        else:
+            msg = ("No traffic after 2 s — silence on bus "
+                   "(nothing connected, wrong port, or wiring fault)"
+                   + sense_note)
+
+        return {
+            "ok":             True,
+            "mode":           "monitor",
             "activity":       bool(received),
             "bytes_received": len(received),
             "raw_hex":        hex_str,
@@ -6035,6 +6276,18 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
                 # Fall back to the currently configured DEVICE_PATH
                 device = read_config().get("DEVICE_PATH", "")
             self._json(diag_jvs_probe(device))
+
+        elif path == "/api/diag/jvs/monitor":
+            try:
+                data = json.loads(body) if body else {}
+            except json.JSONDecodeError:
+                self._json({"error": "Invalid JSON"}, HTTPStatus.BAD_REQUEST)
+                return
+            device = data.get("device", "").strip()
+            if not device:
+                # Fall back to the currently configured DEVICE_PATH
+                device = read_config().get("DEVICE_PATH", "")
+            self._json(diag_jvs_monitor(device))
 
         elif path == "/api/diag/gpio":
             try:
