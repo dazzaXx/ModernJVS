@@ -26,7 +26,6 @@ set(SOURCES
     src/controller/threading.c
     src/ffb/ffb.c
     src/hardware/device.c
-    src/hardware/rotary.c
     src/jvs/io.c
     src/jvs/jvs.c
 )

@@ -1,6 +1,6 @@
 # ![ModernJVS](docs/modernjvs2.png)
 
-ModernJVS is fork of OpenJVS, an emulator for I/O boards in arcade machines that use the JVS protocol. It requires a USB RS485 converter, or an official OpenJVS HAT.
+ModernJVS is fork of OpenJVS, an emulator for I/O boards in arcade machines that use the JVS protocol. It requires a USB RS485 converter.
 
 Updated to use libgpiod for GPIO access, with support for the Raspberry Pi 5. Optimized code and new features.
 
@@ -229,7 +229,6 @@ Set the `DEFAULT_GAME` line to match your game. Available profiles are in `/etc/
 **Sense Line Configuration:**
 - `SENSE_LINE_TYPE 0` - USB to RS485 with no sense line
 - `SENSE_LINE_TYPE 1` - USB to RS485 with sense line (most common)
-- `SENSE_LINE_TYPE 2` - Raspberry Pi OpenJVS HAT
 
 **Device Path:**
 - Usually `/dev/ttyUSB0` for USB RS485 converters
@@ -313,9 +312,6 @@ Valid range: 0.0 to 0.5 (0.0 = no deadzone, 0.1 = 10% deadzone, etc.)
 - Try running in debug mode: `sudo modernjvs --debug`
 
 ## FAQ
-
-**Q: Do I need the OpenJVS HAT or can I use a USB RS485 converter?**
-A: Both work! USB RS485 converters are cheaper and easier to find. The HAT provides integrated sense line support.
 
 **Q: Which I/O board should I emulate?**
 A: Start with the default (namco-FCA1) or check online documentation for your specific arcade game. Most games work with multiple I/O board types.
