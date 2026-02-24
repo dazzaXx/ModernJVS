@@ -318,6 +318,7 @@ _LOGIN_TEMPLATE = """\
 <html lang="en" data-theme="black">
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>ModernJVS WebUI \u2014 Login</title>
+<link rel="icon" type="image/png" href="{sticks}">
 <style>
   :root{{--bg:#000000;--surface:#0a0a0a;--card:#111111;--border:#1f1f1f;
         --accent:#970011;--text:#e2e2f0;--muted:#888888;--red:#ff5555;
@@ -442,8 +443,38 @@ async function doLogin(){{
   }}catch(e){{err.textContent='Network error: '+e;}}
 }}
 // Apply saved theme
+function updateFavicon(theme){{
+  var filters={{
+    dark:'hue-rotate(330deg) saturate(1.1) brightness(0.75)',
+    black:'hue-rotate(330deg) saturate(1.1) brightness(0.75)',
+    light:'grayscale(1) brightness(0.5)',
+    midnight:'hue-rotate(182deg) saturate(1.1)',
+    dracula:'hue-rotate(238deg) saturate(1.2)',
+    terminal:'hue-rotate(118deg) saturate(1.2)',
+    ocean:'hue-rotate(178deg) saturate(1.2)',
+    sunset:'hue-rotate(6deg) saturate(1.2)',
+    forest:'hue-rotate(118deg) saturate(1.2)',
+    purple:'hue-rotate(248deg) saturate(1.2)',
+    neon:'hue-rotate(166deg) saturate(1.2)',
+    rose:'hue-rotate(334deg) saturate(1.1)',
+    amber:'hue-rotate(20deg) saturate(1.2)',
+    solarized:'hue-rotate(162deg) saturate(0.9)'
+  }};
+  var src=document.getElementById('sticks');
+  var link=document.querySelector("link[rel='icon']");
+  if(!src||!link)return;
+  var c=document.createElement('canvas');
+  c.width=c.height=32;
+  var ctx=c.getContext('2d');
+  ctx.filter=filters[theme]||filters.black;
+  ctx.drawImage(src,0,0,32,32);
+  link.href=c.toDataURL();
+}}
 fetch('/api/webui/settings').then(r=>r.json()).then(s=>{{
-  if(s&&s.theme)document.documentElement.setAttribute('data-theme',s.theme);
+  if(s&&s.theme){{
+    document.documentElement.setAttribute('data-theme',s.theme);
+    updateFavicon(s.theme);
+  }}
 }}).catch(()=>{{}});
 // Show version badge
 fetch('/api/version').then(r=>r.json()).then(d=>{{
@@ -465,6 +496,7 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>ModernJVS WebUI</title>
+<link rel="icon" type="image/png" href="__STICKS__">
 <style>
   :root {
     --bg:      #0d0d14;
@@ -1106,6 +1138,7 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
     <button class="tab" onclick="showTab('monitor', this)">Monitor &amp; Logs</button>
     <button class="tab" onclick="showTab('profiles', this)">Profiles</button>
     <button class="tab" onclick="showTab('devices', this)">Devices</button>
+    <button class="tab" onclick="showTab('diagnostics', this)">&#x26A0; Diagnostics</button>
     <button class="tab" onclick="showTab('webui-settings', this)">&#9881; WebUI Settings</button>
   </div>
 
@@ -1246,6 +1279,7 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
       <br>
       <div class="control-row">
         <button class="btn btn-save" onclick="saveConfig()">💾 Save Configuration</button>
+        <button class="btn btn-restart" onclick="saveConfigAndRestart()">💾↺ Save &amp; Restart Service</button>
         <button class="btn btn-refresh" onclick="loadConfig()">⟳ Reload from Disk</button>
         <button class="btn btn-danger" onclick="resetConfig()">↩ Reset to Defaults</button>
       </div>
@@ -1413,6 +1447,59 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
       <div id="inputTesterStatus" style="font-size:0.82rem;color:var(--muted);margin-bottom:0.75rem;"></div>
       <div id="inputTesterDisplay" style="font-family:monospace;font-size:0.82rem;min-height:60px;"></div>
     </div>
+  </div>
+
+  <!-- ====== DIAGNOSTICS ====== -->
+  <div id="panel-diagnostics" class="panel">
+
+    <!-- Serial Port Test -->
+    <div class="card">
+      <h2>Serial Port Test</h2>
+      <p style="font-size:0.83rem;color:var(--muted);margin-bottom:1rem;">
+        Try to open the JVS serial port at 115200 8N1 and report the result. Useful when the device is
+        not responding and you want to confirm the path is correct and accessible.
+      </p>
+      <div id="diagSerialAlert" class="alert"></div>
+      <div style="display:flex;gap:0.6rem;align-items:center;flex-wrap:wrap;margin-bottom:0.75rem;">
+        <select id="diagSerialPort" style="background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--text);padding:0.35rem 0.6rem;min-width:180px;">
+          <option value="">— loading ports… —</option>
+        </select>
+        <input type="text" id="diagSerialCustom" placeholder="or type a path, e.g. /dev/ttyUSB0"
+               style="flex:1;min-width:200px;background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--text);padding:0.35rem 0.6rem;">
+        <button class="btn btn-start" onclick="runSerialTest()">&#9654; Test Port</button>
+      </div>
+      <div id="diagSerialResult" style="font-family:monospace;font-size:0.84rem;min-height:2rem;"></div>
+    </div>
+
+    <!-- GPIO Sense Line Test -->
+    <div class="card" style="margin-top:1rem;">
+      <h2>GPIO Sense Line Test</h2>
+      <p style="font-size:0.83rem;color:var(--muted);margin-bottom:1rem;">
+        Read the current logic level of the configured sense-line GPIO pin via the Linux GPIO character device.
+        Useful when first wiring the sense line — confirms the pin is reachable and reports HIGH or LOW.
+      </p>
+      <div id="diagGpioAlert" class="alert"></div>
+      <div style="display:flex;gap:0.6rem;align-items:center;flex-wrap:wrap;margin-bottom:0.75rem;">
+        <label style="font-size:0.85rem;color:var(--muted);">Pin (header #):</label>
+        <input type="number" id="diagGpioPin" min="1" max="40" placeholder="26"
+               style="width:80px;background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--text);padding:0.35rem 0.6rem;">
+        <button class="btn btn-start" onclick="runGpioTest()">&#9654; Read Pin</button>
+      </div>
+      <div id="diagGpioResult" style="font-family:monospace;font-size:0.84rem;min-height:2rem;"></div>
+    </div>
+
+    <!-- Available Serial Devices -->
+    <div class="card" style="margin-top:1rem;">
+      <h2>Available Serial Devices</h2>
+      <p style="font-size:0.83rem;color:var(--muted);margin-bottom:1rem;">
+        All <code style="color:var(--accent2);font-family:monospace">/dev/ttyUSB*</code>,
+        <code style="color:var(--accent2);font-family:monospace">/dev/ttyAMA*</code>, and
+        <code style="color:var(--accent2);font-family:monospace">/dev/ttyS*</code> nodes currently
+        present on the system.
+      </p>
+      <div id="diagPortListWrap" style="font-family:monospace;font-size:0.84rem;"></div>
+    </div>
+
   </div>
 
   <!-- ====== APPEARANCE ====== -->
@@ -1591,6 +1678,7 @@ function showTab(name, btn) {
   if (name === 'profiles') loadProfiles();
   if (name === 'devices') { loadDevices(); loadBluetoothSection(); populateInputTesterDevices(); }
   if (name !== 'devices') stopInputTest(); // stop streaming when leaving the Devices tab
+  if (name === 'diagnostics') loadDiagnostics();
   if (name === 'webui-settings') { initAppearancePanel(); loadSessions(); }
 }
 
@@ -1767,7 +1855,27 @@ async function loadConfig() {
   document.getElementById('cfgRotaryPath').value = cfgData.rotary_path ?? '';
 }
 
+function validateConfigInputs() {
+  const warnings = [];
+  const device = document.getElementById('cfgDevice').value.trim();
+  if (device && !/^\/dev\/(ttyUSB|ttyAMA)/.test(device))
+    warnings.push('DEVICE_PATH "' + device + '" does not look like a serial port (/dev/ttyUSB* or /dev/ttyAMA*).');
+  const pin = parseInt(document.getElementById('cfgPin').value, 10);
+  if (!isNaN(pin) && (pin < 1 || pin > 40))
+    warnings.push('SENSE_LINE_PIN (' + pin + ') is outside the valid Raspberry Pi GPIO range (1–40).');
+  [['cfgDz1', 1], ['cfgDz2', 2], ['cfgDz3', 3], ['cfgDz4', 4]].forEach(([id, n]) => {
+    if (parseFloat(document.getElementById(id).value) >= 0.5)
+      warnings.push('ANALOG_DEADZONE for Player ' + n + ' is at or above the maximum (0.5), which will make the analog stick non-functional.');
+  });
+  return warnings;
+}
+
 async function saveConfig() {
+  const warnings = validateConfigInputs();
+  if (warnings.length > 0) {
+    const msg = 'Configuration warnings:\n\n' + warnings.join('\n') + '\n\nSave anyway?';
+    if (!confirm(msg)) return;
+  }
   const payload = {
     emulate:                    document.getElementById('cfgEmulate').value,
     game:                       document.getElementById('cfgGame').value,
@@ -1790,6 +1898,15 @@ async function saveConfig() {
   });
   if (d.error) showAlert('cfgAlert', 'Error: ' + d.error, true);
   else showAlert('cfgAlert', 'Configuration saved. Restart the service to apply changes.', false);
+  return !d.error;
+}
+
+async function saveConfigAndRestart() {
+  const saved = await saveConfig();
+  if (saved) {
+    showAlert('cfgAlert', 'Configuration saved. Restarting service\u2026', false);
+    await serviceAction('restart');
+  }
 }
 
 function resetConfig() {
@@ -1843,6 +1960,7 @@ function renderProfilesTable(data) {
       <td style="white-space:nowrap;">
         <button class="btn btn-xs btn-refresh" data-name="${_escHtml(name)}" onclick="editProfile(this.dataset.name)" style="margin-right:0.25rem;">Edit</button>
         <a href="/api/profiles/download?type=${encodeURIComponent(_profilesCurrentTab)}&name=${encodeURIComponent(name)}" class="btn btn-xs" style="margin-right:0.25rem;text-decoration:none;">Download</a>
+        <button class="btn btn-xs" data-name="${_escHtml(name)}" onclick="renameProfile(this.dataset.name)" style="margin-right:0.25rem;">Rename</button>
         <button class="btn btn-xs btn-danger" data-name="${_escHtml(name)}" onclick="deleteProfile(this.dataset.name)">Delete</button>
       </td>
     </tr>`).join('');
@@ -1911,6 +2029,23 @@ async function deleteProfile(name) {
   if (d.error) { showAlert('profilesAlert', 'Error: ' + d.error, true); return; }
   showAlert('profilesAlert', 'Deleted ' + name + '.', false);
   if (_profileEditingName === name) closeProfileEditor();
+  loadProfiles();
+}
+
+async function renameProfile(name) {
+  const newName = prompt('Rename "' + name + '" to:', name);
+  if (!newName || newName === name) return;
+  const d = await api('/api/profiles/rename', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ type: _profilesCurrentTab, name, new_name: newName })
+  });
+  if (d.error) { showAlert('profilesAlert', 'Error: ' + d.error, true); return; }
+  showAlert('profilesAlert', 'Renamed "' + name + '" to "' + newName + '".', false);
+  if (_profileEditingName === name) {
+    _profileEditingName = newName;
+    document.getElementById('profileEditName').textContent = newName;
+  }
   loadProfiles();
 }
 
@@ -2407,11 +2542,14 @@ async function loadBluetoothPaired() {
     const statusHtml = dev.connected
       ? '<span style="color:var(--green);font-size:0.8rem;">✓ Connected</span>'
       : '<span style="color:var(--muted);font-size:0.8rem;">● Paired</span>';
+    const connectBtn = dev.connected
+      ? ''
+      : `<button class="btn btn-xs" style="margin-right:0.25rem;background:var(--green);border-color:var(--green);color:#000;" data-mac="${_escHtml(dev.mac)}" onclick="btConnect(this.dataset.mac, this)">&#x1F517; Connect</button>`;
     return `<tr>
       <td>${_escHtml(dev.name)}</td>
       <td><code>${_escHtml(dev.mac)}</code></td>
       <td>${statusHtml}</td>
-      <td><button class="btn btn-xs" style="background:var(--red);border-color:var(--red);" data-mac="${_escHtml(dev.mac)}" onclick="btRemove(this.dataset.mac, this)">✕ Remove</button></td>
+      <td style="white-space:nowrap;">${connectBtn}<button class="btn btn-xs" style="background:var(--red);border-color:var(--red);" data-mac="${_escHtml(dev.mac)}" onclick="btRemove(this.dataset.mac, this)">✕ Remove</button></td>
     </tr>`;
   }).join('');
 }
@@ -2508,6 +2646,30 @@ async function btRemove(mac, btn) {
   showAlert('btAlert', '✓ Device removed successfully.', false);
   await loadBluetoothPaired();
 }
+async function btConnect(mac, btn) {
+  btn.disabled = true;
+  btn.textContent = 'Connecting…';
+
+  const d = await api('/api/bluetooth/connect', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({mac}),
+  });
+
+  if (d.error) {
+    showAlert('btAlert', 'Error connecting: ' + d.error, true);
+    btn.disabled = false;
+    btn.textContent = '🔗 Connect';
+    return;
+  }
+  if (d.warning) {
+    showAlert('btAlert', d.warning, true);
+  } else {
+    showAlert('btAlert', '✓ Connected successfully.', false);
+  }
+  await loadBluetoothPaired();
+}
+
 function downloadLogs() {
   const lines = document.getElementById('logLines').value;
   const a = document.createElement('a');
@@ -2540,6 +2702,34 @@ const THEME_NAMES = {
 // Seconds to wait for the WebUI service to come back up after a restart
 const WEBUI_RESTART_WAIT_SECS = 8;
 
+function updateFavicon(theme) {
+  const filters = {
+    dark:      'hue-rotate(330deg) saturate(1.1) brightness(0.75)',
+    black:     'hue-rotate(330deg) saturate(1.1) brightness(0.75)',
+    light:     'grayscale(1) brightness(0.5)',
+    midnight:  'hue-rotate(182deg) saturate(1.1)',
+    dracula:   'hue-rotate(238deg) saturate(1.2)',
+    terminal:  'hue-rotate(118deg) saturate(1.2)',
+    ocean:     'hue-rotate(178deg) saturate(1.2)',
+    sunset:    'hue-rotate(6deg) saturate(1.2)',
+    forest:    'hue-rotate(118deg) saturate(1.2)',
+    purple:    'hue-rotate(248deg) saturate(1.2)',
+    neon:      'hue-rotate(166deg) saturate(1.2)',
+    rose:      'hue-rotate(334deg) saturate(1.1)',
+    amber:     'hue-rotate(20deg) saturate(1.2)',
+    solarized: 'hue-rotate(162deg) saturate(0.9)',
+  };
+  const src  = document.getElementById('sticks');
+  const link = document.querySelector("link[rel='icon']");
+  if (!src || !link) return;
+  const c = document.createElement('canvas');
+  c.width = c.height = 32;
+  const ctx = c.getContext('2d');
+  ctx.filter = filters[theme] || filters.black;
+  ctx.drawImage(src, 0, 0, 32, 32);
+  link.href = c.toDataURL();
+}
+
 function applyAppearanceSettings(s) {
   const root = document.documentElement;
 
@@ -2557,6 +2747,8 @@ function applyAppearanceSettings(s) {
   // Background overlay (scrim) opacity
   const scrim = (typeof s.bgScrimOpacity === 'number') ? s.bgScrimOpacity : 0.70;
   document.documentElement.style.setProperty('--bg-scrim-opacity', scrim);
+
+  updateFavicon(s.theme || 'black');
 }
 
 // Apply the server-stored background image (if any) to the page body.
@@ -2921,6 +3113,104 @@ async function systemShutdown() {
   msg.style.color = 'var(--muted)';
   msg.textContent = 'Shutting down…';
   fetch('/api/system/shutdown', {method: 'POST'}).catch(() => {});
+}
+
+// ---- Diagnostics ----
+async function loadDiagnostics() {
+  // Populate GPIO pin from config
+  const cfg = await api('/api/config');
+  if (!cfg.error) {
+    const pin = cfg.sense_line_pin || '26';
+    document.getElementById('diagGpioPin').value = pin;
+  }
+
+  // Load available serial ports
+  const pd = await api('/api/diag/serial/ports');
+  const sel = document.getElementById('diagSerialPort');
+  sel.innerHTML = '';
+  const ports = pd.ports || [];
+  if (ports.length === 0) {
+    sel.innerHTML = '<option value="">— no serial ports found —</option>';
+  } else {
+    sel.innerHTML = '<option value="">— select a port —</option>';
+    ports.forEach(p => {
+      const o = document.createElement('option');
+      o.value = p;
+      o.textContent = p;
+      // Pre-select the configured device path if present
+      if (!cfg.error && cfg.device && cfg.device === p) o.selected = true;
+      sel.appendChild(o);
+    });
+  }
+
+  // Also fill the custom input with configured device if not in the dropdown
+  if (!cfg.error && cfg.device) {
+    document.getElementById('diagSerialCustom').placeholder = cfg.device;
+  }
+
+  // Render port list card
+  const wrap = document.getElementById('diagPortListWrap');
+  if (ports.length === 0) {
+    wrap.textContent = 'No serial devices found under /dev/tty{USB,AMA,S}*.';
+    wrap.style.color = 'var(--muted)';
+  } else {
+    wrap.innerHTML = ports.map(p => `<div style="padding:0.15rem 0;color:var(--accent2);">${_escHtml(p)}</div>`).join('');
+  }
+}
+
+async function runSerialTest() {
+  const custom = document.getElementById('diagSerialCustom').value.trim();
+  const sel    = document.getElementById('diagSerialPort').value;
+  const device = custom || sel;
+  if (!device) {
+    showAlert('diagSerialAlert', 'No device selected or typed.', true);
+    return;
+  }
+  const resultEl = document.getElementById('diagSerialResult');
+  resultEl.textContent = '⏳ Testing…';
+  resultEl.style.color = 'var(--muted)';
+  const d = await api('/api/diag/serial', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({device})
+  });
+  if (d.error) {
+    resultEl.textContent = '✗ ' + d.error;
+    resultEl.style.color = 'var(--red, #e06c75)';
+  } else if (d.ok) {
+    resultEl.textContent = '✓ ' + d.message;
+    resultEl.style.color = 'var(--green, #98c379)';
+  } else {
+    resultEl.textContent = '✗ ' + d.message;
+    resultEl.style.color = 'var(--red, #e06c75)';
+  }
+}
+
+async function runGpioTest() {
+  const pin = document.getElementById('diagGpioPin').value.trim();
+  if (!pin) {
+    showAlert('diagGpioAlert', 'Enter a pin number.', true);
+    return;
+  }
+  const resultEl = document.getElementById('diagGpioResult');
+  resultEl.textContent = '⏳ Reading…';
+  resultEl.style.color = 'var(--muted)';
+  const d = await api('/api/diag/gpio', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({pin})
+  });
+  if (d.error) {
+    resultEl.textContent = '✗ ' + d.error;
+    resultEl.style.color = 'var(--red, #e06c75)';
+  } else if (d.ok) {
+    const stateColor = d.state === 'HIGH' ? 'var(--accent2, #61afef)' : (d.state === 'LOW' ? 'var(--yellow, #e5c07b)' : 'var(--text)');
+    resultEl.innerHTML = `✓ <span style="color:${stateColor};font-weight:bold;">${_escHtml(d.state || '')}</span> — ${_escHtml(d.message)}`;
+    resultEl.style.color = 'var(--text)';
+  } else {
+    resultEl.textContent = '✗ ' + d.message;
+    resultEl.style.color = 'var(--red, #e06c75)';
+  }
 }
 
 // ---- Init ----
@@ -3439,6 +3729,274 @@ def list_dir(path):
 
 
 # ---------------------------------------------------------------------------
+# Diagnostics helpers
+# ---------------------------------------------------------------------------
+
+def diag_serial_test(device_path):
+    """Try to open device_path as a 115200 8N1 serial port.
+
+    Returns a dict with keys: ok (bool), message (str).
+    Uses only stdlib (termios + fcntl) so no external dependencies are needed.
+    """
+    import termios
+    import fcntl
+    import errno as _errno
+
+    device_path = device_path.strip()
+    if not device_path:
+        return {"ok": False, "message": "No device path configured."}
+
+    # Only allow /dev/ paths to prevent path traversal
+    if not device_path.startswith("/dev/"):
+        return {"ok": False, "message": f"Refusing to test non-/dev/ path: {device_path}"}
+
+    try:
+        fd = os.open(device_path, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
+    except OSError as e:
+        return {"ok": False, "message": f"Cannot open {device_path}: {e.strerror} (errno {e.errno})"}
+
+    try:
+        # Check it is a tty
+        if not os.isatty(fd):
+            return {"ok": False, "message": f"{device_path} is not a TTY device."}
+
+        # Get and set terminal attributes to 115200 8N1
+        try:
+            attrs = termios.tcgetattr(fd)
+        except termios.error as e:
+            return {"ok": False, "message": f"tcgetattr failed on {device_path}: {e}"}
+
+        # cfsetispeed / cfsetospeed via termios constants
+        attrs[4] = termios.B115200  # ispeed
+        attrs[5] = termios.B115200  # ospeed
+        # c_cflag: 8 data bits, no parity, 1 stop bit, enable receiver, no modem control
+        attrs[2] = (
+            termios.CS8 | termios.CREAD | termios.CLOCAL
+        )
+        # c_iflag: disable input processing (raw mode)
+        attrs[0] = 0
+        # c_oflag: disable output processing
+        attrs[1] = 0
+        # c_lflag: disable echo, canonical, signals
+        attrs[3] = 0
+
+        try:
+            termios.tcsetattr(fd, termios.TCSANOW, attrs)
+        except termios.error as e:
+            return {"ok": False, "message": f"tcsetattr failed on {device_path}: {e}"}
+
+        return {
+            "ok": True,
+            "message": f"Opened {device_path} successfully at 115200 8N1.",
+        }
+    finally:
+        os.close(fd)
+
+
+def _gpio_read_line(chip_path, line_offset):
+    """Read a GPIO line value using ctypes and the Linux GPIO character device ioctl.
+
+    Tries the v1 GPIO ABI (GPIO_GET_LINEHANDLE_IOCTL, kernel >= 4.8) first, then
+    falls back to the v2 GPIO ABI (GPIO_V2_GET_LINE_IOCTL, kernel >= 5.10, used
+    by libgpiod v2) if the kernel does not recognise the v1 ioctl (ENOTTY).
+    No external CLI tools or Python C extensions are required.
+
+    Returns 0 or 1 on success.
+    Raises PermissionError if the caller lacks access to chip_path or the line.
+    Raises OSError if chip_path does not exist, is not a GPIO chip, or
+    line_offset is out of range (EINVAL).
+    """
+    import ctypes
+    import errno
+    import fcntl
+
+    # ---- v1 ABI (used by libgpiod v1, kernel >= 4.8) ----
+    GPIOHANDLES_MAX = 64
+    GPIOHANDLE_REQUEST_INPUT = 1
+    # _IOWR(0xB4, 0x03, struct gpiohandle_request)  sizeof = 364 bytes
+    GPIO_GET_LINEHANDLE_IOCTL = 0xC16CB403
+    # _IOWR(0xB4, 0x08, struct gpiohandle_data)     sizeof = 64 bytes
+    GPIOHANDLE_GET_LINE_VALUES_IOCTL = 0xC040B408
+
+    class GpiohandleRequest(ctypes.Structure):
+        _fields_ = [
+            ("lineoffsets",    ctypes.c_uint32 * GPIOHANDLES_MAX),
+            ("flags",          ctypes.c_uint32),
+            ("default_values", ctypes.c_uint8  * GPIOHANDLES_MAX),
+            ("consumer_label", ctypes.c_char   * 32),
+            ("lines",          ctypes.c_uint32),
+            ("fd",             ctypes.c_int),
+        ]
+
+    class GpiohandleData(ctypes.Structure):
+        _fields_ = [
+            ("values", ctypes.c_uint8 * GPIOHANDLES_MAX),
+        ]
+
+    # ---- v2 ABI (used by libgpiod v2, kernel >= 5.10) ----
+    GPIO_V2_LINES_MAX        = 64
+    GPIO_MAX_NAME_SIZE       = 32
+    GPIO_V2_LINE_NUM_ATTRS_MAX = 10
+    GPIO_V2_LINE_FLAG_INPUT  = (1 << 3)
+    # _IOWR(0xB4, 0x0F, struct gpio_v2_line_request)  sizeof = 592 bytes
+    GPIO_V2_GET_LINE_IOCTL          = 0xC250B40F
+    # _IOWR(0xB4, 0x12, struct gpio_v2_line_values)   sizeof = 16 bytes
+    GPIO_V2_LINE_GET_VALUES_IOCTL   = 0xC010B412
+
+    class _GpioV2LineAttrUnion(ctypes.Union):
+        _fields_ = [
+            ("flags",              ctypes.c_uint64),
+            ("values",             ctypes.c_uint64),
+            ("debounce_period_us", ctypes.c_uint32),
+        ]
+
+    class GpioV2LineAttribute(ctypes.Structure):
+        _fields_ = [
+            ("id",      ctypes.c_uint32),
+            ("padding", ctypes.c_uint32),
+            ("u",       _GpioV2LineAttrUnion),
+        ]
+
+    class GpioV2LineConfigAttribute(ctypes.Structure):
+        _fields_ = [
+            ("attr", GpioV2LineAttribute),
+            ("mask", ctypes.c_uint64),
+        ]
+
+    class GpioV2LineConfig(ctypes.Structure):
+        _fields_ = [
+            ("flags",     ctypes.c_uint64),
+            ("num_attrs", ctypes.c_uint32),
+            ("padding",   ctypes.c_uint32 * 5),
+            ("attrs",     GpioV2LineConfigAttribute * GPIO_V2_LINE_NUM_ATTRS_MAX),
+        ]
+
+    class GpioV2LineRequest(ctypes.Structure):
+        _fields_ = [
+            ("offsets",           ctypes.c_uint32 * GPIO_V2_LINES_MAX),
+            ("consumer",          ctypes.c_char   * GPIO_MAX_NAME_SIZE),
+            ("config",            GpioV2LineConfig),
+            ("num_lines",         ctypes.c_uint32),
+            ("event_buffer_size", ctypes.c_uint32),
+            ("padding",           ctypes.c_uint32 * 5),
+            ("fd",                ctypes.c_int32),
+        ]
+
+    class GpioV2LineValues(ctypes.Structure):
+        _fields_ = [
+            ("bits", ctypes.c_uint64),
+            ("mask", ctypes.c_uint64),
+        ]
+
+    chip_fd = os.open(chip_path, os.O_RDONLY)
+    try:
+        # Try v1 ABI first (kernel >= 4.8, used by libgpiod v1).
+        # ENOTTY from the chip ioctl means the kernel doesn't support v1; any
+        # other error (e.g. EINVAL for a bad offset, EPERM) propagates normally.
+        req = GpiohandleRequest()
+        req.lineoffsets[0] = line_offset
+        req.flags = GPIOHANDLE_REQUEST_INPUT
+        req.consumer_label = b"modernjvs-webui"
+        req.lines = 1
+        _v1_line_fd = None
+        try:
+            fcntl.ioctl(chip_fd, GPIO_GET_LINEHANDLE_IOCTL, req)  # OSError(EINVAL) if line_offset is out of range
+            _v1_line_fd = req.fd
+        except OSError as e:
+            if e.errno != errno.ENOTTY:
+                raise
+            # v1 ioctl not supported by this kernel — fall through to v2
+
+        if _v1_line_fd is not None:
+            try:
+                data = GpiohandleData()
+                fcntl.ioctl(_v1_line_fd, GPIOHANDLE_GET_LINE_VALUES_IOCTL, data)
+                return data.values[0]
+            finally:
+                os.close(_v1_line_fd)
+
+        # v1 ioctl not supported — fall back to v2 ABI (kernel >= 5.10, used by libgpiod v2)
+        req2 = GpioV2LineRequest()
+        req2.offsets[0] = line_offset
+        req2.consumer = b"modernjvs-webui"
+        req2.config.flags = GPIO_V2_LINE_FLAG_INPUT
+        req2.num_lines = 1
+        fcntl.ioctl(chip_fd, GPIO_V2_GET_LINE_IOCTL, req2)  # OSError(EINVAL) if line_offset is out of range
+        _v2_line_fd = req2.fd
+        try:
+            vals = GpioV2LineValues()
+            vals.mask = 1  # bit 0 = first line in the request
+            fcntl.ioctl(_v2_line_fd, GPIO_V2_LINE_GET_VALUES_IOCTL, vals)
+            return int(vals.bits & 1)
+        finally:
+            os.close(_v2_line_fd)
+    finally:
+        os.close(chip_fd)
+
+
+def diag_gpio_test(pin):
+    """Read the current logic level of a GPIO pin using the Linux GPIO character device.
+
+    Returns a dict with keys: ok (bool), message (str), state (str | None).
+    Uses ctypes + kernel ioctl — no external CLI tools or Python C extensions required.
+    """
+    try:
+        pin_int = int(pin)
+    except (TypeError, ValueError):
+        return {"ok": False, "message": f"Invalid pin number: {pin!r}", "state": None}
+
+    if pin_int < 1 or pin_int > 40:
+        return {
+            "ok": False,
+            "message": f"Pin {pin_int} is outside the valid header range (1–40).",
+            "state": None,
+        }
+
+    # Discover available gpiochip devices (/dev/gpiochip*)
+    chips = sorted(_glob.glob("/dev/gpiochip*"))
+    if not chips:
+        return {
+            "ok": False,
+            "message": "No /dev/gpiochip* devices found. Is the GPIO character device available?",
+            "state": None,
+        }
+
+    # For Raspberry Pi, gpiochip0 is the main BCM GPIO controller.
+    # SENSE_LINE_PIN stores the BCM GPIO line offset, used directly.
+    chip = chips[0]
+
+    try:
+        val = _gpio_read_line(chip, pin_int)
+        state = "HIGH" if val else "LOW"
+        return {
+            "ok": True,
+            "message": f"Pin {pin_int} on {chip} is {state}.",
+            "state": state,
+        }
+    except PermissionError:
+        return {
+            "ok": False,
+            "message": (
+                f"Permission denied reading GPIO pin {pin_int}. "
+                "Run ModernJVS as root or add the service user to the 'gpio' group."
+            ),
+            "state": None,
+        }
+    except OSError as e:
+        import errno as _errno
+        if e.errno == _errno.EBUSY:
+            return {
+                "ok": True,
+                "message": (
+                    f"Pin {pin_int} is currently held by the ModernJVS daemon "
+                    "(sense line active). This is expected while the service is running."
+                ),
+                "state": "IN USE",
+            }
+        return {"ok": False, "message": f"Error reading GPIO pin {pin_int}: {e}", "state": None}
+
+
+# ---------------------------------------------------------------------------
 # Logo helper
 # ---------------------------------------------------------------------------
 
@@ -3601,6 +4159,8 @@ BT_SCAN_DURATION   = 8   # seconds bluetoothctl scans before exiting (--timeout 
 BT_PAIR_TIMEOUT    = 30  # pairing can be slow on first attempt
 BT_CONNECT_TIMEOUT = 20  # connection attempt timeout
 BT_INFO_TIMEOUT    = 10  # info / trust / remove commands
+BT_CONNECT_RETRY_DELAY = 2  # seconds to wait before retrying a failed connection attempt
+BT_CONNECT_MAX_RETRIES = 5  # number of automatic retries after an initial failed connect
 
 
 def _validate_bt_mac(mac):
@@ -3786,9 +4346,11 @@ def bluetooth_pair(mac):
         conn_out = (conn_result.stdout + conn_result.stderr).lower()
         conn_ok = conn_result.returncode == 0 or "successful" in conn_out
 
-        # Wiimotes frequently need a second connect attempt after pairing
-        if not conn_ok and wiimote:
-            time.sleep(2)
+        # Some devices need multiple connect attempts after pairing
+        for _ in range(BT_CONNECT_MAX_RETRIES):
+            if conn_ok:
+                break
+            time.sleep(BT_CONNECT_RETRY_DELAY)
             conn_result = _run_bt("connect", mac, timeout=BT_CONNECT_TIMEOUT)
             conn_out = (conn_result.stdout + conn_result.stderr).lower()
             conn_ok = conn_result.returncode == 0 or "successful" in conn_out
@@ -3829,6 +4391,61 @@ def bluetooth_remove(mac):
         if result.returncode == 0 or "removed" in out:
             return {"ok": True}
         return {"error": (result.stdout + result.stderr).strip()}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def bluetooth_connect(mac):
+    """Connect to an already-paired Bluetooth device by MAC address.
+
+    Retries once for Wii Remotes, which often need a second attempt.
+    Returns {"ok": True} on success, or {"ok": True, "warning": ...} if the
+    connection attempt did not succeed but the device is still paired.
+    """
+    if not _validate_bt_mac(mac):
+        return {"error": "Invalid Bluetooth MAC address"}
+    try:
+        # Resolve device name for type-specific handling
+        info = _run_bt("info", mac)
+        name = ""
+        for line in info.stdout.splitlines():
+            nm = re.match(r'\s*Name:\s+(.*)', line)
+            if nm:
+                name = nm.group(1).strip()
+                break
+        wiimote = _is_wiimote(name)
+        xbox    = _is_xbox(name)
+
+        conn_result = _run_bt("connect", mac, timeout=BT_CONNECT_TIMEOUT)
+        conn_out = (conn_result.stdout + conn_result.stderr).lower()
+        conn_ok = conn_result.returncode == 0 or "successful" in conn_out
+
+        # Some devices need multiple connect attempts
+        for _ in range(BT_CONNECT_MAX_RETRIES):
+            if conn_ok:
+                break
+            time.sleep(BT_CONNECT_RETRY_DELAY)
+            conn_result = _run_bt("connect", mac, timeout=BT_CONNECT_TIMEOUT)
+            conn_out = (conn_result.stdout + conn_result.stderr).lower()
+            conn_ok = conn_result.returncode == 0 or "successful" in conn_out
+
+        if conn_ok:
+            return {"ok": True}
+
+        if wiimote:
+            reconnect_tip = "Try pressing 1+2 on the Wii Remote to reconnect."
+        elif xbox:
+            reconnect_tip = (
+                "Press the Xbox button to reconnect. "
+                "If that fails, press the Pair button to force reconnection."
+            )
+        else:
+            reconnect_tip = "Try turning the controller off and on again to reconnect."
+
+        return {
+            "ok": True,
+            "warning": f"Connection attempt failed. {reconnect_tip}",
+        }
     except Exception as e:
         return {"error": str(e)}
 
@@ -4325,6 +4942,14 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
                 self._json({"lines": []})
             except OSError as e:
                 self._json({"error": str(e)}, HTTPStatus.INTERNAL_SERVER_ERROR)
+        elif path == "/api/diag/serial/ports":
+            # Return a list of /dev/ttyUSB* and /dev/ttyAMA* devices present on the system
+            ports = sorted(
+                _glob.glob("/dev/ttyUSB*") +
+                _glob.glob("/dev/ttyAMA*") +
+                _glob.glob("/dev/ttyS*")
+            )
+            self._json({"ports": ports})
         else:
             self._not_found()
 
@@ -4473,6 +5098,17 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
                 audit_log("BT remove", data.get("mac", ""), ip=self.client_address[0])
             self._json(result)
 
+        elif path == "/api/bluetooth/connect":
+            try:
+                data = json.loads(body) if body else {}
+            except json.JSONDecodeError:
+                self._json({"error": "Invalid JSON"}, HTTPStatus.BAD_REQUEST)
+                return
+            result = bluetooth_connect(data.get("mac", ""))
+            if result.get("ok") and not result.get("warning"):
+                audit_log("BT connect", data.get("mac", ""), ip=self.client_address[0])
+            self._json(result)
+
         elif path == "/api/bluetooth/setup_usb":
             self._json(setup_usb_bluetooth())
 
@@ -4571,11 +5207,65 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
             except OSError as e:
                 self._json({"error": str(e)}, HTTPStatus.INTERNAL_SERVER_ERROR)
 
+        elif path == "/api/profiles/rename":
+            try:
+                data = json.loads(body) if body else {}
+            except json.JSONDecodeError:
+                self._json({"error": "Invalid JSON"}, HTTPStatus.BAD_REQUEST)
+                return
+            type_    = data.get("type", "")
+            name     = os.path.basename(data.get("name", ""))
+            new_name = os.path.basename(data.get("new_name", ""))
+            fpath     = _resolve_profile_path(type_, name)
+            new_fpath = _resolve_profile_path(type_, new_name)
+            if fpath is None or new_fpath is None:
+                self._json({"error": "Invalid type or name."}, HTTPStatus.BAD_REQUEST)
+                return
+            if fpath == new_fpath:
+                self._json({"error": "New name is the same as the old name."}, HTTPStatus.BAD_REQUEST)
+                return
+            try:
+                if not os.path.exists(fpath):
+                    self._json({"error": "File not found."}, HTTPStatus.NOT_FOUND)
+                    return
+                if os.path.exists(new_fpath):
+                    self._json({"error": "A file with that name already exists."}, HTTPStatus.CONFLICT)
+                    return
+                os.rename(fpath, new_fpath)
+                audit_log(f"Profile rename", f"{type_}/{name} -> {new_name}", ip=self.client_address[0])
+                self._json({"ok": True})
+            except OSError as e:
+                self._json({"error": str(e)}, HTTPStatus.INTERNAL_SERVER_ERROR)
+
         elif path == "/api/sessions/invalidate_all":
             current = self._get_session_token()
             invalidate_other_sessions(current)
             audit_log("Sessions invalidated (kept current)", ip=self.client_address[0])
             self._json({"ok": True})
+
+        elif path == "/api/diag/serial":
+            try:
+                data = json.loads(body) if body else {}
+            except json.JSONDecodeError:
+                self._json({"error": "Invalid JSON"}, HTTPStatus.BAD_REQUEST)
+                return
+            device = data.get("device", "").strip()
+            if not device:
+                # Fall back to the currently configured DEVICE_PATH
+                device = read_config().get("DEVICE_PATH", "")
+            self._json(diag_serial_test(device))
+
+        elif path == "/api/diag/gpio":
+            try:
+                data = json.loads(body) if body else {}
+            except json.JSONDecodeError:
+                self._json({"error": "Invalid JSON"}, HTTPStatus.BAD_REQUEST)
+                return
+            pin = data.get("pin", "")
+            if pin == "":
+                # Fall back to the currently configured SENSE_LINE_PIN
+                pin = read_config().get("SENSE_LINE_PIN", "26")
+            self._json(diag_gpio_test(pin))
 
         else:
             self._not_found()

@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.10)
 
 project(modernjvs
-        VERSION "5.11.0"
+        VERSION "5.12.1"
         LANGUAGES "C"
         DESCRIPTION "JVS I/O Emulator"
         HOMEPAGE_URL "https://github.com/dazzaXx/ModernJVS"
@@ -93,7 +93,8 @@ option(ENABLE_WEBUI "Include the WebUI server in the installation" ON)
 if(ENABLE_WEBUI)
     message(STATUS "WebUI: enabled (use -DENABLE_WEBUI=OFF to exclude)")
     install(PROGRAMS
-        ${CMAKE_SOURCE_DIR}/src/webui/modernjvs-webui
+        ${CMAKE_SOURCE_DIR}/src/webui/modernjvs-webui.py
+        RENAME modernjvs-webui
         COMPONENT ${PROJECT_NAME}
         DESTINATION "bin/"
     )
