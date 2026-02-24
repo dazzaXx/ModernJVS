@@ -1443,7 +1443,7 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
     <div class="card" style="margin-top:1rem;">
       <h2>GPIO Sense Line Test</h2>
       <p style="font-size:0.83rem;color:var(--muted);margin-bottom:1rem;">
-        Read the current logic level of the configured sense-line GPIO pin using <code style="color:var(--accent2);font-family:monospace">gpioget</code> (libgpiod).
+        Read the current logic level of the configured sense-line GPIO pin via the Linux GPIO character device.
         Useful when first wiring the sense line — confirms the pin is reachable and reports HIGH or LOW.
       </p>
       <div id="diagGpioAlert" class="alert"></div>
@@ -3728,11 +3728,67 @@ def diag_serial_test(device_path):
         os.close(fd)
 
 
+def _gpio_read_line(chip_path, line_offset):
+    """Read a GPIO line value using ctypes and the Linux GPIO character device ioctl.
+
+    Uses the v1 GPIO ABI (GPIO_GET_LINEHANDLE_IOCTL), available on all kernels
+    >= 4.8 with GPIO character device support.  No external CLI tools or Python
+    C extensions are required.
+
+    Returns 0 or 1 on success.
+    Raises PermissionError if the caller lacks access to chip_path or the line.
+    Raises OSError if chip_path does not exist, is not a GPIO chip, or
+    line_offset is out of range (EINVAL).
+    """
+    import ctypes
+    import fcntl
+
+    GPIOHANDLES_MAX = 64
+    GPIOHANDLE_REQUEST_INPUT = 1
+    # _IOWR(0xB4, 0x03, struct gpiohandle_request)  sizeof = 364 bytes
+    GPIO_GET_LINEHANDLE_IOCTL = 0xC16CB403
+    # _IOWR(0xB4, 0x08, struct gpiohandle_data)  sizeof = 64 bytes
+    GPIOHANDLE_GET_LINE_VALUES_IOCTL = 0xC040B408
+
+    class GpiohandleRequest(ctypes.Structure):
+        _fields_ = [
+            ("lineoffsets",    ctypes.c_uint32 * GPIOHANDLES_MAX),
+            ("flags",          ctypes.c_uint32),
+            ("default_values", ctypes.c_uint8  * GPIOHANDLES_MAX),
+            ("consumer_label", ctypes.c_char   * 32),
+            ("lines",          ctypes.c_uint32),
+            ("fd",             ctypes.c_int),
+        ]
+
+    class GpiohandleData(ctypes.Structure):
+        _fields_ = [
+            ("values", ctypes.c_uint8 * GPIOHANDLES_MAX),
+        ]
+
+    chip_fd = os.open(chip_path, os.O_RDONLY)
+    try:
+        req = GpiohandleRequest()
+        req.lineoffsets[0] = line_offset
+        req.flags = GPIOHANDLE_REQUEST_INPUT
+        req.consumer_label = b"modernjvs-webui"
+        req.lines = 1
+        fcntl.ioctl(chip_fd, GPIO_GET_LINEHANDLE_IOCTL, req)  # OSError(EINVAL) if line_offset is out of range
+        line_fd = req.fd
+        try:
+            data = GpiohandleData()
+            fcntl.ioctl(line_fd, GPIOHANDLE_GET_LINE_VALUES_IOCTL, data)
+            return data.values[0]
+        finally:
+            os.close(line_fd)
+    finally:
+        os.close(chip_fd)
+
+
 def diag_gpio_test(pin):
-    """Read the current logic level of a GPIO pin using the gpioget command-line tool.
+    """Read the current logic level of a GPIO pin using the Linux GPIO character device.
 
     Returns a dict with keys: ok (bool), message (str), state (str | None).
-    Uses 'gpioget' from libgpiod-tools so no Python C extension is required.
+    Uses ctypes + kernel ioctl — no external CLI tools or Python C extensions required.
     """
     try:
         pin_int = int(pin)
@@ -3751,64 +3807,33 @@ def diag_gpio_test(pin):
     if not chips:
         return {
             "ok": False,
-            "message": "No /dev/gpiochip* devices found. Is libgpiod installed?",
+            "message": "No /dev/gpiochip* devices found. Is the GPIO character device available?",
             "state": None,
         }
 
-    # The BCM GPIO numbers on the 40-pin header don't map 1:1 to header pin
-    # numbers. We use gpioinfo to find the line by header-pin name if available,
-    # otherwise we try gpiochip0 line using the pin number directly as a best effort.
     # For Raspberry Pi, gpiochip0 is the main BCM GPIO controller.
+    # SENSE_LINE_PIN stores the BCM GPIO line offset, used directly.
     chip = chips[0]
 
-    # Attempt gpioinfo first to resolve a named line (e.g. "PIN26")
-    line_num = None
     try:
-        r = subprocess.run(
-            ["gpioinfo", chip],
-            capture_output=True, text=True, timeout=5
-        )
-        # Lines look like: "line  26:     unnamed   unused  input  active-high"
-        for line in r.stdout.splitlines():
-            # Match "line  <N>:" with optional spacing
-            m = re.match(r'^\s*line\s+(\d+):', line)
-            if m and int(m.group(1)) == pin_int:
-                line_num = int(m.group(1))
-                break
-    except Exception:
-        pass
-
-    if line_num is None:
-        line_num = pin_int  # fallback: treat header pin as line index
-
-    try:
-        r = subprocess.run(
-            ["gpioget", chip, str(line_num)],
-            capture_output=True, text=True, timeout=5
-        )
-        if r.returncode != 0:
-            err = (r.stderr or r.stdout or "unknown error").strip()
-            return {"ok": False, "message": f"gpioget failed: {err}", "state": None}
-        val = r.stdout.strip()
-        if val == "1":
-            state = "HIGH"
-        elif val == "0":
-            state = "LOW"
-        else:
-            state = val
+        val = _gpio_read_line(chip, pin_int)
+        state = "HIGH" if val else "LOW"
         return {
             "ok": True,
-            "message": f"Pin {line_num} on {chip} is {state}.",
+            "message": f"Pin {pin_int} on {chip} is {state}.",
             "state": state,
         }
-    except FileNotFoundError:
+    except PermissionError:
         return {
             "ok": False,
-            "message": "gpioget not found. Install libgpiod-tools: sudo apt install libgpiod-tools",
+            "message": (
+                f"Permission denied reading GPIO pin {pin_int}. "
+                "Run ModernJVS as root or add the service user to the 'gpio' group."
+            ),
             "state": None,
         }
-    except Exception as e:
-        return {"ok": False, "message": f"Error reading GPIO: {e}", "state": None}
+    except OSError as e:
+        return {"ok": False, "message": f"Error reading GPIO pin {pin_int}: {e}", "state": None}
 
 
 # ---------------------------------------------------------------------------
