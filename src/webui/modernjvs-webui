@@ -3918,6 +3918,16 @@ def diag_gpio_test(pin):
             "state": None,
         }
     except OSError as e:
+        import errno as _errno
+        if e.errno == _errno.EBUSY:
+            return {
+                "ok": True,
+                "message": (
+                    f"Pin {pin_int} is currently held by the ModernJVS daemon "
+                    "(sense line active). This is expected while the service is running."
+                ),
+                "state": "IN USE",
+            }
         return {"ok": False, "message": f"Error reading GPIO pin {pin_int}: {e}", "state": None}
 
 
