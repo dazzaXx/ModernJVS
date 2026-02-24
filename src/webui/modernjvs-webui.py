@@ -1484,7 +1484,7 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
         <code style="color:var(--accent2);font-family:monospace">ASSIGN_ADDR</code>
         broadcast and listens for 500&nbsp;ms — any response bytes confirm a connected,
         powered-on board.
-        <strong>Monitor Bus</strong> listens passively for 2&nbsp;seconds without sending
+        <strong>Monitor Bus</strong> listens passively for 5&nbsp;seconds without sending
         anything, showing whatever packets the arcade board is already transmitting.
         Both tools auto-detect a running service and report bus status without touching
         the port. When the service is stopped, the sense line is floated before listening.
@@ -3335,7 +3335,7 @@ async function runJvsBusMonitor() {
     return;
   }
   const resultEl = document.getElementById('diagJvsResult');
-  resultEl.innerHTML = '⏳ Listening on bus for 2 seconds…';
+  resultEl.innerHTML = '⏳ Listening on bus for 5 seconds…';
   resultEl.style.color = 'var(--muted)';
   const d = await api('/api/diag/jvs/monitor', {
     method: 'POST',
@@ -4414,7 +4414,7 @@ def diag_jvs_probe(device_path):
 
 
 def diag_jvs_monitor(device_path):
-    """Passively listen on device_path for 2 seconds without sending any bytes.
+    """Passively listen on device_path for 5 seconds without sending any bytes.
 
     Behaviour depends on whether the ModernJVS service is already running:
 
@@ -4424,7 +4424,7 @@ def diag_jvs_monitor(device_path):
 
     Service STOPPED:
         Opens device_path at 115200 8N1, floats the sense line GPIO (if
-        SENSE_LINE_TYPE == "1"), flushes stale input, then listens for 2 s.
+        SENSE_LINE_TYPE == "1"), flushes stale input, then listens for 5 s.
         No bytes are written to the bus.
 
     Returns a dict:
@@ -4537,7 +4537,7 @@ def diag_jvs_monitor(device_path):
 
         try:
             # Passive listen — no bytes sent to bus
-            deadline = time.monotonic() + 2.0
+            deadline = time.monotonic() + 5.0
             received = bytearray()
 
             while time.monotonic() < deadline:
@@ -4576,7 +4576,7 @@ def diag_jvs_monitor(device_path):
                 msg += " (showing first 64 bytes)"
             msg += sense_note
         else:
-            msg = ("No traffic after 2 s — silence on bus "
+            msg = ("No traffic after 5 s — silence on bus "
                    "(nothing connected, wrong port, or wiring fault)"
                    + sense_note)
 
