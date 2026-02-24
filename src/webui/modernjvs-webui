@@ -1246,6 +1246,7 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
       <br>
       <div class="control-row">
         <button class="btn btn-save" onclick="saveConfig()">💾 Save Configuration</button>
+        <button class="btn btn-restart" onclick="saveConfigAndRestart()">💾↺ Save &amp; Restart Service</button>
         <button class="btn btn-refresh" onclick="loadConfig()">⟳ Reload from Disk</button>
         <button class="btn btn-danger" onclick="resetConfig()">↩ Reset to Defaults</button>
       </div>
@@ -1767,7 +1768,27 @@ async function loadConfig() {
   document.getElementById('cfgRotaryPath').value = cfgData.rotary_path ?? '';
 }
 
+function validateConfigInputs() {
+  const warnings = [];
+  const device = document.getElementById('cfgDevice').value.trim();
+  if (device && !/^\/dev\/(ttyUSB|ttyAMA)/.test(device))
+    warnings.push('DEVICE_PATH "' + device + '" does not look like a serial port (/dev/ttyUSB* or /dev/ttyAMA*).');
+  const pin = parseInt(document.getElementById('cfgPin').value, 10);
+  if (!isNaN(pin) && (pin < 1 || pin > 40))
+    warnings.push('SENSE_LINE_PIN (' + pin + ') is outside the valid Raspberry Pi GPIO range (1–40).');
+  [['cfgDz1', 1], ['cfgDz2', 2], ['cfgDz3', 3], ['cfgDz4', 4]].forEach(([id, n]) => {
+    if (parseFloat(document.getElementById(id).value) >= 0.5)
+      warnings.push('ANALOG_DEADZONE for Player ' + n + ' is at or above the maximum (0.5), which will make the analog stick non-functional.');
+  });
+  return warnings;
+}
+
 async function saveConfig() {
+  const warnings = validateConfigInputs();
+  if (warnings.length > 0) {
+    const msg = 'Configuration warnings:\n\n' + warnings.join('\n') + '\n\nSave anyway?';
+    if (!confirm(msg)) return;
+  }
   const payload = {
     emulate:                    document.getElementById('cfgEmulate').value,
     game:                       document.getElementById('cfgGame').value,
@@ -1790,6 +1811,12 @@ async function saveConfig() {
   });
   if (d.error) showAlert('cfgAlert', 'Error: ' + d.error, true);
   else showAlert('cfgAlert', 'Configuration saved. Restart the service to apply changes.', false);
+  return !d.error;
+}
+
+async function saveConfigAndRestart() {
+  const saved = await saveConfig();
+  if (saved) await serviceAction('restart');
 }
 
 function resetConfig() {
