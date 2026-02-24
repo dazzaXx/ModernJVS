@@ -1515,13 +1515,16 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
         Stop the service first to read or manually drive the pin.
         <br><br>
         Use <strong>Set HIGH</strong> / <strong>Set LOW</strong> to manually drive the pin to a known state
-        for 3&nbsp;seconds (e.g. to verify wiring with a multimeter), then the line is released automatically.
+        for the chosen duration (e.g. to verify wiring with a multimeter), then the line is released automatically.
       </p>
       <div id="diagGpioAlert" class="alert"></div>
       <div style="display:flex;gap:0.6rem;align-items:center;flex-wrap:wrap;margin-bottom:0.75rem;">
         <label style="font-size:0.85rem;color:var(--muted);">Pin (header #):</label>
         <input type="number" id="diagGpioPin" min="1" max="40" placeholder="26"
                style="width:80px;background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--text);padding:0.35rem 0.6rem;">
+        <label style="font-size:0.85rem;color:var(--muted);">Duration (s):</label>
+        <input type="number" id="diagGpioDuration" min="1" max="60" value="3"
+               style="width:70px;background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--text);padding:0.35rem 0.6rem;">
         <button class="btn btn-start"   onclick="runGpioTest()">&#9654; Read Pin</button>
         <button class="btn btn-restart" onclick="setGpioPin('high')">&#9650; Set HIGH</button>
         <button class="btn btn-stop"    onclick="setGpioPin('low')">&#9660; Set LOW</button>
@@ -3283,13 +3286,15 @@ async function setGpioPin(level) {
     showAlert('diagGpioAlert', 'Enter a pin number.', true);
     return;
   }
+  const durRaw = parseInt(document.getElementById('diagGpioDuration').value, 10);
+  const duration = (!isNaN(durRaw) && durRaw >= 1) ? Math.min(durRaw, 60) : 3;
   const resultEl = document.getElementById('diagGpioResult');
-  resultEl.textContent = `⏳ Driving pin ${level.toUpperCase()} for 3 s…`;
+  resultEl.textContent = `⏳ Driving pin ${level.toUpperCase()} for ${duration} s…`;
   resultEl.style.color = 'var(--muted)';
   const d = await api('/api/diag/gpio/set', {
     method: 'POST',
     headers: {'Content-Type':'application/json'},
-    body: JSON.stringify({pin, level})
+    body: JSON.stringify({pin, level, duration})
   });
   if (d.error) {
     resultEl.textContent = '✗ ' + d.error;
@@ -5076,11 +5081,13 @@ def _gpio_write_line(chip_path, line_offset, value, duration_s=3.0):
         os.close(chip_fd)
 
 
-def diag_gpio_set(pin, level):
-    """Drive a GPIO pin OUTPUT HIGH or LOW for 3 seconds, then release it.
+def diag_gpio_set(pin, level, duration=3):
+    """Drive a GPIO pin OUTPUT HIGH or LOW for a user-defined duration, then release it.
 
     Intended for manual wiring verification — the user can confirm the expected
     voltage on the pin with a multimeter while it is being driven.
+
+    duration is clamped to 1–60 seconds; defaults to 3 s.
 
     Returns a dict: ok (bool), message (str), state (str | None).
     """
@@ -5100,6 +5107,13 @@ def diag_gpio_set(pin, level):
     if level_str not in ("high", "low"):
         return {"ok": False, "message": f"Invalid level {level!r} — must be 'high' or 'low'.", "state": None}
 
+    try:
+        duration_s = float(duration)
+    except (TypeError, ValueError):
+        duration_s = 3.0
+    # Clamp to a safe range
+    duration_s = max(1.0, min(60.0, duration_s))
+
     value = 1 if level_str == "high" else 0
     state = "HIGH" if value else "LOW"
 
@@ -5115,10 +5129,11 @@ def diag_gpio_set(pin, level):
         # pin_int is used directly as the BCM GPIO line offset on gpiochip0,
         # matching the behaviour of diag_gpio_test() which documents:
         # "SENSE_LINE_PIN stores the BCM GPIO line offset, used directly."
-        _gpio_write_line(chips[0], pin_int, value, duration_s=3.0)
+        _gpio_write_line(chips[0], pin_int, value, duration_s=duration_s)
+        dur_label = f"{int(duration_s)} s" if duration_s == int(duration_s) else f"{duration_s} s"
         return {
             "ok": True,
-            "message": f"Pin {pin_int} was driven {state} for 3 s, then released.",
+            "message": f"Pin {pin_int} was driven {state} for {dur_label}, then released.",
             "state": state,
         }
     except PermissionError:
@@ -6528,11 +6543,12 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
             except json.JSONDecodeError:
                 self._json({"error": "Invalid JSON"}, HTTPStatus.BAD_REQUEST)
                 return
-            pin   = data.get("pin", "")
-            level = data.get("level", "")
+            pin      = data.get("pin", "")
+            level    = data.get("level", "")
+            duration = data.get("duration", 3)
             if pin == "":
                 pin = read_config().get("SENSE_LINE_PIN", "26")
-            self._json(diag_gpio_set(pin, level))
+            self._json(diag_gpio_set(pin, level, duration))
 
         else:
             self._not_found()
