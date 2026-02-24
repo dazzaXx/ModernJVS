@@ -1482,7 +1482,7 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
         <strong>Probe Bus</strong> sends a
         <code style="color:var(--accent2);font-family:monospace">RESET</code> +
         <code style="color:var(--accent2);font-family:monospace">ASSIGN_ADDR</code>
-        broadcast and listens for 500&nbsp;ms — any response bytes confirm a connected,
+        broadcast and listens for 2&nbsp;s — any response bytes confirm a connected,
         powered-on board.
         <strong>Monitor Bus</strong> listens passively for 5&nbsp;seconds without sending
         anything, showing whatever packets the arcade board is already transmitting.
@@ -4194,7 +4194,7 @@ def diag_jvs_probe(device_path):
         SENSE_LINE_TYPE == "1"), flushes stale input, sends:
           1. JVS RESET broadcast (SYNC | 0xFF | 0x03 | CMD_RESET(0xF0) | 0xD9 | checksum)
           2. JVS ASSIGN_ADDR broadcast (SYNC | 0xFF | 0x03 | CMD_ASSIGN_ADDR(0xF1) | 0x01 | checksum)
-        then collects any bytes received within 500 ms.
+        then collects any bytes received within 2 s.
 
     Returns a dict:
         ok             – False on OS/TTY errors, True otherwise
@@ -4353,7 +4353,7 @@ def diag_jvs_probe(device_path):
                 pass
 
             # Collect bytes for up to 500 ms
-            deadline  = time.monotonic() + 0.5
+            deadline  = time.monotonic() + 2.0
             received  = bytearray()
 
             while time.monotonic() < deadline:
@@ -4395,7 +4395,7 @@ def diag_jvs_probe(device_path):
                 msg += " (showing first 64 bytes)"
             msg += sense_note
         else:
-            msg = ("No response after 500 ms — silence on bus "
+            msg = ("No response after 2 s — silence on bus "
                    "(nothing connected, wrong port, or wiring fault)"
                    + sense_note)
 
