@@ -3337,7 +3337,6 @@ async function jvsServiceAction(action) {
     showAlert('diagJvsAlert', 'Error: ' + d.error, true);
   } else {
     showAlert('diagJvsAlert', 'Service ' + action + ' successful.', false);
-    setTimeout(runJvsBusProbe, 1200);
   }
 }
 
