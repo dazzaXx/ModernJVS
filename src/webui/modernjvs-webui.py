@@ -1106,7 +1106,7 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
     <button class="tab" onclick="showTab('monitor', this)">Monitor &amp; Logs</button>
     <button class="tab" onclick="showTab('profiles', this)">Profiles</button>
     <button class="tab" onclick="showTab('devices', this)">Devices</button>
-    <button class="tab" onclick="showTab('diagnostics', this)">&#x1F50E; Diagnostics</button>
+    <button class="tab" onclick="showTab('diagnostics', this)">&#x26A0; Diagnostics</button>
     <button class="tab" onclick="showTab('webui-settings', this)">&#9881; WebUI Settings</button>
   </div>
 
