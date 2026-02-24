@@ -3647,6 +3647,7 @@ BT_PAIR_TIMEOUT    = 30  # pairing can be slow on first attempt
 BT_CONNECT_TIMEOUT = 20  # connection attempt timeout
 BT_INFO_TIMEOUT    = 10  # info / trust / remove commands
 BT_CONNECT_RETRY_DELAY = 2  # seconds to wait before retrying a failed connection attempt
+BT_CONNECT_MAX_RETRIES = 5  # number of automatic retries after an initial failed connect
 
 
 def _validate_bt_mac(mac):
@@ -3832,8 +3833,10 @@ def bluetooth_pair(mac):
         conn_out = (conn_result.stdout + conn_result.stderr).lower()
         conn_ok = conn_result.returncode == 0 or "successful" in conn_out
 
-        # Some devices need a second connect attempt after pairing
-        if not conn_ok:
+        # Some devices need multiple connect attempts after pairing
+        for _ in range(BT_CONNECT_MAX_RETRIES):
+            if conn_ok:
+                break
             time.sleep(BT_CONNECT_RETRY_DELAY)
             conn_result = _run_bt("connect", mac, timeout=BT_CONNECT_TIMEOUT)
             conn_out = (conn_result.stdout + conn_result.stderr).lower()
@@ -3904,8 +3907,10 @@ def bluetooth_connect(mac):
         conn_out = (conn_result.stdout + conn_result.stderr).lower()
         conn_ok = conn_result.returncode == 0 or "successful" in conn_out
 
-        # Some devices need a second connect attempt
-        if not conn_ok:
+        # Some devices need multiple connect attempts
+        for _ in range(BT_CONNECT_MAX_RETRIES):
+            if conn_ok:
+                break
             time.sleep(BT_CONNECT_RETRY_DELAY)
             conn_result = _run_bt("connect", mac, timeout=BT_CONNECT_TIMEOUT)
             conn_out = (conn_result.stdout + conn_result.stderr).lower()
