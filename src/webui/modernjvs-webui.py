@@ -318,6 +318,7 @@ _LOGIN_TEMPLATE = """\
 <html lang="en" data-theme="black">
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>ModernJVS WebUI \u2014 Login</title>
+<link rel="icon" type="image/png" href="{sticks}">
 <style>
   :root{{--bg:#000000;--surface:#0a0a0a;--card:#111111;--border:#1f1f1f;
         --accent:#970011;--text:#e2e2f0;--muted:#888888;--red:#ff5555;
@@ -465,6 +466,7 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>ModernJVS WebUI</title>
+<link rel="icon" type="image/png" href="__STICKS__">
 <style>
   :root {
     --bg:      #0d0d14;
