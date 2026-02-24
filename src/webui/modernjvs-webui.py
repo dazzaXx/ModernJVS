@@ -1474,20 +1474,17 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
       <div id="diagSerialResult" style="font-family:monospace;font-size:0.84rem;min-height:2rem;"></div>
     </div>
 
-    <!-- JVS Bus Probe -->
+    <!-- JVS Bus Monitor -->
     <div class="card" style="margin-top:1rem;">
-      <h2>JVS Bus Probe</h2>
+      <h2>JVS Bus Monitor</h2>
       <p style="font-size:0.83rem;color:var(--muted);margin-bottom:1rem;">
-        Checks whether a JVS arcade board is reachable on the selected port.
-        If the ModernJVS service is <strong>running</strong>, the probe detects this automatically
-        and reports bus status without touching the port (the running service is already
-        communicating with the board).
-        If the service is <strong>stopped</strong>, a JVS
-        <code style="color:var(--accent2);font-family:monospace">RESET</code> +
-        <code style="color:var(--accent2);font-family:monospace">ASSIGN_ADDR</code>
-        broadcast is sent and the bus is listened to for 500&nbsp;ms — any response
-        bytes confirm a connected, powered-on board; silence indicates nothing connected,
-        the wrong port, or a wiring fault.
+        Listens passively on the selected port for 2&nbsp;seconds and reports any JVS
+        packets coming from the arcade board — no bytes are sent to the bus.
+        If the ModernJVS service is <strong>running</strong>, the monitor detects this
+        automatically and reports bus status without touching the port.
+        If the service is <strong>stopped</strong>, the sense line is floated and the
+        port is opened in listen-only mode; any traffic confirms a connected, powered-on
+        board while silence indicates nothing connected, the wrong port, or a wiring fault.
       </p>
       <div id="diagJvsAlert" class="alert"></div>
       <div style="display:flex;gap:0.6rem;align-items:center;flex-wrap:wrap;margin-bottom:0.75rem;">
@@ -1496,7 +1493,7 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
         </select>
         <input type="text" id="diagJvsCustom" placeholder="or type a path, e.g. /dev/ttyUSB0"
                style="flex:1;min-width:200px;background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--text);padding:0.35rem 0.6rem;">
-        <button class="btn btn-start" onclick="runJvsBusProbe()">&#9654; Probe Bus</button>
+        <button class="btn btn-start" onclick="runJvsBusMonitor()">&#128065; Monitor Bus</button>
         <button class="btn btn-stop"  onclick="jvsServiceAction('stop')">&#9632; Stop Service</button>
         <button class="btn btn-start" onclick="jvsServiceAction('start')">&#9654; Start Service</button>
       </div>
@@ -3268,7 +3265,7 @@ async function runGpioTest() {
   }
 }
 
-async function runJvsBusProbe() {
+async function runJvsBusMonitor() {
   const custom = document.getElementById('diagJvsCustom').value.trim();
   const sel    = document.getElementById('diagJvsPort').value;
   const device = custom || sel;
@@ -3277,9 +3274,9 @@ async function runJvsBusProbe() {
     return;
   }
   const resultEl = document.getElementById('diagJvsResult');
-  resultEl.innerHTML = '⏳ Checking service state and probing bus…';
+  resultEl.innerHTML = '⏳ Listening on bus for 2 seconds…';
   resultEl.style.color = 'var(--muted)';
-  const d = await api('/api/diag/jvs/probe', {
+  const d = await api('/api/diag/jvs/monitor', {
     method: 'POST',
     headers: {'Content-Type':'application/json'},
     body: JSON.stringify({device})
@@ -3300,11 +3297,11 @@ async function runJvsBusProbe() {
     resultEl.innerHTML =
       `<div style="color:var(--accent2,#61afef);font-weight:bold;">ℹ ${_escHtml(d.message)}</div>`
       + `<div style="margin-top:0.4rem;font-size:0.82rem;color:var(--muted);">`
-      + `Stop the ModernJVS service and probe again to send a RESET broadcast and inspect raw bus traffic.`
+      + `Stop the ModernJVS service and monitor again to inspect raw bus traffic.`
       + `</div>`;
     return;
   }
-  // Active-probe mode
+  // Passive-monitor mode
   if (d.activity) {
     resultEl.style.color = 'var(--text)';
     let html = `<div style="color:var(--green,#98c379);font-weight:bold;">✓ ${_escHtml(d.message)}</div>`;
@@ -4120,28 +4117,28 @@ def _service_owns_port(pid_str, device_path):
     return False
 
 
-def diag_jvs_probe(device_path):
-    """Probe the JVS bus on device_path.
+def diag_jvs_monitor(device_path):
+    """Passively monitor the JVS bus on device_path.
+
+    No bytes are sent to the bus.  The function opens the port, floats the
+    sense line (if configured), and listens for 2 seconds, capturing whatever
+    the arcade board is transmitting.
 
     Behaviour depends on whether the ModernJVS service is already running:
 
     Service RUNNING:
         The daemon owns the port and is actively exchanging JVS packets with
-        the arcade board.  Opening the same port and sending a RESET broadcast
-        would disrupt the session and cause the probe to read silence (the
-        daemon consumes all incoming bytes).  Instead, we confirm the daemon
-        has the port open via /proc/<PID>/fd/ and return an informational result
-        without touching the port.
+        the arcade board.  We confirm the daemon has the port open via
+        /proc/<PID>/fd/ and return an informational result without touching
+        the port.
 
     Service STOPPED:
-        Opens device_path at 115200 8N1, flushes stale input, sends:
-          1. JVS RESET broadcast (SYNC | 0xFF | 0x03 | CMD_RESET(0xF0) | 0xD9 | checksum)
-          2. JVS ASSIGN_ADDR broadcast (SYNC | 0xFF | 0x03 | CMD_ASSIGN_ADDR(0xF1) | 0x01 | checksum)
-        then collects any bytes received within 500 ms.
+        Opens device_path at 115200 8N1, floats the sense line GPIO (if
+        SENSE_LINE_TYPE == "1"), flushes stale input, then listens for 2 s.
 
     Returns a dict:
         ok             – False on OS/TTY errors, True otherwise
-        mode           – "service_running" | "active_probe"
+        mode           – "service_running" | "monitor"
         activity       – True if bus activity confirmed or bytes received
         bytes_received – count of received bytes (0 in service_running mode)
         raw_hex        – space-separated hex of up to 64 bytes
