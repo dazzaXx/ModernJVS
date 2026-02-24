@@ -1496,8 +1496,8 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
         </select>
         <input type="text" id="diagJvsCustom" placeholder="or type a path, e.g. /dev/ttyUSB0"
                style="flex:1;min-width:200px;background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--text);padding:0.35rem 0.6rem;">
-        <button class="btn btn-start" onclick="runJvsBusProbe()">&#9654; Probe Bus</button>
-        <button class="btn btn-start" onclick="runJvsBusMonitor()">&#128065; Monitor Bus</button>
+        <button class="btn btn-restart" onclick="runJvsBusProbe()">&#9654; Probe Bus</button>
+        <button class="btn btn-restart" onclick="runJvsBusMonitor()">&#128065; Monitor Bus</button>
         <button class="btn btn-stop"  onclick="jvsServiceAction('stop')">&#9632; Stop Service</button>
         <button class="btn btn-start" onclick="jvsServiceAction('start')">&#9654; Start Service</button>
       </div>
