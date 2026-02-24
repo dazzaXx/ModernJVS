@@ -10,13 +10,12 @@
 
 #include "controller/input.h"
 
-// Poll rotary every one second
-#define TIME_POLL_ROTARY 1
+// Poll devices every one second
+#define TIME_POLL_DEVICES 1
 
 typedef struct
 {
     volatile int *running;
-    JVSRotaryStatus rotaryStatus;
 
 } WatchdogThreadArguments;
 
@@ -26,21 +25,8 @@ static void *watchdogThread(void *_args)
 
     int originalDevicesCount = getNumberOfDevices();
 
-    int rotaryValue = -1;
-
-    if (args->rotaryStatus == JVS_ROTARY_STATUS_SUCCESS)
-    {
-        rotaryValue = getRotaryValue();
-    }
-
     while (getThreadsRunning())
     {
-        if ((args->rotaryStatus == JVS_ROTARY_STATUS_SUCCESS) && (rotaryValue != getRotaryValue()))
-        {
-            *args->running = 0;
-            break;
-        }
-
         // Check if device count has changed or if we can't enumerate devices:
         // - currentDeviceCount == -1: error accessing /dev/input → restart
         // - currentDeviceCount != originalDevicesCount: device added/removed → restart
@@ -67,7 +53,7 @@ static void *watchdogThread(void *_args)
             *args->running = 0;
             break;
         }
-        sleep(TIME_POLL_ROTARY);
+        sleep(TIME_POLL_DEVICES);
     }
 
     if (_args != NULL)
@@ -79,7 +65,7 @@ static void *watchdogThread(void *_args)
     return 0;
 }
 
-WatchdogStatus initWatchdog(volatile int *running, JVSRotaryStatus rotaryStatus)
+WatchdogStatus initWatchdog(volatile int *running)
 {
     WatchdogThreadArguments *args = malloc(sizeof(WatchdogThreadArguments));
     if (args == NULL)
@@ -89,7 +75,6 @@ WatchdogStatus initWatchdog(volatile int *running, JVSRotaryStatus rotaryStatus)
     }
     
     args->running = running;
-    args->rotaryStatus = rotaryStatus;
 
     if (THREAD_STATUS_SUCCESS != createThread(watchdogThread, args))
     {

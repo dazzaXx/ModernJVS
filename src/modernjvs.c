@@ -10,7 +10,6 @@
 #include "controller/threading.h"
 #include "console/watchdog.h"
 #include "hardware/device.h"
-#include "hardware/rotary.h"
 #include "jvs/io.h"
 #include "jvs/jvs.h"
 #include "ffb/ffb.h"
@@ -72,14 +71,6 @@ int main(int argc, char **argv)
         return EXIT_FAILURE;
     }
 
-    /* Init the rotary status*/
-    JVSRotaryStatus rotaryStatus = JVS_ROTARY_STATUS_UNUSED;
-    int rotaryValue = -1;
-    if (strcmp(config.defaultGamePath, "rotary") == 0 || strcmp(config.defaultGamePath, "ROTARY") == 0)
-    {
-        rotaryStatus = initRotary();
-    }
-
     // Create the JVSIO structure outside the loop so it persists across controller changes.
     // This allows controllers to be hot-plugged without resetting the JVS connection,
     // which would cause the arcade machine to lose communication and require a system reset.
@@ -93,20 +84,13 @@ int main(int argc, char **argv)
     int jvsInitialized = 0;
 
     JVSInputStatus lastInputState = JVS_INPUT_STATUS_SUCCESS;
-    int lastRotaryValue = -1;
     while (running != -1)
     {
-        /* Init the watchdog to check the rotary and inputs */
+        /* Init the watchdog to check inputs */
         debug(1, "Init watchdog\n");
         running = 1;
         setThreadsRunning(1);
-        initWatchdog(&running, rotaryStatus);
-
-        if (rotaryStatus == JVS_ROTARY_STATUS_SUCCESS)
-        {
-            rotaryValue = getRotaryValue();
-            parseRotary(DEFAULT_ROTARY_PATH, rotaryValue, config.defaultGamePath);
-        }
+        initWatchdog(&running);
 
         debug(1, "Init inputs\n");
         JVSInputStatus inputStatus = initInputs(config.defaultGamePath, config.capabilitiesPath, config.secondCapabilitiesPath, &io, config.autoControllerDetection, config.analogDeadzonePlayer1, config.analogDeadzonePlayer2, config.analogDeadzonePlayer3, config.analogDeadzonePlayer4);
@@ -138,14 +122,8 @@ int main(int argc, char **argv)
         {
             // Cleanup then wait before reconnecting
             lastInputState = inputStatus;
-            lastRotaryValue = rotaryValue;
             cleanup();
             continue;
-        }
-
-        if (rotaryStatus == JVS_ROTARY_STATUS_SUCCESS && rotaryValue != lastRotaryValue)
-        {
-            debug(0, "  Rotary Position: %d\n", rotaryValue);
         }
 
         debug(0, "  Output:          %s\n", config.defaultGamePath);
@@ -273,7 +251,6 @@ int main(int argc, char **argv)
         }
 
         lastInputState = inputStatus;
-        lastRotaryValue = rotaryValue;
         cleanup();
     }
 

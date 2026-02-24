@@ -1166,7 +1166,6 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
         <div class="stat-card"><div class="val" id="currentIO2">—</div><div class="lbl">Secondary I/O</div></div>
         <div class="stat-card"><div class="val" id="currentGame">—</div><div class="lbl">Current Game</div></div>
         <div class="stat-card"><div class="val" id="currentDevice">—</div><div class="lbl">Device Path</div></div>
-        <div class="stat-card"><div class="val" id="currentRotary" style="font-size:0.85rem;word-break:break-all;">—</div><div class="lbl">Rotary Path</div></div>
       </div>
       <div id="playerSlots"></div>
     </div>
@@ -1225,11 +1224,10 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
           <input type="text" id="cfgDevice" placeholder="/dev/ttyUSB0">
         </div>
         <div class="field">
-          <label>Sense Line Type (0/1/2)</label>
+          <label>Sense Line Type (0/1)</label>
           <select id="cfgSense">
             <option value="0">0 – USB RS485, no sense line</option>
             <option value="1">1 – USB RS485, with sense line</option>
-            <option value="2">2 – OpenJVS HAT</option>
           </select>
         </div>
         <div class="field">
@@ -1270,10 +1268,6 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
         <div class="field">
           <label>Secondary I/O Board (EMULATE_SECOND)</label>
           <select id="cfgEmulate2"></select>
-        </div>
-        <div class="field">
-          <label>Rotary Encoder Path</label>
-          <input type="text" id="cfgRotaryPath" placeholder="/etc/modernjvs/rotary">
         </div>
       </div>
       <br>
@@ -1716,7 +1710,6 @@ async function refreshDashboard() {
   document.getElementById('currentIO2').textContent    = d.config?.emulate_second   || '—';
   document.getElementById('currentGame').textContent   = d.config?.game             || '—';
   document.getElementById('currentDevice').textContent = d.config?.device           || '—';
-  document.getElementById('currentRotary').textContent = d.config?.rotary_path      || '—';
 
   const players = d.players || [];
   const psEl = document.getElementById('playerSlots');
@@ -1851,8 +1844,6 @@ async function loadConfig() {
     if (cfgData.emulate_second === io) o.selected = true;
     io2Sel.appendChild(o);
   });
-
-  document.getElementById('cfgRotaryPath').value = cfgData.rotary_path ?? '';
 }
 
 function validateConfigInputs() {
@@ -1889,7 +1880,6 @@ async function saveConfig() {
     deadzone_p3:                document.getElementById('cfgDz3').value,
     deadzone_p4:                document.getElementById('cfgDz4').value,
     emulate_second:             document.getElementById('cfgEmulate2').value,
-    rotary_path:                document.getElementById('cfgRotaryPath').value,
   };
   const d = await api('/api/config', {
     method: 'POST',
@@ -1921,7 +1911,6 @@ function resetConfig() {
   document.getElementById('cfgDz3').value = '0.2';
   document.getElementById('cfgDz4').value = '0.2';
   document.getElementById('cfgEmulate2').value   = '';
-  document.getElementById('cfgRotaryPath').value = '';
   showAlert('cfgAlert', 'Fields reset to defaults. Click Save to write the configuration.', false);
 }
 
@@ -3366,13 +3355,12 @@ def write_config(new_values):
         "deadzone_p3":                "ANALOG_DEADZONE_PLAYER_3",
         "deadzone_p4":                "ANALOG_DEADZONE_PLAYER_4",
         "emulate_second":             "EMULATE_SECOND",
-        "rotary_path":                "ROTARY_PATH",
     }
 
     # Build a dict of directive → new value
-    # For EMULATE_SECOND and ROTARY_PATH: if empty/blank, mark for removal (not append)
+    # For EMULATE_SECOND: if empty/blank, mark for removal (not append)
     # so unknown directives are never added to the config file.
-    _optional_directives = {"EMULATE_SECOND", "ROTARY_PATH"}
+    _optional_directives = {"EMULATE_SECOND"}
     _remove_directives = set()
     updates = {}
     for api_key, directive in key_map.items():
@@ -3435,7 +3423,6 @@ def config_to_api(cfg):
         "deadzone_p3":                cfg.get("ANALOG_DEADZONE_PLAYER_3",   "0.2"),
         "deadzone_p4":                cfg.get("ANALOG_DEADZONE_PLAYER_4",   "0.2"),
         "emulate_second":             cfg.get("EMULATE_SECOND",             ""),
-        "rotary_path":                cfg.get("ROTARY_PATH",                ""),
     }
 
 

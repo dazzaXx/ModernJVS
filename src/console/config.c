@@ -552,62 +552,6 @@ JVSConfigStatus parseOutputMapping(char *path, OutputMappings *outputMappings, c
     return JVS_CONFIG_STATUS_SUCCESS;
 }
 
-JVSConfigStatus parseRotary(char *path, int rotary, char *output)
-{
-    FILE *file;
-
-    char *line = NULL;
-    size_t len = 0;
-    ssize_t read;
-
-    /* Validate rotary value is in valid range */
-    if (rotary < 0 || rotary >= MAX_ROTARY_POSITIONS)
-    {
-        debug(1, "Warning: Invalid rotary value %d, using 0\n", rotary);
-        rotary = 0;
-    }
-
-    if ((file = fopen(path, "r")) == NULL)
-        return JVS_CONFIG_STATUS_FILE_NOT_FOUND;
-
-    int counter = 0;
-    char rotaryGames[MAX_ROTARY_POSITIONS][MAX_LINE_LENGTH];
-
-    for (int i = 0; i < MAX_ROTARY_POSITIONS; i++)
-    {
-        strncpy(rotaryGames[i], "generic", MAX_LINE_LENGTH - 1);
-        rotaryGames[i][MAX_LINE_LENGTH - 1] = '\0';
-    }
-
-    while ((read = getline(&line, &len, file)) != -1 && counter < MAX_ROTARY_POSITIONS)
-    {
-        strncpy(rotaryGames[counter], line, MAX_LINE_LENGTH - 1);
-        rotaryGames[counter][MAX_LINE_LENGTH - 1] = '\0';
-        for (size_t i = 0; i < strlen(line); i++)
-        {
-            if (rotaryGames[counter][i] == '\n' || rotaryGames[counter][i] == '\r')
-            {
-                rotaryGames[counter][i] = 0;
-            }
-        }
-        counter++;
-
-        if (line)
-        {
-            free(line);
-            line = NULL;
-            len = 0;
-        }
-    }
-
-    fclose(file);
-
-    strncpy(output, rotaryGames[rotary], MAX_PATH_LENGTH - 1);
-    output[MAX_PATH_LENGTH - 1] = '\0';
-
-    return JVS_CONFIG_STATUS_SUCCESS;
-}
-
 JVSConfigStatus parseIO(char *path, JVSCapabilities *capabilities)
 {
     FILE *file;

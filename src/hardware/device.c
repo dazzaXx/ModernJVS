@@ -137,10 +137,6 @@ int initDevice(char *devicePath, int senseLineType, int senseLinePin)
     debug(1, "Debug: Float/Sync sense line set\n");
     setGPIODirection(senseLinePin, IN);
     break;
-  case 2:
-    debug(1, "Debug: Complex sense line set\n");
-    setGPIODirection(senseLinePin, OUT);
-    break;
   default:
     debug(0, "Debug: Invalid sense line type set\n");
     break;
@@ -656,28 +652,6 @@ int setSenseLine(int state)
     else
     {
       if (!writeGPIO(localSenseLinePin, LOW))
-      {
-        debug(1, "Warning: Failed to sink sense line %d\n", localSenseLinePin);
-        return 0;
-      }
-    }
-  }
-  break;
-
-  /* Switch Style */
-  case 2:
-  {
-    if (!state)
-    {
-      if (!writeGPIO(localSenseLinePin, 0))
-      {
-        debug(1, "Warning: Failed to set sense line to 1 %d\n", localSenseLinePin);
-        return 0;
-      }
-    }
-    else
-    {
-      if (!writeGPIO(localSenseLinePin, 1))
       {
         debug(1, "Warning: Failed to sink sense line %d\n", localSenseLinePin);
         return 0;

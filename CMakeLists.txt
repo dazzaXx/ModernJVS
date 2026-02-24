@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.10)
 
 project(modernjvs
-        VERSION "5.12.2"
+        VERSION "5.12.3"
         LANGUAGES "C"
         DESCRIPTION "JVS I/O Emulator"
         HOMEPAGE_URL "https://github.com/dazzaXx/ModernJVS"
@@ -26,7 +26,6 @@ set(SOURCES
     src/controller/threading.c
     src/ffb/ffb.c
     src/hardware/device.c
-    src/hardware/rotary.c
     src/jvs/io.c
     src/jvs/jvs.c
 )
