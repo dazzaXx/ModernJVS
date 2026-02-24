@@ -4230,51 +4230,99 @@ def diag_jvs_probe(device_path):
         except termios.error:
             pass
 
-        # ----------------------------------------------------------------
-        # Build probe packets (master → all slaves, broadcast addr 0xFF)
-        #
-        # RESET broadcast:
-        #   SYNC(0xE0) | dest(0xFF) | len(0x03) | CMD_RESET(0xF0) | 0xD9 | chk
-        #   checksum = (0xFF + 0x03 + 0xF0 + 0xD9) & 0xFF = 0x2CB & 0xFF = 0xCB
-        #
-        # ASSIGN_ADDR broadcast (assign address 0x01):
-        #   SYNC(0xE0) | dest(0xFF) | len(0x03) | CMD_ASSIGN_ADDR(0xF1) | 0x01 | chk
-        #   checksum = (0xFF + 0x03 + 0xF1 + 0x01) & 0xFF = 0x1F4 & 0xFF = 0xF4
-        #
-        # None of these bytes equal SYNC(0xE0) or ESCAPE(0xD0) so no escaping
-        # is needed in the data portion.
-        # ----------------------------------------------------------------
-        reset_packet       = bytes([0xE0, 0xFF, 0x03, 0xF0, 0xD9, 0xCB])
-        assign_addr_packet = bytes([0xE0, 0xFF, 0x03, 0xF1, 0x01, 0xF4])
+        # ------------------------------------------------------------------
+        # Sense line: if configured, float it (set GPIO to INPUT / high-Z)
+        # before sending probe packets.  When the daemon is not running the
+        # GPIO pin may still be driven LOW (from the last ASSIGN_ADDR), which
+        # prevents the arcade board from detecting an I/O device and responding.
+        # We keep the handle open for the entire probe so the line stays INPUT.
+        # ------------------------------------------------------------------
+        cfg = read_config()
+        sense_type = cfg.get("SENSE_LINE_TYPE", "0").strip()
+        sense_pin_raw = cfg.get("SENSE_LINE_PIN", "26").strip()
+        sense_note = ""
+        gpio_chip_fd = None
+        gpio_line_fd = None
+        if sense_type == "1":
+            try:
+                sense_pin = int(sense_pin_raw)
+            except ValueError:
+                sense_pin = -1
+            if sense_pin >= 0:
+                chips = sorted(_glob.glob("/dev/gpiochip*"))
+                if chips:
+                    gpio_chip_fd, gpio_line_fd = _gpio_open_input(chips[0], sense_pin)
+                    if gpio_line_fd is not None:
+                        time.sleep(0.01)  # 10 ms for the line to stabilise
+                        sense_note = f" (sense line GPIO{sense_pin} floated)"
+                    else:
+                        # Open failed; close chip_fd if it was returned
+                        if gpio_chip_fd is not None:
+                            try:
+                                os.close(gpio_chip_fd)
+                            except OSError:
+                                pass
+                            gpio_chip_fd = None
+                        sense_note = f" (warning: could not float sense line GPIO{sense_pin})"
 
         try:
-            os.write(fd, reset_packet)
-        except OSError:
-            pass  # write failure is non-fatal; we still listen for traffic
+            # ----------------------------------------------------------------
+            # Build probe packets (master → all slaves, broadcast addr 0xFF)
+            #
+            # RESET broadcast:
+            #   SYNC(0xE0) | dest(0xFF) | len(0x03) | CMD_RESET(0xF0) | 0xD9 | chk
+            #   checksum = (0xFF + 0x03 + 0xF0 + 0xD9) & 0xFF = 0x2CB & 0xFF = 0xCB
+            #
+            # ASSIGN_ADDR broadcast (assign address 0x01):
+            #   SYNC(0xE0) | dest(0xFF) | len(0x03) | CMD_ASSIGN_ADDR(0xF1) | 0x01 | chk
+            #   checksum = (0xFF + 0x03 + 0xF1 + 0x01) & 0xFF = 0x1F4 & 0xFF = 0xF4
+            #
+            # None of these bytes equal SYNC(0xE0) or ESCAPE(0xD0) so no escaping
+            # is needed in the data portion.
+            # ----------------------------------------------------------------
+            reset_packet       = bytes([0xE0, 0xFF, 0x03, 0xF0, 0xD9, 0xCB])
+            assign_addr_packet = bytes([0xE0, 0xFF, 0x03, 0xF1, 0x01, 0xF4])
 
-        time.sleep(0.005)  # 5 ms gap between packets
+            try:
+                os.write(fd, reset_packet)
+            except OSError:
+                pass  # write failure is non-fatal; we still listen for traffic
 
-        try:
-            os.write(fd, assign_addr_packet)
-        except OSError:
-            pass
+            time.sleep(0.005)  # 5 ms gap between packets
 
-        # Collect bytes for up to 500 ms
-        deadline  = time.monotonic() + 0.5
-        received  = bytearray()
+            try:
+                os.write(fd, assign_addr_packet)
+            except OSError:
+                pass
 
-        while time.monotonic() < deadline:
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                break
-            r, _, _ = _select.select([fd], [], [], min(remaining, 0.05))
-            if fd in r:
-                try:
-                    chunk = os.read(fd, 256)
-                    if chunk:
-                        received.extend(chunk)
-                except OSError:
+            # Collect bytes for up to 500 ms
+            deadline  = time.monotonic() + 0.5
+            received  = bytearray()
+
+            while time.monotonic() < deadline:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
                     break
+                r, _, _ = _select.select([fd], [], [], min(remaining, 0.05))
+                if fd in r:
+                    try:
+                        chunk = os.read(fd, 256)
+                        if chunk:
+                            received.extend(chunk)
+                    except OSError:
+                        break
+        finally:
+            # Release the sense line GPIO handle now that the probe is complete
+            if gpio_line_fd is not None:
+                try:
+                    os.close(gpio_line_fd)
+                except OSError:
+                    pass
+            if gpio_chip_fd is not None:
+                try:
+                    os.close(gpio_chip_fd)
+                except OSError:
+                    pass
 
         # Parse any JVS packets found in the received bytes
         packets   = _parse_jvs_packets(received)
@@ -4288,8 +4336,11 @@ def diag_jvs_probe(device_path):
                 msg += f" ({names})"
             if truncated:
                 msg += " (showing first 64 bytes)"
+            msg += sense_note
         else:
-            msg = "No response after 500 ms — silence on bus (nothing connected, wrong port, or wiring fault)"
+            msg = ("No response after 500 ms — silence on bus "
+                   "(nothing connected, wrong port, or wiring fault)"
+                   + sense_note)
 
         return {
             "ok":             True,
@@ -4380,6 +4431,117 @@ def diag_usb_devices():
         })
 
     return {"devices": devices}
+
+
+def _gpio_open_input(chip_path, line_offset):
+    """Request a GPIO line as INPUT (float/high-Z) using the kernel GPIO ioctl.
+
+    Returns (chip_fd, line_fd) on success, or (None, None) on any error.
+    Both fds must be closed by the caller when the line is no longer needed.
+    Releasing the line_fd returns the GPIO line to its default kernel-managed state.
+
+    Tries the v1 GPIO ABI first (kernel >= 4.8), then v2 (kernel >= 5.10).
+    No external CLI tools or Python C extensions are required.
+    """
+    import ctypes
+    import errno as _errno
+    import fcntl
+
+    # ---- v1 ABI constants ----
+    GPIOHANDLES_MAX          = 64
+    GPIOHANDLE_REQUEST_INPUT = 1
+    # _IOWR(0xB4, 0x03, struct gpiohandle_request)  sizeof = 364 bytes
+    GPIO_GET_LINEHANDLE_IOCTL = 0xC16CB403
+
+    class GpiohandleRequest(ctypes.Structure):
+        _fields_ = [
+            ("lineoffsets",    ctypes.c_uint32 * GPIOHANDLES_MAX),
+            ("flags",          ctypes.c_uint32),
+            ("default_values", ctypes.c_uint8  * GPIOHANDLES_MAX),
+            ("consumer_label", ctypes.c_char   * 32),
+            ("lines",          ctypes.c_uint32),
+            ("fd",             ctypes.c_int),
+        ]
+
+    # ---- v2 ABI constants ----
+    GPIO_V2_LINES_MAX          = 64
+    GPIO_MAX_NAME_SIZE         = 32
+    GPIO_V2_LINE_NUM_ATTRS_MAX = 10
+    GPIO_V2_LINE_FLAG_INPUT    = (1 << 3)
+    # _IOWR(0xB4, 0x0F, struct gpio_v2_line_request)  sizeof = 592 bytes
+    GPIO_V2_GET_LINE_IOCTL = 0xC250B40F
+
+    class _GpioV2LineAttrUnion(ctypes.Union):
+        _fields_ = [
+            ("flags",              ctypes.c_uint64),
+            ("values",             ctypes.c_uint64),
+            ("debounce_period_us", ctypes.c_uint32),
+        ]
+
+    class GpioV2LineAttribute(ctypes.Structure):
+        _fields_ = [
+            ("id",      ctypes.c_uint32),
+            ("padding", ctypes.c_uint32),
+            ("u",       _GpioV2LineAttrUnion),
+        ]
+
+    class GpioV2LineConfigAttribute(ctypes.Structure):
+        _fields_ = [
+            ("attr", GpioV2LineAttribute),
+            ("mask", ctypes.c_uint64),
+        ]
+
+    class GpioV2LineConfig(ctypes.Structure):
+        _fields_ = [
+            ("flags",     ctypes.c_uint64),
+            ("num_attrs", ctypes.c_uint32),
+            ("padding",   ctypes.c_uint32 * 5),
+            ("attrs",     GpioV2LineConfigAttribute * GPIO_V2_LINE_NUM_ATTRS_MAX),
+        ]
+
+    class GpioV2LineRequest(ctypes.Structure):
+        _fields_ = [
+            ("offsets",           ctypes.c_uint32 * GPIO_V2_LINES_MAX),
+            ("consumer",          ctypes.c_char   * GPIO_MAX_NAME_SIZE),
+            ("config",            GpioV2LineConfig),
+            ("num_lines",         ctypes.c_uint32),
+            ("event_buffer_size", ctypes.c_uint32),
+            ("padding",           ctypes.c_uint32 * 5),
+            ("fd",                ctypes.c_int32),
+        ]
+
+    try:
+        chip_fd = os.open(chip_path, os.O_RDONLY)
+    except OSError:
+        return None, None
+
+    # Try v1 ABI
+    req = GpiohandleRequest()
+    req.lineoffsets[0] = line_offset
+    req.flags          = GPIOHANDLE_REQUEST_INPUT
+    req.consumer_label = b"modernjvs-webui"
+    req.lines          = 1
+    try:
+        fcntl.ioctl(chip_fd, GPIO_GET_LINEHANDLE_IOCTL, req)
+        return chip_fd, req.fd   # caller owns both fds
+    except OSError as e:
+        if e.errno != _errno.ENOTTY:
+            os.close(chip_fd)
+            return None, None
+        # ENOTTY → v1 not supported by this kernel; chip_fd stays open for v2 attempt below
+
+    # Try v2 ABI (chip_fd is still open from above)
+    req2 = GpioV2LineRequest()
+    req2.offsets[0]      = line_offset
+    req2.consumer        = b"modernjvs-webui"
+    req2.config.flags    = GPIO_V2_LINE_FLAG_INPUT
+    req2.num_lines       = 1
+    try:
+        fcntl.ioctl(chip_fd, GPIO_V2_GET_LINE_IOCTL, req2)
+        return chip_fd, req2.fd   # caller owns both fds
+    except OSError:
+        os.close(chip_fd)
+        return None, None
 
 
 def _gpio_read_line(chip_path, line_offset):
