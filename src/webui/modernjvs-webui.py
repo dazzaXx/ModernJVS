@@ -1510,13 +1510,21 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
       <p style="font-size:0.83rem;color:var(--muted);margin-bottom:1rem;">
         Read the current logic level of the configured sense-line GPIO pin via the Linux GPIO character device.
         Useful when first wiring the sense line — confirms the pin is reachable and reports HIGH or LOW.
+        <strong>Note:</strong> if the ModernJVS service is currently <strong>running</strong> it holds the GPIO
+        line exclusively; the read will return <em>IN USE</em> rather than a logic level.
+        Stop the service first to read or manually drive the pin.
+        <br><br>
+        Use <strong>Set HIGH</strong> / <strong>Set LOW</strong> to manually drive the pin to a known state
+        for 3&nbsp;seconds (e.g. to verify wiring with a multimeter), then the line is released automatically.
       </p>
       <div id="diagGpioAlert" class="alert"></div>
       <div style="display:flex;gap:0.6rem;align-items:center;flex-wrap:wrap;margin-bottom:0.75rem;">
         <label style="font-size:0.85rem;color:var(--muted);">Pin (header #):</label>
         <input type="number" id="diagGpioPin" min="1" max="40" placeholder="26"
                style="width:80px;background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--text);padding:0.35rem 0.6rem;">
-        <button class="btn btn-start" onclick="runGpioTest()">&#9654; Read Pin</button>
+        <button class="btn btn-start"   onclick="runGpioTest()">&#9654; Read Pin</button>
+        <button class="btn btn-restart" onclick="setGpioPin('high')">&#9650; Set HIGH</button>
+        <button class="btn btn-stop"    onclick="setGpioPin('low')">&#9660; Set LOW</button>
       </div>
       <div id="diagGpioResult" style="font-family:monospace;font-size:0.84rem;min-height:2rem;"></div>
     </div>
@@ -3269,6 +3277,33 @@ async function runGpioTest() {
   }
 }
 
+async function setGpioPin(level) {
+  const pin = document.getElementById('diagGpioPin').value.trim();
+  if (!pin) {
+    showAlert('diagGpioAlert', 'Enter a pin number.', true);
+    return;
+  }
+  const resultEl = document.getElementById('diagGpioResult');
+  resultEl.textContent = `⏳ Driving pin ${level.toUpperCase()} for 3 s…`;
+  resultEl.style.color = 'var(--muted)';
+  const d = await api('/api/diag/gpio/set', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({pin, level})
+  });
+  if (d.error) {
+    resultEl.textContent = '✗ ' + d.error;
+    resultEl.style.color = 'var(--red, #e06c75)';
+  } else if (d.ok) {
+    const lvlColor = level === 'high' ? 'var(--accent2, #61afef)' : 'var(--yellow, #e5c07b)';
+    resultEl.innerHTML = `✓ <span style="color:${lvlColor};font-weight:bold;">${_escHtml(d.state || level.toUpperCase())}</span> — ${_escHtml(d.message)}`;
+    resultEl.style.color = 'var(--text)';
+  } else {
+    resultEl.textContent = '✗ ' + d.message;
+    resultEl.style.color = 'var(--red, #e06c75)';
+  }
+}
+
 async function runJvsBusProbe() {
   const custom = document.getElementById('diagJvsCustom').value.trim();
   const sel    = document.getElementById('diagJvsPort').value;
@@ -4923,6 +4958,192 @@ def _gpio_read_line(chip_path, line_offset):
         os.close(chip_fd)
 
 
+def _gpio_write_line(chip_path, line_offset, value, duration_s=3.0):
+    """Drive a GPIO line as OUTPUT at `value` (0 or 1) for `duration_s` seconds.
+
+    Uses the same v1/v2 kernel GPIO ioctl approach as _gpio_open_input.
+    Blocks for duration_s then closes the handle, returning the line to its
+    default kernel-managed state.
+
+    Raises OSError on failure (e.g. EBUSY if another process holds the line).
+    """
+    import ctypes
+    import errno as _errno
+    import fcntl
+
+    # ---- v1 ABI ----
+    GPIOHANDLES_MAX           = 64
+    GPIOHANDLE_REQUEST_OUTPUT = 2
+    GPIO_GET_LINEHANDLE_IOCTL = 0xC16CB403
+
+    class GpiohandleRequest(ctypes.Structure):
+        _fields_ = [
+            ("lineoffsets",    ctypes.c_uint32 * GPIOHANDLES_MAX),
+            ("flags",          ctypes.c_uint32),
+            ("default_values", ctypes.c_uint8  * GPIOHANDLES_MAX),
+            ("consumer_label", ctypes.c_char   * 32),
+            ("lines",          ctypes.c_uint32),
+            ("fd",             ctypes.c_int),
+        ]
+
+    # ---- v2 ABI ----
+    GPIO_V2_LINES_MAX          = 64
+    GPIO_MAX_NAME_SIZE         = 32
+    GPIO_V2_LINE_NUM_ATTRS_MAX = 10
+    GPIO_V2_LINE_FLAG_OUTPUT   = (1 << 4)
+    GPIO_V2_LINE_ATTR_ID_OUTPUT_VALUES = 3
+    GPIO_V2_GET_LINE_IOCTL             = 0xC250B40F
+    # _IOWR(0xB4, 0x13, struct gpio_v2_line_values)  sizeof = 16 bytes
+    GPIO_V2_LINE_SET_VALUES_IOCTL      = 0xC010B413
+
+    class _GpioV2LineAttrUnion(ctypes.Union):
+        _fields_ = [
+            ("flags",              ctypes.c_uint64),
+            ("values",             ctypes.c_uint64),
+            ("debounce_period_us", ctypes.c_uint32),
+        ]
+
+    class GpioV2LineAttribute(ctypes.Structure):
+        _fields_ = [
+            ("id",      ctypes.c_uint32),
+            ("padding", ctypes.c_uint32),
+            ("u",       _GpioV2LineAttrUnion),
+        ]
+
+    class GpioV2LineConfigAttribute(ctypes.Structure):
+        _fields_ = [
+            ("attr", GpioV2LineAttribute),
+            ("mask", ctypes.c_uint64),
+        ]
+
+    class GpioV2LineConfig(ctypes.Structure):
+        _fields_ = [
+            ("flags",     ctypes.c_uint64),
+            ("num_attrs", ctypes.c_uint32),
+            ("padding",   ctypes.c_uint32 * 5),
+            ("attrs",     GpioV2LineConfigAttribute * GPIO_V2_LINE_NUM_ATTRS_MAX),
+        ]
+
+    class GpioV2LineRequest(ctypes.Structure):
+        _fields_ = [
+            ("offsets",           ctypes.c_uint32 * GPIO_V2_LINES_MAX),
+            ("consumer",          ctypes.c_char   * GPIO_MAX_NAME_SIZE),
+            ("config",            GpioV2LineConfig),
+            ("num_lines",         ctypes.c_uint32),
+            ("event_buffer_size", ctypes.c_uint32),
+            ("padding",           ctypes.c_uint32 * 5),
+            ("fd",                ctypes.c_int32),
+        ]
+
+    chip_fd = os.open(chip_path, os.O_RDONLY)
+    try:
+        # Try v1 ABI
+        req = GpiohandleRequest()
+        req.lineoffsets[0]    = line_offset
+        req.flags             = GPIOHANDLE_REQUEST_OUTPUT
+        req.default_values[0] = 1 if value else 0
+        req.consumer_label    = b"modernjvs-webui"
+        req.lines             = 1
+        line_fd = None
+        try:
+            fcntl.ioctl(chip_fd, GPIO_GET_LINEHANDLE_IOCTL, req)
+            line_fd = req.fd
+        except OSError as e:
+            if e.errno != _errno.ENOTTY:
+                raise
+            # v1 not supported — fall through to v2
+
+        if line_fd is None:
+            # v2 ABI — set initial output value via config attribute
+            req2 = GpioV2LineRequest()
+            req2.offsets[0]   = line_offset
+            req2.consumer     = b"modernjvs-webui"
+            req2.num_lines    = 1
+            req2.config.flags = GPIO_V2_LINE_FLAG_OUTPUT
+            # Set initial value via attribute
+            req2.config.num_attrs        = 1
+            req2.config.attrs[0].attr.id = GPIO_V2_LINE_ATTR_ID_OUTPUT_VALUES
+            req2.config.attrs[0].attr.u.values = (1 if value else 0)
+            req2.config.attrs[0].mask    = 1   # bit 0 = first line
+            fcntl.ioctl(chip_fd, GPIO_V2_GET_LINE_IOCTL, req2)
+            line_fd = req2.fd
+
+        try:
+            time.sleep(duration_s)
+        finally:
+            os.close(line_fd)
+    finally:
+        os.close(chip_fd)
+
+
+def diag_gpio_set(pin, level):
+    """Drive a GPIO pin OUTPUT HIGH or LOW for 3 seconds, then release it.
+
+    Intended for manual wiring verification — the user can confirm the expected
+    voltage on the pin with a multimeter while it is being driven.
+
+    Returns a dict: ok (bool), message (str), state (str | None).
+    """
+    try:
+        pin_int = int(pin)
+    except (TypeError, ValueError):
+        return {"ok": False, "message": f"Invalid pin number: {pin!r}", "state": None}
+
+    if pin_int < 1 or pin_int > 40:
+        return {
+            "ok": False,
+            "message": f"Pin {pin_int} is outside the valid header range (1–40).",
+            "state": None,
+        }
+
+    level_str = str(level).strip().lower()
+    if level_str not in ("high", "low"):
+        return {"ok": False, "message": f"Invalid level {level!r} — must be 'high' or 'low'.", "state": None}
+
+    value = 1 if level_str == "high" else 0
+    state = "HIGH" if value else "LOW"
+
+    chips = sorted(_glob.glob("/dev/gpiochip*"))
+    if not chips:
+        return {
+            "ok": False,
+            "message": "No /dev/gpiochip* devices found. Is the GPIO character device available?",
+            "state": None,
+        }
+
+    try:
+        # pin_int is used directly as the BCM GPIO line offset on gpiochip0,
+        # matching the behaviour of diag_gpio_test() which documents:
+        # "SENSE_LINE_PIN stores the BCM GPIO line offset, used directly."
+        _gpio_write_line(chips[0], pin_int, value, duration_s=3.0)
+        return {
+            "ok": True,
+            "message": f"Pin {pin_int} was driven {state} for 3 s, then released.",
+            "state": state,
+        }
+    except PermissionError:
+        return {
+            "ok": False,
+            "message": (
+                f"Permission denied driving GPIO pin {pin_int}. "
+                "Run ModernJVS as root or add the service user to the 'gpio' group."
+            ),
+            "state": None,
+        }
+    except OSError as e:
+        import errno as _errno
+        if e.errno == _errno.EBUSY:
+            return {
+                "ok": False,
+                "message": (
+                    f"Pin {pin_int} is held by another process (ModernJVS service is likely running). "
+                    "Stop the service first."
+                ),
+                "state": "IN USE",
+            }
+        return {"ok": False, "message": f"Error driving GPIO pin {pin_int}: {e}", "state": None}
+
+
 def diag_gpio_test(pin):
     """Read the current logic level of a GPIO pin using the Linux GPIO character device.
 
@@ -6300,6 +6521,18 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
                 # Fall back to the currently configured SENSE_LINE_PIN
                 pin = read_config().get("SENSE_LINE_PIN", "26")
             self._json(diag_gpio_test(pin))
+
+        elif path == "/api/diag/gpio/set":
+            try:
+                data = json.loads(body) if body else {}
+            except json.JSONDecodeError:
+                self._json({"error": "Invalid JSON"}, HTTPStatus.BAD_REQUEST)
+                return
+            pin   = data.get("pin", "")
+            level = data.get("level", "")
+            if pin == "":
+                pin = read_config().get("SENSE_LINE_PIN", "26")
+            self._json(diag_gpio_set(pin, level))
 
         else:
             self._not_found()
