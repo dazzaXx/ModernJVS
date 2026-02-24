@@ -1106,6 +1106,7 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
     <button class="tab" onclick="showTab('monitor', this)">Monitor &amp; Logs</button>
     <button class="tab" onclick="showTab('profiles', this)">Profiles</button>
     <button class="tab" onclick="showTab('devices', this)">Devices</button>
+    <button class="tab" onclick="showTab('diagnostics', this)">&#x1F50E; Diagnostics</button>
     <button class="tab" onclick="showTab('webui-settings', this)">&#9881; WebUI Settings</button>
   </div>
 
@@ -1416,6 +1417,59 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
     </div>
   </div>
 
+  <!-- ====== DIAGNOSTICS ====== -->
+  <div id="panel-diagnostics" class="panel">
+
+    <!-- Serial Port Test -->
+    <div class="card">
+      <h2>Serial Port Test</h2>
+      <p style="font-size:0.83rem;color:var(--muted);margin-bottom:1rem;">
+        Try to open the JVS serial port at 115200 8N1 and report the result. Useful when the device is
+        not responding and you want to confirm the path is correct and accessible.
+      </p>
+      <div id="diagSerialAlert" class="alert"></div>
+      <div style="display:flex;gap:0.6rem;align-items:center;flex-wrap:wrap;margin-bottom:0.75rem;">
+        <select id="diagSerialPort" style="background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--text);padding:0.35rem 0.6rem;min-width:180px;">
+          <option value="">— loading ports… —</option>
+        </select>
+        <input type="text" id="diagSerialCustom" placeholder="or type a path, e.g. /dev/ttyUSB0"
+               style="flex:1;min-width:200px;background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--text);padding:0.35rem 0.6rem;">
+        <button class="btn btn-start" onclick="runSerialTest()">&#9654; Test Port</button>
+      </div>
+      <div id="diagSerialResult" style="font-family:monospace;font-size:0.84rem;min-height:2rem;"></div>
+    </div>
+
+    <!-- GPIO Sense Line Test -->
+    <div class="card" style="margin-top:1rem;">
+      <h2>GPIO Sense Line Test</h2>
+      <p style="font-size:0.83rem;color:var(--muted);margin-bottom:1rem;">
+        Read the current logic level of the configured sense-line GPIO pin using <code style="color:var(--accent2);font-family:monospace">gpioget</code> (libgpiod).
+        Useful when first wiring the sense line — confirms the pin is reachable and reports HIGH or LOW.
+      </p>
+      <div id="diagGpioAlert" class="alert"></div>
+      <div style="display:flex;gap:0.6rem;align-items:center;flex-wrap:wrap;margin-bottom:0.75rem;">
+        <label style="font-size:0.85rem;color:var(--muted);">Pin (header #):</label>
+        <input type="number" id="diagGpioPin" min="1" max="40" placeholder="26"
+               style="width:80px;background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--text);padding:0.35rem 0.6rem;">
+        <button class="btn btn-start" onclick="runGpioTest()">&#9654; Read Pin</button>
+      </div>
+      <div id="diagGpioResult" style="font-family:monospace;font-size:0.84rem;min-height:2rem;"></div>
+    </div>
+
+    <!-- Available Serial Devices -->
+    <div class="card" style="margin-top:1rem;">
+      <h2>Available Serial Devices</h2>
+      <p style="font-size:0.83rem;color:var(--muted);margin-bottom:1rem;">
+        All <code style="color:var(--accent2);font-family:monospace">/dev/ttyUSB*</code>,
+        <code style="color:var(--accent2);font-family:monospace">/dev/ttyAMA*</code>, and
+        <code style="color:var(--accent2);font-family:monospace">/dev/ttyS*</code> nodes currently
+        present on the system.
+      </p>
+      <div id="diagPortListWrap" style="font-family:monospace;font-size:0.84rem;"></div>
+    </div>
+
+  </div>
+
   <!-- ====== APPEARANCE ====== -->
   <div id="panel-webui-settings" class="panel">
     <div class="card">
@@ -1592,6 +1646,7 @@ function showTab(name, btn) {
   if (name === 'profiles') loadProfiles();
   if (name === 'devices') { loadDevices(); loadBluetoothSection(); populateInputTesterDevices(); }
   if (name !== 'devices') stopInputTest(); // stop streaming when leaving the Devices tab
+  if (name === 'diagnostics') loadDiagnostics();
   if (name === 'webui-settings') { initAppearancePanel(); loadSessions(); }
 }
 
@@ -2995,6 +3050,104 @@ async function systemShutdown() {
   fetch('/api/system/shutdown', {method: 'POST'}).catch(() => {});
 }
 
+// ---- Diagnostics ----
+async function loadDiagnostics() {
+  // Populate GPIO pin from config
+  const cfg = await api('/api/config');
+  if (!cfg.error) {
+    const pin = cfg.sense_line_pin || '26';
+    document.getElementById('diagGpioPin').value = pin;
+  }
+
+  // Load available serial ports
+  const pd = await api('/api/diag/serial/ports');
+  const sel = document.getElementById('diagSerialPort');
+  sel.innerHTML = '';
+  const ports = pd.ports || [];
+  if (ports.length === 0) {
+    sel.innerHTML = '<option value="">— no serial ports found —</option>';
+  } else {
+    sel.innerHTML = '<option value="">— select a port —</option>';
+    ports.forEach(p => {
+      const o = document.createElement('option');
+      o.value = p;
+      o.textContent = p;
+      // Pre-select the configured device path if present
+      if (!cfg.error && cfg.device && cfg.device === p) o.selected = true;
+      sel.appendChild(o);
+    });
+  }
+
+  // Also fill the custom input with configured device if not in the dropdown
+  if (!cfg.error && cfg.device) {
+    document.getElementById('diagSerialCustom').placeholder = cfg.device;
+  }
+
+  // Render port list card
+  const wrap = document.getElementById('diagPortListWrap');
+  if (ports.length === 0) {
+    wrap.textContent = 'No serial devices found under /dev/tty{USB,AMA,S}*.';
+    wrap.style.color = 'var(--muted)';
+  } else {
+    wrap.innerHTML = ports.map(p => `<div style="padding:0.15rem 0;color:var(--accent2);">${_escHtml(p)}</div>`).join('');
+  }
+}
+
+async function runSerialTest() {
+  const custom = document.getElementById('diagSerialCustom').value.trim();
+  const sel    = document.getElementById('diagSerialPort').value;
+  const device = custom || sel;
+  if (!device) {
+    showAlert('diagSerialAlert', 'No device selected or typed.', true);
+    return;
+  }
+  const resultEl = document.getElementById('diagSerialResult');
+  resultEl.textContent = '⏳ Testing…';
+  resultEl.style.color = 'var(--muted)';
+  const d = await api('/api/diag/serial', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({device})
+  });
+  if (d.error) {
+    resultEl.textContent = '✗ ' + d.error;
+    resultEl.style.color = 'var(--red, #e06c75)';
+  } else if (d.ok) {
+    resultEl.textContent = '✓ ' + d.message;
+    resultEl.style.color = 'var(--green, #98c379)';
+  } else {
+    resultEl.textContent = '✗ ' + d.message;
+    resultEl.style.color = 'var(--red, #e06c75)';
+  }
+}
+
+async function runGpioTest() {
+  const pin = document.getElementById('diagGpioPin').value.trim();
+  if (!pin) {
+    showAlert('diagGpioAlert', 'Enter a pin number.', true);
+    return;
+  }
+  const resultEl = document.getElementById('diagGpioResult');
+  resultEl.textContent = '⏳ Reading…';
+  resultEl.style.color = 'var(--muted)';
+  const d = await api('/api/diag/gpio', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({pin})
+  });
+  if (d.error) {
+    resultEl.textContent = '✗ ' + d.error;
+    resultEl.style.color = 'var(--red, #e06c75)';
+  } else if (d.ok) {
+    const stateColor = d.state === 'HIGH' ? 'var(--accent2, #61afef)' : (d.state === 'LOW' ? 'var(--yellow, #e5c07b)' : 'var(--text)');
+    resultEl.innerHTML = `✓ <span style="color:${stateColor};font-weight:bold;">${_escHtml(d.state || '')}</span> — ${_escHtml(d.message)}`;
+    resultEl.style.color = 'var(--text)';
+  } else {
+    resultEl.textContent = '✗ ' + d.message;
+    resultEl.style.color = 'var(--red, #e06c75)';
+  }
+}
+
 // ---- Init ----
 // Fetch appearance settings from the server and apply them before first render.
 // Falls back to sensible defaults if the server hasn't stored any yet.
@@ -3508,6 +3661,154 @@ def list_dir(path):
         )
     except OSError:
         return []
+
+
+# ---------------------------------------------------------------------------
+# Diagnostics helpers
+# ---------------------------------------------------------------------------
+
+def diag_serial_test(device_path):
+    """Try to open device_path as a 115200 8N1 serial port.
+
+    Returns a dict with keys: ok (bool), message (str).
+    Uses only stdlib (termios + fcntl) so no external dependencies are needed.
+    """
+    import termios
+    import fcntl
+    import errno as _errno
+
+    device_path = device_path.strip()
+    if not device_path:
+        return {"ok": False, "message": "No device path configured."}
+
+    # Only allow /dev/ paths to prevent path traversal
+    if not device_path.startswith("/dev/"):
+        return {"ok": False, "message": f"Refusing to test non-/dev/ path: {device_path}"}
+
+    try:
+        fd = os.open(device_path, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
+    except OSError as e:
+        return {"ok": False, "message": f"Cannot open {device_path}: {e.strerror} (errno {e.errno})"}
+
+    try:
+        # Check it is a tty
+        if not os.isatty(fd):
+            return {"ok": False, "message": f"{device_path} is not a TTY device."}
+
+        # Get and set terminal attributes to 115200 8N1
+        try:
+            attrs = termios.tcgetattr(fd)
+        except termios.error as e:
+            return {"ok": False, "message": f"tcgetattr failed on {device_path}: {e}"}
+
+        # cfsetispeed / cfsetospeed via termios constants
+        attrs[4] = termios.B115200  # ispeed
+        attrs[5] = termios.B115200  # ospeed
+        # c_cflag: 8 data bits, no parity, 1 stop bit, enable receiver, no modem control
+        attrs[2] = (
+            termios.CS8 | termios.CREAD | termios.CLOCAL
+        )
+        # c_iflag: disable input processing (raw mode)
+        attrs[0] = 0
+        # c_oflag: disable output processing
+        attrs[1] = 0
+        # c_lflag: disable echo, canonical, signals
+        attrs[3] = 0
+
+        try:
+            termios.tcsetattr(fd, termios.TCSANOW, attrs)
+        except termios.error as e:
+            return {"ok": False, "message": f"tcsetattr failed on {device_path}: {e}"}
+
+        return {
+            "ok": True,
+            "message": f"Opened {device_path} successfully at 115200 8N1.",
+        }
+    finally:
+        os.close(fd)
+
+
+def diag_gpio_test(pin):
+    """Read the current logic level of a GPIO pin using the gpioget command-line tool.
+
+    Returns a dict with keys: ok (bool), message (str), state (str | None).
+    Uses 'gpioget' from libgpiod-tools so no Python C extension is required.
+    """
+    try:
+        pin_int = int(pin)
+    except (TypeError, ValueError):
+        return {"ok": False, "message": f"Invalid pin number: {pin!r}", "state": None}
+
+    if pin_int < 1 or pin_int > 40:
+        return {
+            "ok": False,
+            "message": f"Pin {pin_int} is outside the valid header range (1–40).",
+            "state": None,
+        }
+
+    # Discover available gpiochip devices (/dev/gpiochip*)
+    chips = sorted(_glob.glob("/dev/gpiochip*"))
+    if not chips:
+        return {
+            "ok": False,
+            "message": "No /dev/gpiochip* devices found. Is libgpiod installed?",
+            "state": None,
+        }
+
+    # The BCM GPIO numbers on the 40-pin header don't map 1:1 to header pin
+    # numbers. We use gpioinfo to find the line by header-pin name if available,
+    # otherwise we try gpiochip0 line using the pin number directly as a best effort.
+    # For Raspberry Pi, gpiochip0 is the main BCM GPIO controller.
+    chip = chips[0]
+
+    # Attempt gpioinfo first to resolve a named line (e.g. "PIN26")
+    line_num = None
+    try:
+        r = subprocess.run(
+            ["gpioinfo", chip],
+            capture_output=True, text=True, timeout=5
+        )
+        # Lines look like: "line  26:     unnamed   unused  input  active-high"
+        for line in r.stdout.splitlines():
+            # Match "line  <N>:" with optional spacing
+            m = re.match(r'^\s*line\s+(\d+):', line)
+            if m and int(m.group(1)) == pin_int:
+                line_num = int(m.group(1))
+                break
+    except Exception:
+        pass
+
+    if line_num is None:
+        line_num = pin_int  # fallback: treat header pin as line index
+
+    try:
+        r = subprocess.run(
+            ["gpioget", chip, str(line_num)],
+            capture_output=True, text=True, timeout=5
+        )
+        if r.returncode != 0:
+            err = (r.stderr or r.stdout or "unknown error").strip()
+            return {"ok": False, "message": f"gpioget failed: {err}", "state": None}
+        val = r.stdout.strip()
+        if val == "1":
+            state = "HIGH"
+        elif val == "0":
+            state = "LOW"
+        else:
+            state = val
+        return {
+            "ok": True,
+            "message": f"Pin {line_num} on {chip} is {state}.",
+            "state": state,
+        }
+    except FileNotFoundError:
+        return {
+            "ok": False,
+            "message": "gpioget not found. Install libgpiod-tools: sudo apt install libgpiod-tools",
+            "state": None,
+        }
+    except Exception as e:
+        return {"ok": False, "message": f"Error reading GPIO: {e}", "state": None}
 
 
 # ---------------------------------------------------------------------------
@@ -4456,6 +4757,14 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
                 self._json({"lines": []})
             except OSError as e:
                 self._json({"error": str(e)}, HTTPStatus.INTERNAL_SERVER_ERROR)
+        elif path == "/api/diag/serial/ports":
+            # Return a list of /dev/ttyUSB* and /dev/ttyAMA* devices present on the system
+            ports = sorted(
+                _glob.glob("/dev/ttyUSB*") +
+                _glob.glob("/dev/ttyAMA*") +
+                _glob.glob("/dev/ttyS*")
+            )
+            self._json({"ports": ports})
         else:
             self._not_found()
 
@@ -4748,6 +5057,30 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
             invalidate_other_sessions(current)
             audit_log("Sessions invalidated (kept current)", ip=self.client_address[0])
             self._json({"ok": True})
+
+        elif path == "/api/diag/serial":
+            try:
+                data = json.loads(body) if body else {}
+            except json.JSONDecodeError:
+                self._json({"error": "Invalid JSON"}, HTTPStatus.BAD_REQUEST)
+                return
+            device = data.get("device", "").strip()
+            if not device:
+                # Fall back to the currently configured DEVICE_PATH
+                device = read_config().get("DEVICE_PATH", "")
+            self._json(diag_serial_test(device))
+
+        elif path == "/api/diag/gpio":
+            try:
+                data = json.loads(body) if body else {}
+            except json.JSONDecodeError:
+                self._json({"error": "Invalid JSON"}, HTTPStatus.BAD_REQUEST)
+                return
+            pin = data.get("pin", "")
+            if pin == "":
+                # Fall back to the currently configured SENSE_LINE_PIN
+                pin = read_config().get("SENSE_LINE_PIN", "26")
+            self._json(diag_gpio_test(pin))
 
         else:
             self._not_found()
