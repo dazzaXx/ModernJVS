@@ -1478,12 +1478,16 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
     <div class="card" style="margin-top:1rem;">
       <h2>JVS Bus Probe</h2>
       <p style="font-size:0.83rem;color:var(--muted);margin-bottom:1rem;">
-        Sends a JVS <code style="color:var(--accent2);font-family:monospace">RESET</code> +
-        <code style="color:var(--accent2);font-family:monospace">ASSIGN_ADDR</code> broadcast on
-        the selected port and listens for 500&nbsp;ms. Any response bytes indicate a connected,
-        powered-on arcade board. Silence means nothing is connected, the wrong port is selected, or
-        there is a wiring fault.
-        <strong>Stop the ModernJVS service before running this probe</strong> to avoid port conflicts.
+        Checks whether a JVS arcade board is reachable on the selected port.
+        If the ModernJVS service is <strong>running</strong>, the probe detects this automatically
+        and reports bus status without touching the port (the running service is already
+        communicating with the board).
+        If the service is <strong>stopped</strong>, a JVS
+        <code style="color:var(--accent2);font-family:monospace">RESET</code> +
+        <code style="color:var(--accent2);font-family:monospace">ASSIGN_ADDR</code>
+        broadcast is sent and the bus is listened to for 500&nbsp;ms — any response
+        bytes confirm a connected, powered-on board; silence indicates nothing connected,
+        the wrong port, or a wiring fault.
       </p>
       <div id="diagJvsAlert" class="alert"></div>
       <div style="display:flex;gap:0.6rem;align-items:center;flex-wrap:wrap;margin-bottom:0.75rem;">
@@ -3271,7 +3275,7 @@ async function runJvsBusProbe() {
     return;
   }
   const resultEl = document.getElementById('diagJvsResult');
-  resultEl.innerHTML = '⏳ Sending RESET + ASSIGN_ADDR broadcast, listening for 500 ms…';
+  resultEl.innerHTML = '⏳ Checking service state and probing bus…';
   resultEl.style.color = 'var(--muted)';
   const d = await api('/api/diag/jvs/probe', {
     method: 'POST',
@@ -3288,6 +3292,17 @@ async function runJvsBusProbe() {
     resultEl.style.color = 'var(--red, #e06c75)';
     return;
   }
+  // Service-running mode: bus is actively in use by the daemon
+  if (d.mode === 'service_running') {
+    resultEl.style.color = 'var(--text)';
+    resultEl.innerHTML =
+      `<div style="color:var(--accent2,#61afef);font-weight:bold;">ℹ ${_escHtml(d.message)}</div>`
+      + `<div style="margin-top:0.4rem;font-size:0.82rem;color:var(--muted);">`
+      + `Stop the ModernJVS service and probe again to send a RESET broadcast and inspect raw bus traffic.`
+      + `</div>`;
+    return;
+  }
+  // Active-probe mode
   if (d.activity) {
     resultEl.style.color = 'var(--text)';
     let html = `<div style="color:var(--green,#98c379);font-weight:bold;">✓ ${_escHtml(d.message)}</div>`;
@@ -4064,22 +4079,60 @@ def _parse_jvs_packets(data):
     return packets
 
 
-def diag_jvs_probe(device_path):
-    """Send a JVS RESET + ASSIGN_ADDR broadcast and listen for 500 ms.
+def _service_owns_port(pid_str, device_path):
+    """Return True if the process pid_str currently has device_path open.
 
-    Opens device_path at 115200 8N1, flushes stale input, sends:
-      1. JVS RESET broadcast (SYNC | 0xFF | 0x03 | CMD_RESET(0xF0) | 0xD9 | checksum)
-      2. JVS ASSIGN_ADDR broadcast (SYNC | 0xFF | 0x03 | CMD_ASSIGN_ADDR(0xF1) | 0x01 | checksum)
-    then collects any bytes received within 500 ms.
+    Walks /proc/<pid>/fd/ and checks each symlink target against device_path.
+    Returns False (never raises) on any permission error or missing entry.
+    """
+    try:
+        pid = int(pid_str)
+    except (TypeError, ValueError):
+        return False
+    if pid <= 0:
+        return False
+    fd_dir = f"/proc/{pid}/fd"
+    try:
+        for entry in os.listdir(fd_dir):
+            try:
+                target = os.readlink(os.path.join(fd_dir, entry))
+                if target == device_path:
+                    return True
+            except OSError:
+                continue
+    except OSError:
+        pass
+    return False
+
+
+def diag_jvs_probe(device_path):
+    """Probe the JVS bus on device_path.
+
+    Behaviour depends on whether the ModernJVS service is already running:
+
+    Service RUNNING:
+        The daemon owns the port and is actively exchanging JVS packets with
+        the arcade board.  Opening the same port and sending a RESET broadcast
+        would disrupt the session and cause the probe to read silence (the
+        daemon consumes all incoming bytes).  Instead, we confirm the daemon
+        has the port open via /proc/<PID>/fd/ and return an informational result
+        without touching the port.
+
+    Service STOPPED:
+        Opens device_path at 115200 8N1, flushes stale input, sends:
+          1. JVS RESET broadcast (SYNC | 0xFF | 0x03 | CMD_RESET(0xF0) | 0xD9 | checksum)
+          2. JVS ASSIGN_ADDR broadcast (SYNC | 0xFF | 0x03 | CMD_ASSIGN_ADDR(0xF1) | 0x01 | checksum)
+        then collects any bytes received within 500 ms.
 
     Returns a dict:
-        ok            – False on OS/TTY errors, True otherwise
-        activity      – True if any bytes were received
-        bytes_received – count of received bytes
-        raw_hex       – space-separated hex of up to 64 bytes
-        truncated     – True when more than 64 bytes were received
-        packets       – list of parsed JVS packet dicts (see _parse_jvs_packets)
-        message       – human-readable summary
+        ok             – False on OS/TTY errors, True otherwise
+        mode           – "service_running" | "active_probe"
+        activity       – True if bus activity confirmed or bytes received
+        bytes_received – count of received bytes (0 in service_running mode)
+        raw_hex        – space-separated hex of up to 64 bytes
+        truncated      – True when more than 64 bytes were received
+        packets        – list of parsed JVS packet dicts (see _parse_jvs_packets)
+        message        – human-readable summary
     """
     import termios
     import select as _select
@@ -4091,6 +4144,41 @@ def diag_jvs_probe(device_path):
     # Only allow /dev/ paths to prevent path traversal
     if not device_path.startswith("/dev/"):
         return {"ok": False, "message": f"Refusing to probe non-/dev/ path: {device_path}"}
+
+    # ------------------------------------------------------------------
+    # Service-running check: when the daemon already has the port open, any
+    # attempt to open it ourselves + send a RESET broadcast would disrupt
+    # the live session and cause the probe to read silence (the daemon's
+    # tight select() loop consumes all incoming bytes first).
+    # Instead, confirm via /proc/<PID>/fd/ that the daemon owns the port,
+    # then return an informational result without touching the serial port.
+    # ------------------------------------------------------------------
+    _, svc_out = systemctl("show", SERVICE_NAME,
+                           "--property=ActiveState,MainPID")
+    svc_props = {}
+    for line in svc_out.splitlines():
+        if "=" in line:
+            k, _, v = line.partition("=")
+            svc_props[k.strip()] = v.strip()
+
+    if svc_props.get("ActiveState") == "active":
+        pid_str = svc_props.get("MainPID", "")
+        port_open = _service_owns_port(pid_str, device_path) if pid_str and pid_str != "0" else False
+        if port_open:
+            msg = (f"ModernJVS service is running and has {device_path} open — "
+                   "the bus is actively in use by the daemon.")
+        else:
+            msg = ("ModernJVS service is running — the bus is in use by the daemon.")
+        return {
+            "ok":             True,
+            "mode":           "service_running",
+            "activity":       True,
+            "bytes_received": 0,
+            "raw_hex":        "",
+            "truncated":      False,
+            "packets":        [],
+            "message":        msg,
+        }
 
     try:
         fd = os.open(device_path, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
@@ -4190,6 +4278,7 @@ def diag_jvs_probe(device_path):
 
         return {
             "ok":             True,
+            "mode":           "active_probe",
             "activity":       bool(received),
             "bytes_received": len(received),
             "raw_hex":        hex_str,
