@@ -31,32 +31,14 @@ STICKS_PATH = "/usr/share/modernjvs/Sticks4.png"
 SERVICE_NAME = "modernjvs"
 WEBUI_SERVICE_NAME = "modernjvs-webui"
 
-# Background image upload limits
-MAX_UPLOAD_BYTES = 20 * 1024 * 1024         # 20 MB hard cap
-ALLOWED_IMAGE_MIMES = {
-    "image/jpeg", "image/png", "image/gif",
-    "image/webp", "image/svg+xml", "image/bmp",
-}
 MAX_SETTING_STRING_LENGTH = 64  # cap per string field in webui-settings.json
-MAX_FONT_UPLOAD_BYTES = 10 * 1024 * 1024   # 10 MB hard cap for font files
 MAX_PROFILE_UPLOAD_BYTES = 256 * 1024      # 256 KB hard cap for profile files
 MAX_PROFILE_NAME_LENGTH = 64               # max filename length for profile files
 MAX_PROFILE_CONTENT_CHARS = 65536         # max content length for profile writes
 INPUT_TEST_TIMEOUT_SECONDS = 60           # max duration for SSE input test stream
-ALLOWED_FONT_EXTS  = {".ttf", ".otf", ".woff", ".woff2"}
-FONT_EXT_TO_MIME   = {
-    ".ttf":   "font/ttf",
-    ".otf":   "font/otf",
-    ".woff":  "font/woff",
-    ".woff2": "font/woff2",
-}
 
 # Server-side WebUI settings persistence
 WEBUI_SETTINGS_PATH  = "/etc/modernjvs/webui-settings.json"
-WEBUI_BG_PATH        = "/etc/modernjvs/webui-bg"
-WEBUI_BG_MIME_PATH   = "/etc/modernjvs/webui-bg.mime"
-WEBUI_FONT_PATH      = "/etc/modernjvs/webui-font"
-WEBUI_FONT_NAME_PATH = "/etc/modernjvs/webui-font-name"
 WEBUI_PASSWORD_PATH  = "/etc/modernjvs/webui-password"
 AUDIT_LOG_PATH       = "/etc/modernjvs/webui-audit.log"
 MAX_AUDIT_LOG_LINES  = 1000
@@ -69,7 +51,6 @@ _SETTINGS_DEFAULTS = {
     "theme":          "black",
     "compact":        False,
     "noAnim":         False,
-    "bgScrimOpacity": 0.70,   # 0.0 = no overlay, 0.9 = near-black overlay
 }
 
 _settings_lock = threading.Lock()
@@ -97,7 +78,7 @@ def write_webui_settings(settings):
             if isinstance(default, bool):
                 cleaned[key] = bool(val)
             elif isinstance(default, float):
-                # Clamp float settings to [0.0, 1.0] (covers bgScrimOpacity)
+                # Clamp float settings to [0.0, 1.0]
                 cleaned[key] = max(0.0, min(1.0, float(val)))
             elif isinstance(default, str):
                 cleaned[key] = str(val)[:MAX_SETTING_STRING_LENGTH]
@@ -939,20 +920,6 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
     animation: none !important;
   }
 
-  /* ---- background image scrim ----
-     When a background image is active, a semi-transparent dark overlay is
-     painted above the image (z-index:1) but below all content (z-index:2).
-     Opacity is controlled by --bg-scrim-opacity (set via JS from settings). */
-  :root { --bg-scrim-opacity: 0.70; }
-  body.has-bg-image::after {
-    content: '';
-    position: fixed;
-    inset: 0;
-    background: rgba(0, 0, 0, var(--bg-scrim-opacity));
-    z-index: 1;
-    pointer-events: none;
-  }
-
   /* ---- settings panel ---- */
   .settings-grid {
     display: grid;
@@ -982,41 +949,6 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
     cursor: pointer;
     padding: 2px 4px;
   }
-  /* --- background image upload area --- */
-  .bg-upload-area {
-    border: 2px dashed var(--border);
-    border-radius: var(--radius);
-    padding: 1.2rem 1rem;
-    text-align: center;
-    cursor: pointer;
-    transition: border-color 0.2s, background 0.2s;
-    position: relative;
-    overflow: hidden;
-  }
-  .bg-upload-area:hover, .bg-upload-area.dragover {
-    border-color: var(--accent);
-    background: rgba(255,255,255,0.03);
-  }
-  .bg-upload-area input[type="file"] {
-    position: absolute; inset: 0; width: 100%; height: 100%;
-    opacity: 0; cursor: pointer;
-  }
-  .bg-upload-icon { font-size: 1.8rem; margin-bottom: 0.3rem; }
-  .bg-upload-label { font-size: 0.85rem; color: var(--muted); }
-  .bg-preview {
-    margin-top: 0.75rem;
-    display: none;
-    align-items: center;
-    gap: 0.75rem;
-  }
-  .bg-preview.visible { display: flex; }
-  .bg-preview img {
-    width: 80px; height: 52px;
-    object-fit: cover;
-    border-radius: 4px;
-    border: 1px solid var(--border);
-  }
-  .bg-preview-info { font-size: 0.82rem; color: var(--text); }
   .settings-toggle { display: flex; align-items: center; gap: 0.6rem; margin-top: 0.15rem; }
   .settings-toggle input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; }
   .settings-toggle span { font-size: 0.88rem; color: var(--text); }
@@ -1583,51 +1515,6 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
             <option value="solarized">Solarized Dark</option>
           </select>
           <div class="settings-preview">Base colour theme</div>
-        </div>
-        <div class="settings-field">
-          <label>Custom Font</label>
-          <div class="bg-upload-area" id="fontUploadArea">
-            <input type="file" id="stFontFile" accept=".ttf,.otf,.woff,.woff2" onchange="onFontFileChosen(this)">
-            <div class="bg-upload-icon">&#119070;</div>
-            <div class="bg-upload-label">Click or drag a font file here<br><span style="font-size:0.75rem">TTF, OTF, WOFF, WOFF2 · max 10 MB</span></div>
-          </div>
-          <div class="bg-preview" id="fontPreview">
-            <div>
-              <div class="bg-preview-info" id="fontPreviewName"></div>
-              <button class="btn btn-refresh btn-xs" style="margin-top:0.4rem;" onclick="clearFont()">✕ Clear Font</button>
-            </div>
-          </div>
-          <div class="settings-preview">Leave empty to use the default system font</div>
-        </div>
-      </div>
-    </div>
-
-    <div class="card">
-      <h2>Background</h2>
-      <div class="settings-grid">
-        <div class="settings-field">
-          <label>Background Image</label>
-          <div class="bg-upload-area" id="bgUploadArea">
-            <input type="file" id="stBgFile" accept="image/*" onchange="onBgFileChosen(this)">
-            <div class="bg-upload-icon">&#128444;</div>
-            <div class="bg-upload-label">Click or drag an image here<br><span style="font-size:0.75rem">JPEG, PNG, GIF, WebP, SVG · max 20 MB</span></div>
-          </div>
-          <div class="bg-preview" id="bgPreview">
-            <img id="bgPreviewImg" src="" alt="preview">
-            <div>
-              <div class="bg-preview-info" id="bgPreviewName"></div>
-              <button class="btn btn-refresh btn-xs" style="margin-top:0.4rem;" onclick="clearBgImage()">✕ Clear Image</button>
-            </div>
-          </div>
-          <div class="settings-preview">Leave empty to use the theme background colour</div>
-        </div>
-        <div class="settings-field">
-          <label>Background Overlay Darkness</label>
-          <div style="display:flex;align-items:center;gap:0.75rem;">
-            <input type="range" id="stBgScrim" min="0" max="0.9" step="0.05" value="__BG_SCRIM_DEFAULT__" style="flex:1;">
-            <span id="stBgScrimVal" style="min-width:2.5rem;text-align:right;font-size:0.85rem;">45%</span>
-          </div>
-          <div class="settings-preview">Semi-transparent overlay to keep text readable over bright images (0 = none)</div>
         </div>
       </div>
     </div>
@@ -2785,160 +2672,14 @@ function applyAppearanceSettings(s) {
   // Theme – always set an explicit data-theme value so selectors are consistent
   root.setAttribute('data-theme', s.theme || 'black');
 
-  // Font is applied server-side via applyServerFont(); nothing to do here.
-
   // Compact mode
   document.body.classList.toggle('compact', !!s.compact);
 
   // No animations
   document.body.classList.toggle('no-anim', !!s.noAnim);
 
-  // Background overlay (scrim) opacity
-  const scrim = (typeof s.bgScrimOpacity === 'number') ? s.bgScrimOpacity : 0.70;
-  document.documentElement.style.setProperty('--bg-scrim-opacity', scrim);
-
   updateFavicon(s.theme || 'black');
 }
-
-// Apply the server-stored background image (if any) to the page body.
-// Uses a cache-busting timestamp so a newly uploaded image is always visible.
-function applyServerBg() {
-  api('/api/bg/status').then(d => {
-    if (d.hasImage) {
-      document.body.style.backgroundImage = 'url(/api/bg?t=' + Date.now() + ')';
-      document.body.style.backgroundSize  = 'cover';
-      document.body.style.backgroundAttachment = 'fixed';
-      document.body.classList.add('has-bg-image');
-    } else {
-      document.body.style.backgroundImage = '';
-      document.body.style.backgroundSize  = '';
-      document.body.style.backgroundAttachment = '';
-      document.body.classList.remove('has-bg-image');
-    }
-  });
-}
-
-// ---- Background image preview helpers ----
-function _showBgPreview(src, label) {
-  document.getElementById('bgPreviewImg').src  = src;
-  document.getElementById('bgPreviewName').textContent = label;
-  document.getElementById('bgPreview').classList.add('visible');
-}
-
-function _hideBgPreview() {
-  document.getElementById('bgPreview').classList.remove('visible');
-  document.getElementById('bgPreviewImg').src = '';
-  document.getElementById('bgPreviewName').textContent = '';
-}
-
-// Called when the user picks a file via the upload widget.
-async function onBgFileChosen(input) {
-  const file = input.files && input.files[0];
-  if (!file) return;
-  if (!file.type.startsWith('image/')) {
-    alert('Only image files can be uploaded as a background.');
-    input.value = '';
-    return;
-  }
-  if (file.size > 20 * 1024 * 1024) {
-    alert('Image is too large. Maximum size is 20 MB.');
-    input.value = '';
-    return;
-  }
-  const res = await fetch('/api/bg/upload', {
-    method: 'POST',
-    headers: {'Content-Type': file.type},
-    body: file,
-  });
-  const d = await res.json();
-  if (d.error) {
-    alert('Upload failed: ' + d.error);
-    return;
-  }
-  // Show thumbnail preview using a temporary object URL (no localStorage needed)
-  const previewUrl = URL.createObjectURL(file);
-  _showBgPreview(previewUrl, file.name + ' (' + (file.size / 1024).toFixed(0) + ' KB)');
-  applyServerBg();
-}
-
-async function clearBgImage() {
-  const d = await api('/api/bg/clear', {method: 'POST'});
-  if (d.error) { alert('Could not clear image: ' + d.error); return; }
-  _hideBgPreview();
-  document.body.style.backgroundImage = '';
-  document.body.style.backgroundSize  = '';
-  document.body.style.backgroundAttachment = '';
-  // Reset file input so the same file can be re-selected if needed
-  const inp = document.getElementById('stBgFile');
-  if (inp) inp.value = '';
-}
-
-// ---- Custom font helpers ----
-function applyServerFont() {
-  api('/api/font/status').then(d => {
-    const root = document.documentElement;
-    let styleEl = document.getElementById('customFontStyle');
-    if (d.hasFont) {
-      if (!styleEl) {
-        styleEl = document.createElement('style');
-        styleEl.id = 'customFontStyle';
-        document.head.appendChild(styleEl);
-      }
-      styleEl.textContent =
-        "@font-face { font-family: 'CustomFont'; src: url('/api/font?t=" + Date.now() + "'); }";
-      root.style.setProperty('--font', "'CustomFont', system-ui, sans-serif");
-    } else {
-      if (styleEl) styleEl.remove();
-      root.style.removeProperty('--font');
-    }
-  });
-}
-
-async function onFontFileChosen(input) {
-  const file = input.files && input.files[0];
-  if (!file) return;
-  const ext = file.name.split('.').pop().toLowerCase();
-  if (!['ttf', 'otf', 'woff', 'woff2'].includes(ext)) {
-    alert('Only TTF, OTF, WOFF, or WOFF2 font files can be uploaded.');
-    input.value = '';
-    return;
-  }
-  if (file.size > 10 * 1024 * 1024) {
-    alert('Font file is too large. Maximum size is 10 MB.');
-    input.value = '';
-    return;
-  }
-  const res = await fetch('/api/font/upload', {
-    method: 'POST',
-    headers: {'Content-Type': file.type || 'application/octet-stream',
-               'X-File-Name': file.name},
-    body: file,
-  });
-  const d = await res.json();
-  if (d.error) { alert('Upload failed: ' + d.error); return; }
-  _showFontPreview(file.name + ' (' + (file.size / 1024).toFixed(0) + ' KB)');
-  applyServerFont();
-}
-
-async function clearFont() {
-  const d = await api('/api/font/clear', {method: 'POST'});
-  if (d.error) { alert('Could not clear font: ' + d.error); return; }
-  _hideFontPreview();
-  applyServerFont();
-  const inp = document.getElementById('stFontFile');
-  if (inp) inp.value = '';
-}
-
-function _showFontPreview(label) {
-  document.getElementById('fontPreviewName').textContent = label;
-  document.getElementById('fontPreview').classList.add('visible');
-}
-
-function _hideFontPreview() {
-  document.getElementById('fontPreview').classList.remove('visible');
-  document.getElementById('fontPreviewName').textContent = '';
-}
-
 
 async function initAppearancePanel() {
   const d = await api('/api/webui/settings');
@@ -2949,34 +2690,6 @@ async function initAppearancePanel() {
   document.getElementById('stCompact').checked  = !!d.compact;
   document.getElementById('stNoAnim').checked   = !!d.noAnim;
 
-  // Scrim slider – live preview of opacity value
-  const scrimVal = (typeof d.bgScrimOpacity === 'number') ? d.bgScrimOpacity : 0.70;
-  const scrimEl  = document.getElementById('stBgScrim');
-  const scrimLbl = document.getElementById('stBgScrimVal');
-  scrimEl.value  = scrimVal;
-  scrimLbl.textContent = Math.round(scrimVal * 100) + '%';
-  scrimEl.oninput = () => {
-    const v = parseFloat(scrimEl.value);
-    scrimLbl.textContent = Math.round(v * 100) + '%';
-    document.documentElement.style.setProperty('--bg-scrim-opacity', v);
-  };
-
-  // Show thumbnail if a background image is stored on the server
-  const bg = await api('/api/bg/status');
-  if (bg.hasImage) {
-    _showBgPreview('/api/bg?t=' + Date.now(), 'Server background image (' +
-      (bg.size / 1024).toFixed(0) + ' KB)');
-  } else {
-    _hideBgPreview();
-  }
-
-  // Show font preview if a custom font is stored on the server
-  const font = await api('/api/font/status');
-  if (font.hasFont) {
-    _showFontPreview(font.name + ' (' + (font.size / 1024).toFixed(0) + ' KB)');
-  } else {
-    _hideFontPreview();
-  }
   initPasswordSection();
 }
 
@@ -2985,7 +2698,6 @@ async function saveAppearanceSettings() {
     theme:          document.getElementById('stTheme').value,
     compact:        document.getElementById('stCompact').checked,
     noAnim:         document.getElementById('stNoAnim').checked,
-    bgScrimOpacity: parseFloat(document.getElementById('stBgScrim').value),
   };
   const d = await api('/api/webui/settings', {
     method: 'POST',
@@ -3000,15 +2712,12 @@ async function saveAppearanceSettings() {
 }
 
 async function resetAppearanceSettings() {
-  const defaults = {theme:'black', compact:false, noAnim:false,
-                    bgScrimOpacity:0.70};
+  const defaults = {theme:'black', compact:false, noAnim:false};
   await api('/api/webui/settings', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify(defaults),
   });
-  await clearBgImage();
-  await clearFont();
   applyAppearanceSettings(defaults);
   initAppearancePanel();
 }
@@ -3520,8 +3229,6 @@ async function loadUsbDevices() {
 api('/api/webui/settings').then(s => {
   applyAppearanceSettings(s.error ? {} : s);
 });
-applyServerBg();
-applyServerFont();
 refreshDashboard();
 refreshSysinfo();
 setInterval(refreshDashboard, 10000);
@@ -3573,7 +3280,6 @@ def _build_html_page():
         _HTML_TEMPLATE
         .replace("__LOGO__",           _logo_data_uri())
         .replace("__STICKS__",         _sticks_data_uri())
-        .replace("__BG_SCRIM_DEFAULT__", str(_SETTINGS_DEFAULTS["bgScrimOpacity"]))
     )
 
 
@@ -6105,33 +5811,6 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
             self._json({"version": get_version()})
         elif path == "/api/webui/settings":
             self._json(read_webui_settings())
-        elif path == "/api/bg":
-            self._serve_bg()
-        elif path == "/api/bg/status":
-            size = os.path.getsize(WEBUI_BG_PATH) if os.path.isfile(WEBUI_BG_PATH) else 0
-            has = size > 0
-            mime = ""
-            if has:
-                try:
-                    with open(WEBUI_BG_MIME_PATH) as f:
-                        mime = f.read().strip()
-                except OSError:
-                    mime = "image/jpeg"
-            self._json({"hasImage": has, "size": size, "mime": mime})
-        elif path == "/api/font":
-            self._serve_font()
-        elif path == "/api/font/status":
-            has = os.path.isfile(WEBUI_FONT_PATH)
-            name = ""
-            size = 0
-            if has:
-                size = os.path.getsize(WEBUI_FONT_PATH)
-                try:
-                    with open(WEBUI_FONT_NAME_PATH) as f:
-                        name = f.read().strip()
-                except OSError:
-                    name = "custom-font"
-            self._json({"hasFont": has, "name": name, "size": size})
         elif path == "/api/profiles/list":
             self._json({
                 "games":   list_dir(GAMES_PATH),
@@ -6292,12 +5971,6 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
 
         # Binary upload must be routed BEFORE _read_body() to avoid
         # attempting to UTF-8 decode raw image bytes.
-        if path == "/api/bg/upload":
-            self._handle_bg_upload()
-            return
-        if path == "/api/font/upload":
-            self._handle_font_upload()
-            return
         if path == "/api/profiles/upload":
             self._handle_profile_upload()
             return
@@ -6371,28 +6044,6 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
                 self._json({"ok": True})
             else:
                 self._json({"error": msg}, HTTPStatus.INTERNAL_SERVER_ERROR)
-
-        elif path == "/api/bg/clear":
-            try:
-                for p in (WEBUI_BG_PATH, WEBUI_BG_MIME_PATH):
-                    try:
-                        os.remove(p)
-                    except FileNotFoundError:
-                        pass
-                self._json({"ok": True})
-            except OSError as e:
-                self._json({"error": str(e)}, HTTPStatus.INTERNAL_SERVER_ERROR)
-
-        elif path == "/api/font/clear":
-            try:
-                for p in (WEBUI_FONT_PATH, WEBUI_FONT_NAME_PATH):
-                    try:
-                        os.remove(p)
-                    except FileNotFoundError:
-                        pass
-                self._json({"ok": True})
-            except OSError as e:
-                self._json({"error": str(e)}, HTTPStatus.INTERNAL_SERVER_ERROR)
 
         elif path == "/api/bluetooth/scan":
             self._json(bluetooth_scan())
@@ -6708,124 +6359,6 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
             self._json({"ok": True, "size": len(raw)})
         except OSError as e:
             self._json({"error": str(e)}, HTTPStatus.INTERNAL_SERVER_ERROR)
-
-    def _handle_bg_upload(self):
-        """Accept a background image upload and persist it to disk."""
-        content_type = self.headers.get("Content-Type", "").split(";")[0].strip().lower()
-        if content_type not in ALLOWED_IMAGE_MIMES:
-            self._json({"error": "Only image files are accepted."}, HTTPStatus.BAD_REQUEST)
-            return
-        content_length = int(self.headers.get("Content-Length", 0))
-        if content_length > MAX_UPLOAD_BYTES:
-            self._json(
-                {"error": f"File too large. Maximum size is {MAX_UPLOAD_BYTES // (1024*1024)} MB."},
-                HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
-            )
-            return
-        raw = self.rfile.read(content_length) if content_length else b""
-        if not raw:
-            self._json({"error": "Empty upload."}, HTTPStatus.BAD_REQUEST)
-            return
-        try:
-            os.makedirs(os.path.dirname(WEBUI_BG_PATH), exist_ok=True)
-            with open(WEBUI_BG_PATH, "wb") as f:
-                f.write(raw)
-            with open(WEBUI_BG_MIME_PATH, "w") as f:
-                f.write(content_type)
-            self._json({"ok": True, "size": len(raw), "mime": content_type})
-        except OSError as e:
-            self._json({"error": str(e)}, HTTPStatus.INTERNAL_SERVER_ERROR)
-
-    def _serve_bg(self):
-        """Serve the stored background image file."""
-        if not os.path.isfile(WEBUI_BG_PATH):
-            self._not_found()
-            return
-        try:
-            mime = "image/jpeg"
-            try:
-                with open(WEBUI_BG_MIME_PATH) as f:
-                    mime = f.read().strip()
-            except OSError:
-                pass
-            with open(WEBUI_BG_PATH, "rb") as f:
-                data = f.read()
-            self.send_response(HTTPStatus.OK)
-            self.send_header("Content-Type", mime)
-            self.send_header("Content-Length", len(data))
-            # No long-term cache – clients should see cleared images promptly
-            self.send_header("Cache-Control", "no-cache")
-            self.end_headers()
-            self.wfile.write(data)
-        except OSError:
-            self._not_found()
-
-    def _handle_font_upload(self):
-        """Accept a font file upload (.ttf/.otf/.woff/.woff2) and persist it to disk."""
-        # Validate by filename extension sent in X-File-Name header.
-        # Use X-File-Name as the primary gate; fall back to content-type when absent.
-        raw_name = self.headers.get("X-File-Name", "")
-        # Sanitize: strip path separators and limit to safe filename characters
-        safe_name = re.sub(r'[^A-Za-z0-9._\- ]', '', os.path.basename(raw_name))[:64]
-        ext = os.path.splitext(safe_name.lower())[1]
-        content_type = self.headers.get("Content-Type", "").split(";")[0].strip().lower()
-        # If a name was provided, the extension must be in the allowed set.
-        # If no name was provided, require a known font content-type.
-        if safe_name:
-            valid = ext in ALLOWED_FONT_EXTS
-        else:
-            valid = content_type in FONT_EXT_TO_MIME.values()
-        if not valid:
-            self._json({"error": "Only TTF, OTF, WOFF, or WOFF2 font files are accepted."},
-                       HTTPStatus.BAD_REQUEST)
-            return
-        content_length = int(self.headers.get("Content-Length", 0))
-        if content_length > MAX_FONT_UPLOAD_BYTES:
-            self._json(
-                {"error": f"File too large. Maximum size is {MAX_FONT_UPLOAD_BYTES // (1024 * 1024)} MB."},
-                HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
-            )
-            return
-        raw = self.rfile.read(content_length) if content_length else b""
-        if not raw:
-            self._json({"error": "Empty upload."}, HTTPStatus.BAD_REQUEST)
-            return
-        try:
-            os.makedirs(os.path.dirname(WEBUI_FONT_PATH), exist_ok=True)
-            with open(WEBUI_FONT_PATH, "wb") as f:
-                f.write(raw)
-            display_name = safe_name if safe_name else ("custom-font" + ext)
-            with open(WEBUI_FONT_NAME_PATH, "w") as f:
-                f.write(display_name)
-            mime = FONT_EXT_TO_MIME.get(ext, "font/ttf")
-            self._json({"ok": True, "size": len(raw), "name": display_name, "mime": mime})
-        except OSError as e:
-            self._json({"error": str(e)}, HTTPStatus.INTERNAL_SERVER_ERROR)
-
-    def _serve_font(self):
-        """Serve the stored custom font file."""
-        if not os.path.isfile(WEBUI_FONT_PATH):
-            self._not_found()
-            return
-        try:
-            name = ""
-            try:
-                with open(WEBUI_FONT_NAME_PATH) as f:
-                    name = f.read().strip()
-            except OSError:
-                pass
-            ext = os.path.splitext(name.lower())[1] if name else ""
-            mime = FONT_EXT_TO_MIME.get(ext, "font/ttf")
-            with open(WEBUI_FONT_PATH, "rb") as f:
-                data = f.read()
-            self.send_response(HTTPStatus.OK)
-            self.send_header("Content-Type", mime)
-            self.send_header("Content-Length", len(data))
-            self.send_header("Cache-Control", "no-cache")
-            self.end_headers()
-            self.wfile.write(data)
-        except OSError:
-            self._not_found()
 
     def _send_html(self, html):
         data = html.encode("utf-8")
