@@ -3237,6 +3237,8 @@ function _diagAbortCurrent() {
 
 function cancelDiagTests() {
   if (_diagAbortCtrl) { try { _diagAbortCtrl.abort(); } catch(_) {} _diagAbortCtrl = null; }
+  // Release any GPIO line held by a Set HIGH / Set LOW operation on the server.
+  fetch('/api/diag/gpio/cancel', {method:'POST'}).catch(() => {});
   ['diagSerialResult', 'diagGpioResult', 'diagJvsResult'].forEach(id => {
     const el = document.getElementById(id);
     if (el) { el.textContent = ''; el.style.color = ''; }
@@ -4093,6 +4095,9 @@ def diag_serial_test(device_path):
 # JVS protocol constants used by the bus probe
 _JVS_SYNC   = 0xE0
 _JVS_ESCAPE = 0xD0
+
+# Event set by POST /api/diag/gpio/cancel to interrupt a running _gpio_write_line sleep.
+_gpio_set_cancel = threading.Event()
 
 # Human-readable names for JVS command bytes (master → slave direction)
 _JVS_CMD_NAMES = {
@@ -5107,7 +5112,12 @@ def _gpio_write_line(chip_path, line_offset, value, duration_s=3.0):
             line_fd = req2.fd
 
         try:
-            time.sleep(duration_s)
+            # Poll in 50 ms ticks so the hold can be cancelled early via _gpio_set_cancel.
+            _gpio_set_cancel.clear()
+            deadline = time.monotonic() + duration_s
+            while time.monotonic() < deadline:
+                if _gpio_set_cancel.wait(timeout=0.05):
+                    break  # cancelled early — line is released in the finally below
         finally:
             os.close(line_fd)
     finally:
@@ -5190,6 +5200,16 @@ def diag_gpio_set(pin, level, duration=3):
                 "state": "IN USE",
             }
         return {"ok": False, "message": f"Error driving GPIO pin {pin_int}: {e}", "state": None}
+
+
+def diag_gpio_cancel():
+    """Signal any in-progress _gpio_write_line hold to release early.
+
+    Called by POST /api/diag/gpio/cancel when the browser navigates away from
+    the Diagnostics tab.  Safe to call even when no hold is active.
+    """
+    _gpio_set_cancel.set()
+    return {"ok": True}
 
 
 def diag_gpio_test(pin):
@@ -6582,6 +6602,9 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
             if pin == "":
                 pin = read_config().get("SENSE_LINE_PIN", "26")
             self._json(diag_gpio_set(pin, level, duration))
+
+        elif path == "/api/diag/gpio/cancel":
+            self._json(diag_gpio_cancel())
 
         else:
             self._not_found()
