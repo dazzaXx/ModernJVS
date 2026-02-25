@@ -252,6 +252,7 @@ JVSStatus processPacket(JVSIO *jvsIO)
 				jvsIO->deviceID = -1;
 			}
 			setSenseLine(0);
+			debug(0, "JVS: Connection reset\n");
 		}
 		break;
 
@@ -273,6 +274,7 @@ JVSStatus processPacket(JVSIO *jvsIO)
 			if (jvsIO->deviceID != -1)
 			{
 				setSenseLine(1);
+				debug(0, "JVS: Connection established\n");
 			}
 		}
 		break;
