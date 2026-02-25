@@ -8,10 +8,6 @@ case "$1" in
     remove|purge)
         # Remove WebUI runtime state files created after installation.
         rm -f /etc/modernjvs/webui-settings.json \
-              /etc/modernjvs/webui-bg \
-              /etc/modernjvs/webui-bg.mime \
-              /etc/modernjvs/webui-font \
-              /etc/modernjvs/webui-font-name \
               /etc/modernjvs/webui-password \
               /etc/modernjvs/webui-audit.log
 
