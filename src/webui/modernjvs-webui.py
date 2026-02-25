@@ -41,6 +41,7 @@ INPUT_TEST_TIMEOUT_SECONDS = 60           # max duration for SSE input test stre
 # These must match the debug(0, ...) calls in src/jvs/jvs.c exactly.
 JVS_LOG_CONNECTED    = "JVS: Connection established"
 JVS_LOG_DISCONNECTED = "JVS: Connection reset"
+JVS_LOG_LOST         = "JVS: Connection lost"
 
 # Server-side WebUI settings persistence
 WEBUI_SETTINGS_PATH  = "/etc/modernjvs/webui-settings.json"
@@ -3512,11 +3513,15 @@ def get_player_slots():
 def get_jvs_connection_status():
     """Determine JVS connection status from the most recent service run's logs.
 
-    Scans the service log for ``JVS: Connection established`` and
-    ``JVS: Connection reset`` lines emitted by jvs.c and returns the state
-    based on which event appeared last.  Only the most recent service start
-    (identified by the last 'ModernJVS Version' banner) is used so that stale
-    entries from a previous run are not shown.
+    Scans the service log for ``JVS: Connection established``,
+    ``JVS: Connection reset``, and ``JVS: Connection lost`` lines emitted by
+    jvs.c and returns the state based on which event appeared last.  Only the
+    most recent service start (identified by the last 'ModernJVS Version'
+    banner) is used so that stale entries from a previous run are not shown.
+
+    ``JVS: Connection reset`` is logged when the arcade machine sends CMD_RESET.
+    ``JVS: Connection lost`` is logged after 5 s of inactivity on an established
+    connection (e.g. arcade machine powered off without sending a reset).
 
     Returns True if the JVS connection is currently established, False otherwise.
     """
@@ -3534,7 +3539,7 @@ def get_jvs_connection_status():
     for line in logs[start_idx:]:
         if JVS_LOG_CONNECTED in line:
             connected = True
-        elif JVS_LOG_DISCONNECTED in line:
+        elif JVS_LOG_DISCONNECTED in line or JVS_LOG_LOST in line:
             connected = False
     return connected
 

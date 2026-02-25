@@ -13,6 +13,11 @@ unsigned char outputBuffer[JVS_MAX_PACKET_SIZE], inputBuffer[JVS_MAX_PACKET_SIZE
 /* Packet counter for debugging */
 static unsigned long packetCounter = 0;
 
+/* Connection inactivity timeout tracking */
+#define JVS_CONNECTION_TIMEOUT_SECONDS 5
+static time_t lastPacketTime = 0;
+static int connectionLostLogged = 0;
+
 /**
  * Get the name of a JVS command
  *
@@ -205,7 +210,28 @@ JVSStatus processPacket(JVSIO *jvsIO)
 	/* Initially read in a packet */
 	JVSStatus readPacketStatus = readPacket(&inputPacket);
 	if (readPacketStatus != JVS_STATUS_SUCCESS)
+	{
+		/* Detect connection loss when the arcade machine powers off without sending CMD_RESET.
+		 * After JVS_CONNECTION_TIMEOUT_SECONDS of inactivity on an established connection,
+		 * log a "Connection lost" event once so the WebUI can reflect the disconnected state.
+		 * lastPacketTime != 0 ensures we only fire after at least one packet has been received
+		 * (deviceID is only set after CMD_ASSIGN_ADDR which counts as a received packet, so
+		 * the two guards together prevent any false trigger before a connection is made). */
+		if (readPacketStatus == JVS_STATUS_ERROR_TIMEOUT &&
+		    jvsIO->deviceID != -1 &&
+		    lastPacketTime != 0 &&
+		    !connectionLostLogged &&
+		    difftime(time(NULL), lastPacketTime) > JVS_CONNECTION_TIMEOUT_SECONDS)
+		{
+			debug(0, "JVS: Connection lost\n");
+			connectionLostLogged = 1;
+		}
 		return readPacketStatus;
+	}
+
+	/* A packet was received — reset inactivity tracking */
+	lastPacketTime = time(NULL);
+	connectionLostLogged = 0;
 
 	/* Check if the packet is for us and loop through connected boards */
 	if (inputPacket.destination != BROADCAST)
