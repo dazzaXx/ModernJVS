@@ -1167,7 +1167,16 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
         <div class="stat-card"><div class="val" id="currentGame">—</div><div class="lbl">Current Game</div></div>
         <div class="stat-card"><div class="val" id="currentDevice">—</div><div class="lbl">Device Path</div></div>
       </div>
-      <div id="playerSlots"></div>
+    </div>
+
+    <div class="card">
+      <h2>Player Assignments</h2>
+      <div class="stat-grid" id="playerSlots">
+        <div class="stat-card"><div class="val" style="font-size:0.85rem;word-break:break-all;">—</div><div class="lbl">Player 1</div></div>
+        <div class="stat-card"><div class="val" style="font-size:0.85rem;word-break:break-all;">—</div><div class="lbl">Player 2</div></div>
+        <div class="stat-card"><div class="val" style="font-size:0.85rem;word-break:break-all;">—</div><div class="lbl">Player 3</div></div>
+        <div class="stat-card"><div class="val" style="font-size:0.85rem;word-break:break-all;">—</div><div class="lbl">Player 4</div></div>
+      </div>
     </div>
 
     <div class="card">
@@ -1465,19 +1474,60 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
       <div id="diagSerialResult" style="font-family:monospace;font-size:0.84rem;min-height:2rem;"></div>
     </div>
 
+    <!-- JVS Bus -->
+    <div class="card" style="margin-top:1rem;">
+      <h2>JVS Bus</h2>
+      <p style="font-size:0.83rem;color:var(--muted);margin-bottom:1rem;">
+        Two tools for inspecting the JVS bus.
+        <strong>Probe Bus</strong> sends a
+        <code style="color:var(--accent2);font-family:monospace">RESET</code> +
+        <code style="color:var(--accent2);font-family:monospace">ASSIGN_ADDR</code>
+        broadcast and listens for 2&nbsp;s — any response bytes confirm a connected,
+        powered-on board.
+        <strong>Monitor Bus</strong> listens passively for 5&nbsp;seconds without sending
+        anything, showing whatever packets the arcade board is already transmitting.
+        Both tools auto-detect a running service and report bus status without touching
+        the port. When the service is stopped, the sense line is floated before listening.
+      </p>
+      <div id="diagJvsAlert" class="alert"></div>
+      <div style="display:flex;gap:0.6rem;align-items:center;flex-wrap:wrap;margin-bottom:0.75rem;">
+        <select id="diagJvsPort" style="background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--text);padding:0.35rem 0.6rem;min-width:180px;">
+          <option value="">— loading ports… —</option>
+        </select>
+        <input type="text" id="diagJvsCustom" placeholder="or type a path, e.g. /dev/ttyUSB0"
+               style="flex:1;min-width:200px;background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--text);padding:0.35rem 0.6rem;">
+        <button class="btn btn-restart" onclick="runJvsBusProbe()">&#9654; Probe Bus</button>
+        <button class="btn btn-restart" onclick="runJvsBusMonitor()">&#128065; Monitor Bus</button>
+        <button class="btn btn-stop"  onclick="jvsServiceAction('stop')">&#9632; Stop Service</button>
+        <button class="btn btn-start" onclick="jvsServiceAction('start')">&#9654; Start Service</button>
+      </div>
+      <div id="diagJvsResult" style="font-family:monospace;font-size:0.84rem;min-height:2rem;"></div>
+    </div>
+
     <!-- GPIO Sense Line Test -->
     <div class="card" style="margin-top:1rem;">
       <h2>GPIO Sense Line Test</h2>
       <p style="font-size:0.83rem;color:var(--muted);margin-bottom:1rem;">
         Read the current logic level of the configured sense-line GPIO pin via the Linux GPIO character device.
         Useful when first wiring the sense line — confirms the pin is reachable and reports HIGH or LOW.
+        <strong>Note:</strong> if the ModernJVS service is currently <strong>running</strong> it holds the GPIO
+        line exclusively; the read will return <em>IN USE</em> rather than a logic level.
+        Stop the service first to read or manually drive the pin.
+        <br><br>
+        Use <strong>Set HIGH</strong> / <strong>Set LOW</strong> to manually drive the pin to a known state
+        for the chosen duration (e.g. to verify wiring with a multimeter), then the line is released automatically.
       </p>
       <div id="diagGpioAlert" class="alert"></div>
       <div style="display:flex;gap:0.6rem;align-items:center;flex-wrap:wrap;margin-bottom:0.75rem;">
         <label style="font-size:0.85rem;color:var(--muted);">Pin (header #):</label>
         <input type="number" id="diagGpioPin" min="1" max="40" placeholder="26"
                style="width:80px;background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--text);padding:0.35rem 0.6rem;">
-        <button class="btn btn-start" onclick="runGpioTest()">&#9654; Read Pin</button>
+        <label style="font-size:0.85rem;color:var(--muted);">Duration (s):</label>
+        <input type="number" id="diagGpioDuration" min="1" max="60" value="3"
+               style="width:70px;background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--text);padding:0.35rem 0.6rem;">
+        <button class="btn btn-start"   onclick="runGpioTest()">&#9654; Read Pin</button>
+        <button class="btn btn-restart" onclick="setGpioPin('high')">&#9650; Set HIGH</button>
+        <button class="btn btn-stop"    onclick="setGpioPin('low')">&#9660; Set LOW</button>
       </div>
       <div id="diagGpioResult" style="font-family:monospace;font-size:0.84rem;min-height:2rem;"></div>
     </div>
@@ -1492,6 +1542,19 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
         present on the system.
       </p>
       <div id="diagPortListWrap" style="font-family:monospace;font-size:0.84rem;"></div>
+    </div>
+
+    <!-- USB Device Inspector -->
+    <div class="card" style="margin-top:1rem;">
+      <h2>USB Device Inspector <button class="btn btn-refresh btn-xs" onclick="loadUsbDevices()" style="margin-left:0.5rem;vertical-align:middle;">⟳</button></h2>
+      <p style="font-size:0.83rem;color:var(--muted);margin-bottom:1rem;">
+        All connected USB devices read from
+        <code style="color:var(--accent2);font-family:monospace">/sys/bus/usb/devices/</code>.
+        Known RS-485/serial adapters are highlighted. Shows the currently bound kernel driver —
+        useful when a <code style="color:var(--accent2);font-family:monospace">/dev/ttyUSB*</code>
+        node is not appearing.
+      </p>
+      <div id="diagUsbWrap" style="font-size:0.84rem;"></div>
     </div>
 
   </div>
@@ -1672,6 +1735,7 @@ function showTab(name, btn) {
   if (name === 'profiles') loadProfiles();
   if (name === 'devices') { loadDevices(); loadBluetoothSection(); populateInputTesterDevices(); }
   if (name !== 'devices') stopInputTest(); // stop streaming when leaving the Devices tab
+  if (name !== 'diagnostics') cancelDiagTests(); // abort any in-flight diag tests when leaving
   if (name === 'diagnostics') loadDiagnostics();
   if (name === 'webui-settings') { initAppearancePanel(); loadSessions(); }
 }
@@ -1713,15 +1777,11 @@ async function refreshDashboard() {
 
   const players = d.players || [];
   const psEl = document.getElementById('playerSlots');
-  if (players.length > 0) {
-    psEl.innerHTML = '<div class="stat-grid" style="margin-top:0.75rem;">'
-      + players.map(p =>
-          `<div class="stat-card"><div class="val" style="font-size:0.85rem;word-break:break-all;">${_escHtml(p.profile)}</div><div class="lbl">Player ${p.player}</div></div>`
-        ).join('')
-      + '</div>';
-  } else {
-    psEl.innerHTML = '';
-  }
+  const playerMap = {};
+  players.forEach(p => { playerMap[p.player] = p.profile; });
+  psEl.innerHTML = [1, 2, 3, 4].map(n =>
+    `<div class="stat-card"><div class="val" style="font-size:0.85rem;word-break:break-all;">${_escHtml(playerMap[n] || 'Not assigned')}</div><div class="lbl">Player ${n}</div></div>`
+  ).join('');
 }
 
 async function refreshSysinfo() {
@@ -3132,9 +3192,26 @@ async function loadDiagnostics() {
     });
   }
 
+  // Mirror the same port list into the JVS probe dropdown
+  const jvsSel = document.getElementById('diagJvsPort');
+  jvsSel.innerHTML = '';
+  if (ports.length === 0) {
+    jvsSel.innerHTML = '<option value="">— no serial ports found —</option>';
+  } else {
+    jvsSel.innerHTML = '<option value="">— select a port —</option>';
+    ports.forEach(p => {
+      const o = document.createElement('option');
+      o.value = p;
+      o.textContent = p;
+      if (!cfg.error && cfg.device && cfg.device === p) o.selected = true;
+      jvsSel.appendChild(o);
+    });
+  }
+
   // Also fill the custom input with configured device if not in the dropdown
   if (!cfg.error && cfg.device) {
     document.getElementById('diagSerialCustom').placeholder = cfg.device;
+    document.getElementById('diagJvsCustom').placeholder = cfg.device;
   }
 
   // Render port list card
@@ -3145,6 +3222,27 @@ async function loadDiagnostics() {
   } else {
     wrap.innerHTML = ports.map(p => `<div style="padding:0.15rem 0;color:var(--accent2);">${_escHtml(p)}</div>`).join('');
   }
+
+  loadUsbDevices();
+}
+
+// ---- Diagnostics abort / cleanup ----
+let _diagAbortCtrl = null;
+
+function _diagAbortCurrent() {
+  if (_diagAbortCtrl) { try { _diagAbortCtrl.abort(); } catch(_) {} }
+  _diagAbortCtrl = new AbortController();
+  return _diagAbortCtrl;
+}
+
+function cancelDiagTests() {
+  if (_diagAbortCtrl) { try { _diagAbortCtrl.abort(); } catch(_) {} _diagAbortCtrl = null; }
+  // Release any GPIO line held by a Set HIGH / Set LOW operation on the server.
+  fetch('/api/diag/gpio/cancel', {method:'POST'}).catch(() => {});
+  ['diagSerialResult', 'diagGpioResult', 'diagJvsResult'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) { el.textContent = ''; el.style.color = ''; }
+  });
 }
 
 async function runSerialTest() {
@@ -3155,14 +3253,17 @@ async function runSerialTest() {
     showAlert('diagSerialAlert', 'No device selected or typed.', true);
     return;
   }
+  const ac = _diagAbortCurrent();
   const resultEl = document.getElementById('diagSerialResult');
   resultEl.textContent = '⏳ Testing…';
   resultEl.style.color = 'var(--muted)';
   const d = await api('/api/diag/serial', {
     method: 'POST',
     headers: {'Content-Type':'application/json'},
-    body: JSON.stringify({device})
+    body: JSON.stringify({device}),
+    signal: ac.signal
   });
+  if (ac.signal.aborted) return;
   if (d.error) {
     resultEl.textContent = '✗ ' + d.error;
     resultEl.style.color = 'var(--red, #e06c75)';
@@ -3181,14 +3282,17 @@ async function runGpioTest() {
     showAlert('diagGpioAlert', 'Enter a pin number.', true);
     return;
   }
+  const ac = _diagAbortCurrent();
   const resultEl = document.getElementById('diagGpioResult');
   resultEl.textContent = '⏳ Reading…';
   resultEl.style.color = 'var(--muted)';
   const d = await api('/api/diag/gpio', {
     method: 'POST',
     headers: {'Content-Type':'application/json'},
-    body: JSON.stringify({pin})
+    body: JSON.stringify({pin}),
+    signal: ac.signal
   });
+  if (ac.signal.aborted) return;
   if (d.error) {
     resultEl.textContent = '✗ ' + d.error;
     resultEl.style.color = 'var(--red, #e06c75)';
@@ -3200,6 +3304,214 @@ async function runGpioTest() {
     resultEl.textContent = '✗ ' + d.message;
     resultEl.style.color = 'var(--red, #e06c75)';
   }
+}
+
+async function setGpioPin(level) {
+  const pin = document.getElementById('diagGpioPin').value.trim();
+  if (!pin) {
+    showAlert('diagGpioAlert', 'Enter a pin number.', true);
+    return;
+  }
+  const durRaw = parseInt(document.getElementById('diagGpioDuration').value, 10);
+  const duration = (!isNaN(durRaw) && durRaw >= 1) ? Math.min(durRaw, 60) : 3;
+  const ac = _diagAbortCurrent();
+  const resultEl = document.getElementById('diagGpioResult');
+  resultEl.textContent = `⏳ Driving pin ${level.toUpperCase()} for ${duration} s…`;
+  resultEl.style.color = 'var(--muted)';
+  const d = await api('/api/diag/gpio/set', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({pin, level, duration}),
+    signal: ac.signal
+  });
+  if (ac.signal.aborted) return;
+  if (d.error) {
+    resultEl.textContent = '✗ ' + d.error;
+    resultEl.style.color = 'var(--red, #e06c75)';
+  } else if (d.ok) {
+    const lvlColor = level === 'high' ? 'var(--accent2, #61afef)' : 'var(--yellow, #e5c07b)';
+    resultEl.innerHTML = `✓ <span style="color:${lvlColor};font-weight:bold;">${_escHtml(d.state || level.toUpperCase())}</span> — ${_escHtml(d.message)}`;
+    resultEl.style.color = 'var(--text)';
+  } else {
+    resultEl.textContent = '✗ ' + d.message;
+    resultEl.style.color = 'var(--red, #e06c75)';
+  }
+}
+
+async function runJvsBusProbe() {
+  const custom = document.getElementById('diagJvsCustom').value.trim();
+  const sel    = document.getElementById('diagJvsPort').value;
+  const device = custom || sel;
+  if (!device) {
+    showAlert('diagJvsAlert', 'No device selected or typed.', true);
+    return;
+  }
+  const ac = _diagAbortCurrent();
+  const resultEl = document.getElementById('diagJvsResult');
+  resultEl.innerHTML = '⏳ Checking service state and probing bus…';
+  resultEl.style.color = 'var(--muted)';
+  const d = await api('/api/diag/jvs/probe', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({device}),
+    signal: ac.signal
+  });
+  if (ac.signal.aborted) return;
+  if (d.error) {
+    resultEl.textContent = '✗ ' + d.error;
+    resultEl.style.color = 'var(--red, #e06c75)';
+    return;
+  }
+  if (!d.ok) {
+    resultEl.textContent = '✗ ' + d.message;
+    resultEl.style.color = 'var(--red, #e06c75)';
+    return;
+  }
+  if (d.mode === 'service_running') {
+    resultEl.style.color = 'var(--text)';
+    resultEl.innerHTML =
+      `<div style="color:var(--accent2,#61afef);font-weight:bold;">ℹ ${_escHtml(d.message)}</div>`
+      + `<div style="margin-top:0.4rem;font-size:0.82rem;color:var(--muted);">`
+      + `Stop the ModernJVS service and probe again to send a RESET broadcast and inspect raw bus traffic.`
+      + `</div>`;
+    return;
+  }
+  if (d.activity) {
+    resultEl.style.color = 'var(--text)';
+    let html = `<div style="color:var(--green,#98c379);font-weight:bold;">✓ ${_escHtml(d.message)}</div>`;
+    if (d.raw_hex) {
+      html += `<div style="margin-top:0.4rem;color:var(--muted);">Raw bytes: <code style="color:var(--accent2);word-break:break-all;">${_escHtml(d.raw_hex)}${d.truncated ? '…' : ''}</code></div>`;
+    }
+    if (d.packets && d.packets.length > 0) {
+      html += '<div style="margin-top:0.5rem;">Parsed JVS packets:</div>'
+            + '<ul style="margin:0.25rem 0 0 1rem;padding:0;">'
+            + d.packets.map(p =>
+                `<li><code style="color:var(--accent2);">${_escHtml(p.name)}</code>`
+                + ` <span style="color:var(--muted);">→ ${_escHtml(p.dest)}</span></li>`
+              ).join('')
+            + '</ul>';
+    }
+    resultEl.innerHTML = html;
+  } else {
+    resultEl.textContent = '✗ ' + d.message;
+    resultEl.style.color = 'var(--red, #e06c75)';
+  }
+}
+
+async function runJvsBusMonitor() {
+  const custom = document.getElementById('diagJvsCustom').value.trim();
+  const sel    = document.getElementById('diagJvsPort').value;
+  const device = custom || sel;
+  if (!device) {
+    showAlert('diagJvsAlert', 'No device selected or typed.', true);
+    return;
+  }
+  const ac = _diagAbortCurrent();
+  const resultEl = document.getElementById('diagJvsResult');
+  resultEl.innerHTML = '⏳ Listening on bus for 5 seconds…';
+  resultEl.style.color = 'var(--muted)';
+  const d = await api('/api/diag/jvs/monitor', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({device}),
+    signal: ac.signal
+  });
+  if (ac.signal.aborted) return;
+  if (d.error) {
+    resultEl.textContent = '✗ ' + d.error;
+    resultEl.style.color = 'var(--red, #e06c75)';
+    return;
+  }
+  if (!d.ok) {
+    resultEl.textContent = '✗ ' + d.message;
+    resultEl.style.color = 'var(--red, #e06c75)';
+    return;
+  }
+  // Service-running mode: bus is actively in use by the daemon
+  if (d.mode === 'service_running') {
+    resultEl.style.color = 'var(--text)';
+    resultEl.innerHTML =
+      `<div style="color:var(--accent2,#61afef);font-weight:bold;">ℹ ${_escHtml(d.message)}</div>`
+      + `<div style="margin-top:0.4rem;font-size:0.82rem;color:var(--muted);">`
+      + `Stop the ModernJVS service and monitor again to inspect raw bus traffic.`
+      + `</div>`;
+    return;
+  }
+  // Passive-monitor mode
+  if (d.activity) {
+    resultEl.style.color = 'var(--text)';
+    let html = `<div style="color:var(--green,#98c379);font-weight:bold;">✓ ${_escHtml(d.message)}</div>`;
+    if (d.raw_hex) {
+      html += `<div style="margin-top:0.4rem;color:var(--muted);">Raw bytes: <code style="color:var(--accent2);word-break:break-all;">${_escHtml(d.raw_hex)}${d.truncated ? '…' : ''}</code></div>`;
+    }
+    if (d.packets && d.packets.length > 0) {
+      html += '<div style="margin-top:0.5rem;">Parsed JVS packets:</div>'
+            + '<ul style="margin:0.25rem 0 0 1rem;padding:0;">'
+            + d.packets.map(p =>
+                `<li><code style="color:var(--accent2);">${_escHtml(p.name)}</code>`
+                + ` <span style="color:var(--muted);">→ ${_escHtml(p.dest)}</span></li>`
+              ).join('')
+            + '</ul>';
+    }
+    resultEl.innerHTML = html;
+  } else {
+    resultEl.textContent = '✗ ' + d.message;
+    resultEl.style.color = 'var(--red, #e06c75)';
+  }
+}
+
+async function jvsServiceAction(action) {
+  const d = await api('/api/control', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({action})
+  });
+  if (d.error) {
+    showAlert('diagJvsAlert', 'Error: ' + d.error, true);
+  } else {
+    showAlert('diagJvsAlert', 'Service ' + action + ' successful.', false);
+  }
+}
+
+async function loadUsbDevices() {
+  const wrap = document.getElementById('diagUsbWrap');
+  wrap.textContent = '⏳ Scanning…';
+  wrap.style.color = 'var(--muted)';
+  const d = await api('/api/diag/usb/devices');
+  if (d.error) {
+    wrap.textContent = '✗ ' + d.error;
+    wrap.style.color = 'var(--red, #e06c75)';
+    return;
+  }
+  const devices = d.devices || [];
+  if (devices.length === 0) {
+    wrap.textContent = 'No USB devices found.';
+    wrap.style.color = 'var(--muted)';
+    return;
+  }
+  wrap.style.color = '';
+  wrap.innerHTML = devices.map(dev => {
+    const vidpid = dev.vid + ':' + dev.pid;
+    const label  = dev.product || dev.manufacturer || vidpid;
+    const mfgStr = dev.manufacturer ? `<span style="color:var(--muted);margin-right:0.25rem;">${_escHtml(dev.manufacturer)}</span>` : '';
+    let driverBadge;
+    if (dev.driver) {
+      const dc = dev.is_serial_driver ? 'var(--accent2, #61afef)' : 'var(--muted)';
+      driverBadge = `<span style="font-size:0.75rem;padding:0.1rem 0.4rem;background:var(--surface2,#2c313a);border-radius:3px;color:${dc};">${_escHtml(dev.driver)}</span>`;
+    } else {
+      driverBadge = `<span style="font-size:0.75rem;padding:0.1rem 0.4rem;background:var(--surface2,#2c313a);border-radius:3px;color:var(--red,#e06c75);">unbound</span>`;
+    }
+    const rs485Badge = dev.is_rs485
+      ? `<span style="font-size:0.75rem;padding:0.1rem 0.4rem;background:var(--yellow,#e5c07b);color:#1a1a1a;border-radius:3px;">RS-485/Serial: ${_escHtml(dev.rs485_chip)}</span>`
+      : '';
+    return `<div style="padding:0.35rem 0;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:0.4rem;flex-wrap:wrap;">`
+      + `<code style="color:var(--accent2);font-family:monospace;">${_escHtml(vidpid)}</code>`
+      + mfgStr
+      + `<strong>${_escHtml(label)}</strong>`
+      + (rs485Badge ? ' ' + rs485Badge : '')
+      + ' ' + driverBadge
+      + `</div>`;
+  }).join('');
 }
 
 // ---- Init ----
@@ -3780,6 +4092,774 @@ def diag_serial_test(device_path):
         os.close(fd)
 
 
+# JVS protocol constants used by the bus probe
+_JVS_SYNC   = 0xE0
+_JVS_ESCAPE = 0xD0
+
+# Event set by POST /api/diag/gpio/cancel to interrupt a running _gpio_write_line sleep.
+_gpio_set_cancel = threading.Event()
+
+# Human-readable names for JVS command bytes (master → slave direction)
+_JVS_CMD_NAMES = {
+    0xF0: "RESET",
+    0xF1: "ASSIGN_ADDR",
+    0xF2: "SET_COMMS_MODE",
+    0x10: "REQUEST_ID",
+    0x11: "COMMAND_VERSION",
+    0x12: "JVS_VERSION",
+    0x13: "COMMS_VERSION",
+    0x14: "CAPABILITIES",
+    0x15: "CONVEY_ID",
+    0x20: "READ_SWITCHES",
+    0x21: "READ_COINS",
+    0x22: "READ_ANALOGS",
+    0x23: "READ_ROTARY",
+    0x24: "READ_KEYPAD",
+    0x25: "READ_LIGHTGUN",
+    0x26: "READ_GPI",
+    0x2E: "REMAINING_PAYOUT",
+    0x2F: "RETRANSMIT",
+    0x30: "DECREASE_COINS",
+    0x31: "SET_PAYOUT",
+    0x32: "WRITE_GPO",
+    0x33: "WRITE_ANALOG",
+    0x34: "WRITE_DISPLAY",
+    0x35: "WRITE_COINS",
+    0x36: "SUBTRACT_PAYOUT",
+    0x37: "WRITE_GPO_BYTE",
+    0x38: "WRITE_GPO_BIT",
+    0x70: "NAMCO_SPECIFIC",
+}
+
+# JVS status/report bytes that appear in slave → master responses
+_JVS_STATUS_NAMES = {
+    0x01: "STATUS_SUCCESS",
+    0x02: "STATUS_UNSUPPORTED",
+    0x03: "STATUS_CHECKSUM_FAILURE",
+    0x04: "STATUS_OVERFLOW",
+}
+
+
+def _parse_jvs_packets(data):
+    """Parse a raw byte sequence and return a list of identified JVS packets.
+
+    Each entry is a dict:
+        name   – command/status name string
+        dest   – human-readable destination ("BROADCAST", "MASTER", or "0xNN")
+        length – declared packet length field value
+
+    This is best-effort: malformed bytes are silently skipped.
+    """
+    packets = []
+    raw = bytes(data)
+    i = 0
+
+    while i < len(raw) and len(packets) < 16:
+        # Scan for SYNC byte
+        if raw[i] != _JVS_SYNC:
+            i += 1
+            continue
+
+        i += 1  # consume SYNC
+
+        # Read destination (with un-escaping)
+        if i >= len(raw):
+            break
+        if raw[i] == _JVS_ESCAPE:
+            i += 1
+            if i >= len(raw):
+                break
+            dest = raw[i] + 1
+        else:
+            dest = raw[i]
+        i += 1
+
+        # Read length (with un-escaping)
+        if i >= len(raw):
+            break
+        if raw[i] == _JVS_ESCAPE:
+            i += 1
+            if i >= len(raw):
+                break
+            length = raw[i] + 1
+        else:
+            length = raw[i]
+        i += 1
+
+        if length < 2:
+            continue  # length must cover at least 1 data byte + 1 checksum
+
+        # Read payload bytes (length − 1 data bytes; last byte is checksum)
+        payload_len = length - 1
+        payload = []
+        for _ in range(payload_len):
+            if i >= len(raw):
+                break
+            if raw[i] == _JVS_ESCAPE:
+                i += 1
+                if i >= len(raw):
+                    break
+                payload.append(raw[i] + 1)
+            else:
+                payload.append(raw[i])
+            i += 1
+
+        if not payload:
+            continue
+
+        first_byte = payload[0]
+        # Destination 0x00 = BUS_MASTER (slave → master response)
+        # Destination 0xFF = BROADCAST (master → all slaves)
+        # Destination 0x01–0xFE = specific slave address
+        if dest == 0xFF:
+            dest_str = "BROADCAST"
+        elif dest == 0x00:
+            dest_str = "MASTER"
+        else:
+            dest_str = f"0x{dest:02X}"
+
+        # For slave→master packets the first payload byte is the status code;
+        # for master→slave the first payload byte is the first command.
+        if dest == 0x00:
+            name = _JVS_STATUS_NAMES.get(first_byte, f"0x{first_byte:02X}")
+        else:
+            name = _JVS_CMD_NAMES.get(first_byte, f"0x{first_byte:02X}")
+
+        packets.append({"name": name, "dest": dest_str, "length": length})
+
+    return packets
+
+
+def _service_owns_port(pid_str, device_path):
+    """Return True if the process pid_str currently has device_path open.
+
+    Walks /proc/<pid>/fd/ and checks each symlink target against device_path.
+    Returns False (never raises) on any permission error or missing entry.
+    """
+    try:
+        pid = int(pid_str)
+    except (TypeError, ValueError):
+        return False
+    if pid <= 0:
+        return False
+    fd_dir = f"/proc/{pid}/fd"
+    try:
+        for entry in os.listdir(fd_dir):
+            try:
+                target = os.readlink(os.path.join(fd_dir, entry))
+                if target == device_path:
+                    return True
+            except OSError:
+                continue
+    except OSError:
+        pass
+    return False
+
+
+def diag_jvs_probe(device_path):
+    """Probe the JVS bus on device_path.
+
+    Behaviour depends on whether the ModernJVS service is already running:
+
+    Service RUNNING:
+        The daemon owns the port and is actively exchanging JVS packets with
+        the arcade board.  We confirm the daemon has the port open via
+        /proc/<PID>/fd/ and return an informational result without touching
+        the port.
+
+    Service STOPPED:
+        Opens device_path at 115200 8N1, floats the sense line GPIO (if
+        SENSE_LINE_TYPE == "1"), flushes stale input, sends:
+          1. JVS RESET broadcast (SYNC | 0xFF | 0x03 | CMD_RESET(0xF0) | 0xD9 | checksum)
+          2. JVS ASSIGN_ADDR broadcast (SYNC | 0xFF | 0x03 | CMD_ASSIGN_ADDR(0xF1) | 0x01 | checksum)
+        then collects any bytes received within 2 s.
+
+    Returns a dict:
+        ok             – False on OS/TTY errors, True otherwise
+        mode           – "service_running" | "active_probe"
+        activity       – True if bus activity confirmed or bytes received
+        bytes_received – count of received bytes (0 in service_running mode)
+        raw_hex        – space-separated hex of up to 64 bytes
+        truncated      – True when more than 64 bytes were received
+        packets        – list of parsed JVS packet dicts (see _parse_jvs_packets)
+        message        – human-readable summary
+    """
+    import termios
+    import select as _select
+
+    device_path = device_path.strip()
+    if not device_path:
+        return {"ok": False, "message": "No device path configured."}
+
+    # Only allow /dev/ paths to prevent path traversal
+    if not device_path.startswith("/dev/"):
+        return {"ok": False, "message": f"Refusing to probe non-/dev/ path: {device_path}"}
+
+    # ------------------------------------------------------------------
+    # Service-running check: when the daemon already has the port open, any
+    # attempt to open it ourselves + send a RESET broadcast would disrupt
+    # the live session and cause the probe to read silence (the daemon's
+    # tight select() loop consumes all incoming bytes first).
+    # Instead, confirm via /proc/<PID>/fd/ that the daemon owns the port,
+    # then return an informational result without touching the serial port.
+    # ------------------------------------------------------------------
+    _, svc_out = systemctl("show", SERVICE_NAME,
+                           "--property=ActiveState,MainPID")
+    svc_props = {}
+    for line in svc_out.splitlines():
+        if "=" in line:
+            k, _, v = line.partition("=")
+            svc_props[k.strip()] = v.strip()
+
+    if svc_props.get("ActiveState") == "active":
+        pid_str = svc_props.get("MainPID", "")
+        port_open = _service_owns_port(pid_str, device_path) if pid_str and pid_str != "0" else False
+        if port_open:
+            msg = (f"ModernJVS service is running and has {device_path} open — "
+                   "the bus is actively in use by the daemon.")
+        else:
+            msg = ("ModernJVS service is running — the bus is in use by the daemon.")
+        return {
+            "ok":             True,
+            "mode":           "service_running",
+            "activity":       True,
+            "bytes_received": 0,
+            "raw_hex":        "",
+            "truncated":      False,
+            "packets":        [],
+            "message":        msg,
+        }
+
+    try:
+        fd = os.open(device_path, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
+    except OSError as e:
+        return {"ok": False, "message": f"Cannot open {device_path}: {e.strerror} (errno {e.errno})"}
+
+    try:
+        if not os.isatty(fd):
+            return {"ok": False, "message": f"{device_path} is not a TTY device."}
+
+        # Configure 115200 8N1 raw mode (mirrors what the C daemon does)
+        try:
+            attrs = termios.tcgetattr(fd)
+        except termios.error as e:
+            return {"ok": False, "message": f"tcgetattr failed on {device_path}: {e}"}
+
+        attrs[4] = termios.B115200   # c_ispeed
+        attrs[5] = termios.B115200   # c_ospeed
+        attrs[2] = termios.CS8 | termios.CREAD | termios.CLOCAL  # c_cflag
+        attrs[0] = 0                 # c_iflag – disable all input processing
+        attrs[1] = 0                 # c_oflag – disable all output processing
+        attrs[3] = 0                 # c_lflag – disable echo / canonical mode
+        attrs[6][termios.VMIN]  = 0
+        attrs[6][termios.VTIME] = 0
+
+        try:
+            termios.tcsetattr(fd, termios.TCSAFLUSH, attrs)
+        except termios.error as e:
+            return {"ok": False, "message": f"tcsetattr failed on {device_path}: {e}"}
+
+        # Flush any stale input/output
+        try:
+            termios.tcflush(fd, termios.TCIOFLUSH)
+        except termios.error:
+            pass
+
+        # ------------------------------------------------------------------
+        # Sense line: if configured, float it (set GPIO to INPUT / high-Z)
+        # before sending probe packets.  When the daemon is not running the
+        # GPIO pin may still be driven LOW (from the last ASSIGN_ADDR), which
+        # prevents the arcade board from detecting an I/O device and responding.
+        # We keep the handle open for the entire probe so the line stays INPUT.
+        # ------------------------------------------------------------------
+        cfg = read_config()
+        sense_type = cfg.get("SENSE_LINE_TYPE", "0").strip()
+        sense_pin_raw = cfg.get("SENSE_LINE_PIN", "26").strip()
+        sense_note = ""
+        gpio_chip_fd = None
+        gpio_line_fd = None
+        if sense_type == "1":
+            try:
+                sense_pin = int(sense_pin_raw)
+            except ValueError:
+                sense_pin = -1
+            if sense_pin >= 0:
+                chips = sorted(_glob.glob("/dev/gpiochip*"))
+                if chips:
+                    gpio_chip_fd, gpio_line_fd = _gpio_open_input(chips[0], sense_pin)
+                    if gpio_line_fd is not None:
+                        time.sleep(0.01)  # 10 ms for the line to stabilise
+                        sense_note = f" (sense line GPIO{sense_pin} floated)"
+                    else:
+                        # Open failed; close chip_fd if it was returned
+                        if gpio_chip_fd is not None:
+                            try:
+                                os.close(gpio_chip_fd)
+                            except OSError:
+                                pass
+                            gpio_chip_fd = None
+                        sense_note = f" (warning: could not float sense line GPIO{sense_pin})"
+
+        try:
+            # ----------------------------------------------------------------
+            # Build probe packets (master → all slaves, broadcast addr 0xFF)
+            #
+            # RESET broadcast:
+            #   SYNC(0xE0) | dest(0xFF) | len(0x03) | CMD_RESET(0xF0) | 0xD9 | chk
+            #   checksum = (0xFF + 0x03 + 0xF0 + 0xD9) & 0xFF = 0x2CB & 0xFF = 0xCB
+            #
+            # ASSIGN_ADDR broadcast (assign address 0x01):
+            #   SYNC(0xE0) | dest(0xFF) | len(0x03) | CMD_ASSIGN_ADDR(0xF1) | 0x01 | chk
+            #   checksum = (0xFF + 0x03 + 0xF1 + 0x01) & 0xFF = 0x1F4 & 0xFF = 0xF4
+            #
+            # None of these bytes equal SYNC(0xE0) or ESCAPE(0xD0) so no escaping
+            # is needed in the data portion.
+            # ----------------------------------------------------------------
+            reset_packet       = bytes([0xE0, 0xFF, 0x03, 0xF0, 0xD9, 0xCB])
+            assign_addr_packet = bytes([0xE0, 0xFF, 0x03, 0xF1, 0x01, 0xF4])
+
+            try:
+                os.write(fd, reset_packet)
+            except OSError:
+                pass  # write failure is non-fatal; we still listen for traffic
+
+            time.sleep(0.005)  # 5 ms gap between packets
+
+            try:
+                os.write(fd, assign_addr_packet)
+            except OSError:
+                pass
+
+            # Collect bytes for up to 500 ms
+            deadline  = time.monotonic() + 2.0
+            received  = bytearray()
+
+            while time.monotonic() < deadline:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                r, _, _ = _select.select([fd], [], [], min(remaining, 0.05))
+                if fd in r:
+                    try:
+                        chunk = os.read(fd, 256)
+                        if chunk:
+                            received.extend(chunk)
+                    except OSError:
+                        break
+        finally:
+            # Release the sense line GPIO handle now that the probe is complete
+            if gpio_line_fd is not None:
+                try:
+                    os.close(gpio_line_fd)
+                except OSError:
+                    pass
+            if gpio_chip_fd is not None:
+                try:
+                    os.close(gpio_chip_fd)
+                except OSError:
+                    pass
+
+        # Parse any JVS packets found in the received bytes
+        packets   = _parse_jvs_packets(received)
+        hex_str   = received[:64].hex(' ') if received else ''
+        truncated = len(received) > 64
+
+        if received:
+            msg = f"Bus activity detected — {len(received)} byte(s) received"
+            if packets:
+                names = ', '.join(p['name'] for p in packets[:3])
+                msg += f" ({names})"
+            if truncated:
+                msg += " (showing first 64 bytes)"
+            msg += sense_note
+        else:
+            msg = ("No response after 2 s — silence on bus "
+                   "(nothing connected, wrong port, or wiring fault)"
+                   + sense_note)
+
+        return {
+            "ok":             True,
+            "mode":           "active_probe",
+            "activity":       bool(received),
+            "bytes_received": len(received),
+            "raw_hex":        hex_str,
+            "truncated":      truncated,
+            "packets":        packets,
+            "message":        msg,
+        }
+    finally:
+        os.close(fd)
+
+
+def diag_jvs_monitor(device_path):
+    """Passively listen on device_path for 5 seconds without sending any bytes.
+
+    Behaviour depends on whether the ModernJVS service is already running:
+
+    Service RUNNING:
+        The daemon owns the port.  We confirm via /proc/<PID>/fd/ and return an
+        informational result without touching the port.
+
+    Service STOPPED:
+        Opens device_path at 115200 8N1, floats the sense line GPIO (if
+        SENSE_LINE_TYPE == "1"), flushes stale input, then listens for 5 s.
+        No bytes are written to the bus.
+
+    Returns a dict:
+        ok             – False on OS/TTY errors, True otherwise
+        mode           – "service_running" | "monitor"
+        activity       – True if bus activity detected or bytes received
+        bytes_received – count of received bytes (0 in service_running mode)
+        raw_hex        – space-separated hex of up to 64 bytes
+        truncated      – True when more than 64 bytes were received
+        packets        – list of parsed JVS packet dicts (see _parse_jvs_packets)
+        message        – human-readable summary
+    """
+    import termios
+    import select as _select
+
+    device_path = device_path.strip()
+    if not device_path:
+        return {"ok": False, "message": "No device path configured."}
+
+    if not device_path.startswith("/dev/"):
+        return {"ok": False, "message": f"Refusing to monitor non-/dev/ path: {device_path}"}
+
+    # Service-running check (same as diag_jvs_probe)
+    _, svc_out = systemctl("show", SERVICE_NAME,
+                           "--property=ActiveState,MainPID")
+    svc_props = {}
+    for line in svc_out.splitlines():
+        if "=" in line:
+            k, _, v = line.partition("=")
+            svc_props[k.strip()] = v.strip()
+
+    if svc_props.get("ActiveState") == "active":
+        pid_str  = svc_props.get("MainPID", "")
+        port_open = _service_owns_port(pid_str, device_path) if pid_str and pid_str != "0" else False
+        msg = (f"ModernJVS service is running and has {device_path} open — "
+               "the bus is actively in use by the daemon."
+               if port_open else
+               "ModernJVS service is running — the bus is in use by the daemon.")
+        return {
+            "ok":             True,
+            "mode":           "service_running",
+            "activity":       True,
+            "bytes_received": 0,
+            "raw_hex":        "",
+            "truncated":      False,
+            "packets":        [],
+            "message":        msg,
+        }
+
+    try:
+        fd = os.open(device_path, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
+    except OSError as e:
+        return {"ok": False, "message": f"Cannot open {device_path}: {e.strerror} (errno {e.errno})"}
+
+    try:
+        if not os.isatty(fd):
+            return {"ok": False, "message": f"{device_path} is not a TTY device."}
+
+        try:
+            attrs = termios.tcgetattr(fd)
+        except termios.error as e:
+            return {"ok": False, "message": f"tcgetattr failed on {device_path}: {e}"}
+
+        attrs[4] = termios.B115200
+        attrs[5] = termios.B115200
+        attrs[2] = termios.CS8 | termios.CREAD | termios.CLOCAL
+        attrs[0] = 0
+        attrs[1] = 0
+        attrs[3] = 0
+        attrs[6][termios.VMIN]  = 0
+        attrs[6][termios.VTIME] = 0
+
+        try:
+            termios.tcsetattr(fd, termios.TCSAFLUSH, attrs)
+        except termios.error as e:
+            return {"ok": False, "message": f"tcsetattr failed on {device_path}: {e}"}
+
+        try:
+            termios.tcflush(fd, termios.TCIOFLUSH)
+        except termios.error:
+            pass
+
+        # Float the sense line (same logic as diag_jvs_probe)
+        cfg = read_config()
+        sense_type    = cfg.get("SENSE_LINE_TYPE", "0").strip()
+        sense_pin_raw = cfg.get("SENSE_LINE_PIN", "26").strip()
+        sense_note    = ""
+        gpio_chip_fd  = None
+        gpio_line_fd  = None
+        if sense_type == "1":
+            try:
+                sense_pin = int(sense_pin_raw)
+            except ValueError:
+                sense_pin = -1
+            if sense_pin >= 0:
+                chips = sorted(_glob.glob("/dev/gpiochip*"))
+                if chips:
+                    gpio_chip_fd, gpio_line_fd = _gpio_open_input(chips[0], sense_pin)
+                    if gpio_line_fd is not None:
+                        time.sleep(0.01)
+                        sense_note = f" (sense line GPIO{sense_pin} floated)"
+                    else:
+                        if gpio_chip_fd is not None:
+                            try:
+                                os.close(gpio_chip_fd)
+                            except OSError:
+                                pass
+                            gpio_chip_fd = None
+                        sense_note = f" (warning: could not float sense line GPIO{sense_pin})"
+
+        try:
+            # Passive listen — no bytes sent to bus
+            deadline = time.monotonic() + 5.0
+            received = bytearray()
+
+            while time.monotonic() < deadline:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                r, _, _ = _select.select([fd], [], [], min(remaining, 0.05))
+                if fd in r:
+                    try:
+                        chunk = os.read(fd, 256)
+                        if chunk:
+                            received.extend(chunk)
+                    except OSError:
+                        break
+        finally:
+            if gpio_line_fd is not None:
+                try:
+                    os.close(gpio_line_fd)
+                except OSError:
+                    pass
+            if gpio_chip_fd is not None:
+                try:
+                    os.close(gpio_chip_fd)
+                except OSError:
+                    pass
+
+        packets   = _parse_jvs_packets(received)
+        hex_str   = received[:64].hex(' ') if received else ''
+        truncated = len(received) > 64
+
+        if received:
+            msg = f"Bus activity detected — {len(received)} byte(s) received"
+            if packets:
+                msg += f" ({', '.join(p['name'] for p in packets[:3])})"
+            if truncated:
+                msg += " (showing first 64 bytes)"
+            msg += sense_note
+        else:
+            msg = ("No traffic after 5 s — silence on bus "
+                   "(nothing connected, wrong port, or wiring fault)"
+                   + sense_note)
+
+        return {
+            "ok":             True,
+            "mode":           "monitor",
+            "activity":       bool(received),
+            "bytes_received": len(received),
+            "raw_hex":        hex_str,
+            "truncated":      truncated,
+            "packets":        packets,
+            "message":        msg,
+        }
+    finally:
+        os.close(fd)
+
+
+def diag_usb_devices():
+    """List connected USB devices by reading /sys/bus/usb/devices/.
+
+    For each device that exposes idVendor/idProduct (i.e. actual devices,
+    not USB interfaces or root hubs), returns:
+      path        – sysfs entry name (e.g. "1-1.2")
+      vid / pid   – vendor/product ID (4-char hex strings, lower-case)
+      manufacturer / product – human-readable strings (may be empty)
+      driver      – kernel driver currently bound to the first interface,
+                    or "" if unbound
+      is_rs485    – True when the VID:PID matches a known RS-485/serial adapter
+      rs485_chip  – friendly chip name when is_rs485 is True, else ""
+      is_serial_driver – True when the bound driver is a serial/CDC driver
+    """
+    usb_base = "/sys/bus/usb/devices"
+    devices = []
+
+    try:
+        entries = os.listdir(usb_base)
+    except OSError as e:
+        return {"error": f"Cannot read {usb_base}: {e.strerror}"}
+
+    for entry in sorted(entries):
+        dev_path = os.path.join(usb_base, entry)
+
+        def _read_attr(fname, base_path=dev_path):
+            try:
+                with open(os.path.join(base_path, fname), errors="replace") as f:
+                    return f.read().strip()
+            except OSError:
+                return None
+
+        vid = _read_attr("idVendor")
+        pid = _read_attr("idProduct")
+        # Skip USB interfaces (e.g. "1-1.2:1.0") and entries without VID/PID
+        if not vid or not pid:
+            continue
+
+        manufacturer = _read_attr("manufacturer") or ""
+        product      = _read_attr("product")      or ""
+
+        # Find the first interface sub-directory that has a bound driver
+        driver = ""
+        try:
+            for iface in sorted(os.listdir(dev_path)):
+                iface_path = os.path.join(dev_path, iface)
+                if not os.path.isdir(iface_path):
+                    continue
+                drv_link = os.path.join(iface_path, "driver")
+                if os.path.islink(drv_link):
+                    driver = os.path.basename(os.readlink(drv_link))
+                    break
+        except OSError:
+            pass
+
+        vid_lower = vid.lower()
+        pid_lower = pid.lower()
+        key = (vid_lower, pid_lower)
+        is_rs485   = key in _USB_RS485_KNOWN
+        rs485_chip = _USB_RS485_KNOWN.get(key, "")
+        is_serial_driver = driver in _USB_SERIAL_DRIVERS
+
+        devices.append({
+            "path":             entry,
+            "vid":              vid_lower,
+            "pid":              pid_lower,
+            "manufacturer":     manufacturer,
+            "product":          product,
+            "driver":           driver,
+            "is_rs485":         is_rs485,
+            "rs485_chip":       rs485_chip,
+            "is_serial_driver": is_serial_driver,
+        })
+
+    return {"devices": devices}
+
+
+def _gpio_open_input(chip_path, line_offset):
+    """Request a GPIO line as INPUT (float/high-Z) using the kernel GPIO ioctl.
+
+    Returns (chip_fd, line_fd) on success, or (None, None) on any error.
+    Both fds must be closed by the caller when the line is no longer needed.
+    Releasing the line_fd returns the GPIO line to its default kernel-managed state.
+
+    Tries the v1 GPIO ABI first (kernel >= 4.8), then v2 (kernel >= 5.10).
+    No external CLI tools or Python C extensions are required.
+    """
+    import ctypes
+    import errno as _errno
+    import fcntl
+
+    # ---- v1 ABI constants ----
+    GPIOHANDLES_MAX          = 64
+    GPIOHANDLE_REQUEST_INPUT = 1
+    # _IOWR(0xB4, 0x03, struct gpiohandle_request)  sizeof = 364 bytes
+    GPIO_GET_LINEHANDLE_IOCTL = 0xC16CB403
+
+    class GpiohandleRequest(ctypes.Structure):
+        _fields_ = [
+            ("lineoffsets",    ctypes.c_uint32 * GPIOHANDLES_MAX),
+            ("flags",          ctypes.c_uint32),
+            ("default_values", ctypes.c_uint8  * GPIOHANDLES_MAX),
+            ("consumer_label", ctypes.c_char   * 32),
+            ("lines",          ctypes.c_uint32),
+            ("fd",             ctypes.c_int),
+        ]
+
+    # ---- v2 ABI constants ----
+    GPIO_V2_LINES_MAX          = 64
+    GPIO_MAX_NAME_SIZE         = 32
+    GPIO_V2_LINE_NUM_ATTRS_MAX = 10
+    GPIO_V2_LINE_FLAG_INPUT    = (1 << 3)
+    # _IOWR(0xB4, 0x0F, struct gpio_v2_line_request)  sizeof = 592 bytes
+    GPIO_V2_GET_LINE_IOCTL = 0xC250B40F
+
+    class _GpioV2LineAttrUnion(ctypes.Union):
+        _fields_ = [
+            ("flags",              ctypes.c_uint64),
+            ("values",             ctypes.c_uint64),
+            ("debounce_period_us", ctypes.c_uint32),
+        ]
+
+    class GpioV2LineAttribute(ctypes.Structure):
+        _fields_ = [
+            ("id",      ctypes.c_uint32),
+            ("padding", ctypes.c_uint32),
+            ("u",       _GpioV2LineAttrUnion),
+        ]
+
+    class GpioV2LineConfigAttribute(ctypes.Structure):
+        _fields_ = [
+            ("attr", GpioV2LineAttribute),
+            ("mask", ctypes.c_uint64),
+        ]
+
+    class GpioV2LineConfig(ctypes.Structure):
+        _fields_ = [
+            ("flags",     ctypes.c_uint64),
+            ("num_attrs", ctypes.c_uint32),
+            ("padding",   ctypes.c_uint32 * 5),
+            ("attrs",     GpioV2LineConfigAttribute * GPIO_V2_LINE_NUM_ATTRS_MAX),
+        ]
+
+    class GpioV2LineRequest(ctypes.Structure):
+        _fields_ = [
+            ("offsets",           ctypes.c_uint32 * GPIO_V2_LINES_MAX),
+            ("consumer",          ctypes.c_char   * GPIO_MAX_NAME_SIZE),
+            ("config",            GpioV2LineConfig),
+            ("num_lines",         ctypes.c_uint32),
+            ("event_buffer_size", ctypes.c_uint32),
+            ("padding",           ctypes.c_uint32 * 5),
+            ("fd",                ctypes.c_int32),
+        ]
+
+    try:
+        chip_fd = os.open(chip_path, os.O_RDONLY)
+    except OSError:
+        return None, None
+
+    # Try v1 ABI
+    req = GpiohandleRequest()
+    req.lineoffsets[0] = line_offset
+    req.flags          = GPIOHANDLE_REQUEST_INPUT
+    req.consumer_label = b"modernjvs-webui"
+    req.lines          = 1
+    try:
+        fcntl.ioctl(chip_fd, GPIO_GET_LINEHANDLE_IOCTL, req)
+        return chip_fd, req.fd   # caller owns both fds
+    except OSError as e:
+        if e.errno != _errno.ENOTTY:
+            os.close(chip_fd)
+            return None, None
+        # ENOTTY → v1 not supported by this kernel; chip_fd stays open for v2 attempt below
+
+    # Try v2 ABI (chip_fd is still open from above)
+    req2 = GpioV2LineRequest()
+    req2.offsets[0]      = line_offset
+    req2.consumer        = b"modernjvs-webui"
+    req2.config.flags    = GPIO_V2_LINE_FLAG_INPUT
+    req2.num_lines       = 1
+    try:
+        fcntl.ioctl(chip_fd, GPIO_V2_GET_LINE_IOCTL, req2)
+        return chip_fd, req2.fd   # caller owns both fds
+    except OSError:
+        os.close(chip_fd)
+        return None, None
+
+
 def _gpio_read_line(chip_path, line_offset):
     """Read a GPIO line value using ctypes and the Linux GPIO character device ioctl.
 
@@ -3921,11 +5001,226 @@ def _gpio_read_line(chip_path, line_offset):
         os.close(chip_fd)
 
 
+def _gpio_write_line(chip_path, line_offset, value, duration_s=3.0):
+    """Drive a GPIO line as OUTPUT at `value` (0 or 1) for `duration_s` seconds.
+
+    Uses the same v1/v2 kernel GPIO ioctl approach as _gpio_open_input.
+    Blocks for duration_s then closes the handle, returning the line to its
+    default kernel-managed state.
+
+    Raises OSError on failure (e.g. EBUSY if another process holds the line).
+    """
+    import ctypes
+    import errno as _errno
+    import fcntl
+
+    # ---- v1 ABI ----
+    GPIOHANDLES_MAX           = 64
+    GPIOHANDLE_REQUEST_OUTPUT = 2
+    GPIO_GET_LINEHANDLE_IOCTL = 0xC16CB403
+
+    class GpiohandleRequest(ctypes.Structure):
+        _fields_ = [
+            ("lineoffsets",    ctypes.c_uint32 * GPIOHANDLES_MAX),
+            ("flags",          ctypes.c_uint32),
+            ("default_values", ctypes.c_uint8  * GPIOHANDLES_MAX),
+            ("consumer_label", ctypes.c_char   * 32),
+            ("lines",          ctypes.c_uint32),
+            ("fd",             ctypes.c_int),
+        ]
+
+    # ---- v2 ABI ----
+    GPIO_V2_LINES_MAX          = 64
+    GPIO_MAX_NAME_SIZE         = 32
+    GPIO_V2_LINE_NUM_ATTRS_MAX = 10
+    GPIO_V2_LINE_FLAG_OUTPUT   = (1 << 4)
+    GPIO_V2_LINE_ATTR_ID_OUTPUT_VALUES = 3
+    GPIO_V2_GET_LINE_IOCTL             = 0xC250B40F
+    # _IOWR(0xB4, 0x13, struct gpio_v2_line_values)  sizeof = 16 bytes
+    GPIO_V2_LINE_SET_VALUES_IOCTL      = 0xC010B413
+
+    class _GpioV2LineAttrUnion(ctypes.Union):
+        _fields_ = [
+            ("flags",              ctypes.c_uint64),
+            ("values",             ctypes.c_uint64),
+            ("debounce_period_us", ctypes.c_uint32),
+        ]
+
+    class GpioV2LineAttribute(ctypes.Structure):
+        _fields_ = [
+            ("id",      ctypes.c_uint32),
+            ("padding", ctypes.c_uint32),
+            ("u",       _GpioV2LineAttrUnion),
+        ]
+
+    class GpioV2LineConfigAttribute(ctypes.Structure):
+        _fields_ = [
+            ("attr", GpioV2LineAttribute),
+            ("mask", ctypes.c_uint64),
+        ]
+
+    class GpioV2LineConfig(ctypes.Structure):
+        _fields_ = [
+            ("flags",     ctypes.c_uint64),
+            ("num_attrs", ctypes.c_uint32),
+            ("padding",   ctypes.c_uint32 * 5),
+            ("attrs",     GpioV2LineConfigAttribute * GPIO_V2_LINE_NUM_ATTRS_MAX),
+        ]
+
+    class GpioV2LineRequest(ctypes.Structure):
+        _fields_ = [
+            ("offsets",           ctypes.c_uint32 * GPIO_V2_LINES_MAX),
+            ("consumer",          ctypes.c_char   * GPIO_MAX_NAME_SIZE),
+            ("config",            GpioV2LineConfig),
+            ("num_lines",         ctypes.c_uint32),
+            ("event_buffer_size", ctypes.c_uint32),
+            ("padding",           ctypes.c_uint32 * 5),
+            ("fd",                ctypes.c_int32),
+        ]
+
+    chip_fd = os.open(chip_path, os.O_RDONLY)
+    try:
+        # Try v1 ABI
+        req = GpiohandleRequest()
+        req.lineoffsets[0]    = line_offset
+        req.flags             = GPIOHANDLE_REQUEST_OUTPUT
+        req.default_values[0] = 1 if value else 0
+        req.consumer_label    = b"modernjvs-webui"
+        req.lines             = 1
+        line_fd = None
+        try:
+            fcntl.ioctl(chip_fd, GPIO_GET_LINEHANDLE_IOCTL, req)
+            line_fd = req.fd
+        except OSError as e:
+            if e.errno != _errno.ENOTTY:
+                raise
+            # v1 not supported — fall through to v2
+
+        if line_fd is None:
+            # v2 ABI — set initial output value via config attribute
+            req2 = GpioV2LineRequest()
+            req2.offsets[0]   = line_offset
+            req2.consumer     = b"modernjvs-webui"
+            req2.num_lines    = 1
+            req2.config.flags = GPIO_V2_LINE_FLAG_OUTPUT
+            # Set initial value via attribute
+            req2.config.num_attrs        = 1
+            req2.config.attrs[0].attr.id = GPIO_V2_LINE_ATTR_ID_OUTPUT_VALUES
+            req2.config.attrs[0].attr.u.values = (1 if value else 0)
+            req2.config.attrs[0].mask    = 1   # bit 0 = first line
+            fcntl.ioctl(chip_fd, GPIO_V2_GET_LINE_IOCTL, req2)
+            line_fd = req2.fd
+
+        try:
+            # Poll in 50 ms ticks so the hold can be cancelled early via _gpio_set_cancel.
+            _gpio_set_cancel.clear()
+            deadline = time.monotonic() + duration_s
+            while time.monotonic() < deadline:
+                if _gpio_set_cancel.wait(timeout=0.05):
+                    break  # cancelled early — line is released in the finally below
+        finally:
+            os.close(line_fd)
+    finally:
+        os.close(chip_fd)
+
+
+def diag_gpio_set(pin, level, duration=3):
+    """Drive a GPIO pin OUTPUT HIGH or LOW for a user-defined duration, then release it.
+
+    Intended for manual wiring verification — the user can confirm the expected
+    voltage on the pin with a multimeter while it is being driven.
+
+    duration is clamped to 1–60 seconds; defaults to 3 s.
+
+    Returns a dict: ok (bool), message (str), state (str | None).
+    """
+    try:
+        pin_int = int(pin)
+    except (TypeError, ValueError):
+        return {"ok": False, "message": f"Invalid pin number: {pin!r}", "state": None}
+
+    if pin_int < 1 or pin_int > 40:
+        return {
+            "ok": False,
+            "message": f"Pin {pin_int} is outside the valid header range (1–40).",
+            "state": None,
+        }
+
+    level_str = str(level).strip().lower()
+    if level_str not in ("high", "low"):
+        return {"ok": False, "message": f"Invalid level {level!r} — must be 'high' or 'low'.", "state": None}
+
+    try:
+        duration_s = float(duration)
+    except (TypeError, ValueError):
+        duration_s = 3.0
+    # Clamp to a safe range
+    duration_s = max(1.0, min(60.0, duration_s))
+
+    value = 1 if level_str == "high" else 0
+    state = "HIGH" if value else "LOW"
+
+    chips = sorted(_glob.glob("/dev/gpiochip*"))
+    if not chips:
+        return {
+            "ok": False,
+            "message": "No /dev/gpiochip* devices found. Is the GPIO character device available?",
+            "state": None,
+        }
+
+    try:
+        # pin_int is used directly as the BCM GPIO line offset on gpiochip0,
+        # matching the behaviour of diag_gpio_test() which documents:
+        # "SENSE_LINE_PIN stores the BCM GPIO line offset, used directly."
+        _gpio_write_line(chips[0], pin_int, value, duration_s=duration_s)
+        dur_label = f"{int(duration_s)} s" if duration_s == int(duration_s) else f"{duration_s} s"
+        return {
+            "ok": True,
+            "message": f"Pin {pin_int} was driven {state} for {dur_label}, then released.",
+            "state": state,
+        }
+    except PermissionError:
+        return {
+            "ok": False,
+            "message": (
+                f"Permission denied driving GPIO pin {pin_int}. "
+                "Run ModernJVS as root or add the service user to the 'gpio' group."
+            ),
+            "state": None,
+        }
+    except OSError as e:
+        import errno as _errno
+        if e.errno == _errno.EBUSY:
+            return {
+                "ok": False,
+                "message": (
+                    f"Pin {pin_int} is held by another process (ModernJVS service is likely running). "
+                    "Stop the service first."
+                ),
+                "state": "IN USE",
+            }
+        return {"ok": False, "message": f"Error driving GPIO pin {pin_int}: {e}", "state": None}
+
+
+def diag_gpio_cancel():
+    """Signal any in-progress _gpio_write_line hold to release early.
+
+    Called by POST /api/diag/gpio/cancel when the browser navigates away from
+    the Diagnostics tab.  Safe to call even when no hold is active.
+    """
+    _gpio_set_cancel.set()
+    return {"ok": True}
+
+
 def diag_gpio_test(pin):
     """Read the current logic level of a GPIO pin using the Linux GPIO character device.
 
     Returns a dict with keys: ok (bool), message (str), state (str | None).
     Uses ctypes + kernel ioctl — no external CLI tools or Python C extensions required.
+
+    If a Set HIGH/LOW hold is in progress via _gpio_write_line, the cancel event
+    is signalled first and the read is retried for up to ~300 ms to let the other
+    thread release the line before giving up with an EBUSY result.
     """
     try:
         pin_int = int(pin)
@@ -3952,35 +5247,53 @@ def diag_gpio_test(pin):
     # SENSE_LINE_PIN stores the BCM GPIO line offset, used directly.
     chip = chips[0]
 
-    try:
-        val = _gpio_read_line(chip, pin_int)
-        state = "HIGH" if val else "LOW"
-        return {
-            "ok": True,
-            "message": f"Pin {pin_int} on {chip} is {state}.",
-            "state": state,
-        }
-    except PermissionError:
-        return {
-            "ok": False,
-            "message": (
-                f"Permission denied reading GPIO pin {pin_int}. "
-                "Run ModernJVS as root or add the service user to the 'gpio' group."
-            ),
-            "state": None,
-        }
-    except OSError as e:
-        import errno as _errno
-        if e.errno == _errno.EBUSY:
+    # If a Set HIGH/LOW hold is active on another thread, signal it to release
+    # early and retry the read for up to ~300 ms (6 × 50 ms) before falling
+    # through to the normal EBUSY path.
+    _gpio_set_cancel.set()
+
+    import errno as _errno
+    last_err = None
+    for _attempt in range(7):
+        try:
+            val = _gpio_read_line(chip, pin_int)
+            _gpio_set_cancel.clear()
+            state = "HIGH" if val else "LOW"
             return {
                 "ok": True,
-                "message": (
-                    f"Pin {pin_int} is currently held by the ModernJVS daemon "
-                    "(sense line active). This is expected while the service is running."
-                ),
-                "state": "IN USE",
+                "message": f"Pin {pin_int} on {chip} is {state}.",
+                "state": state,
             }
-        return {"ok": False, "message": f"Error reading GPIO pin {pin_int}: {e}", "state": None}
+        except PermissionError:
+            _gpio_set_cancel.clear()
+            return {
+                "ok": False,
+                "message": (
+                    f"Permission denied reading GPIO pin {pin_int}. "
+                    "Run ModernJVS as root or add the service user to the 'gpio' group."
+                ),
+                "state": None,
+            }
+        except OSError as e:
+            if e.errno == _errno.EBUSY and _attempt < 6:
+                # Line still held — wait one polling tick then retry
+                time.sleep(0.05)
+                last_err = e
+                continue
+            last_err = e
+            break
+
+    _gpio_set_cancel.clear()
+    if last_err is not None and last_err.errno == _errno.EBUSY:
+        return {
+            "ok": True,
+            "message": (
+                f"Pin {pin_int} is currently held by the ModernJVS daemon "
+                "(sense line active). This is expected while the service is running."
+            ),
+            "state": "IN USE",
+        }
+    return {"ok": False, "message": f"Error reading GPIO pin {pin_int}: {last_err}", "state": None}
 
 
 # ---------------------------------------------------------------------------
@@ -4148,6 +5461,25 @@ BT_CONNECT_TIMEOUT = 20  # connection attempt timeout
 BT_INFO_TIMEOUT    = 10  # info / trust / remove commands
 BT_CONNECT_RETRY_DELAY = 2  # seconds to wait before retrying a failed connection attempt
 BT_CONNECT_MAX_RETRIES = 5  # number of automatic retries after an initial failed connect
+
+# Known RS-485 / serial adapter VID:PID → human-readable chip name.
+# Used by diag_usb_devices() to highlight adapters in the USB inspector.
+_USB_RS485_KNOWN = {
+    ("0403", "6001"): "FTDI FT232R",
+    ("0403", "6010"): "FTDI FT2232",
+    ("0403", "6011"): "FTDI FT4232",
+    ("0403", "6014"): "FTDI FT232H",
+    ("0403", "6015"): "FTDI FT-X",
+    ("1a86", "7523"): "CH340",
+    ("1a86", "55d4"): "CH343P",
+    ("10c4", "ea60"): "CP2102/CP2104",
+    ("10c4", "ea70"): "CP210x",
+    ("067b", "2303"): "PL2303",
+    ("04e2", "1410"): "XR21V1410",
+}
+
+# Kernel drivers that expose serial TTY nodes (/dev/ttyUSB* or /dev/ttyACM*).
+_USB_SERIAL_DRIVERS = {"ftdi_sio", "ch341", "cdc_acm", "cp210x", "xr_serial", "pl2303"}
 
 
 def _validate_bt_mac(mac):
@@ -4937,6 +6269,8 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
                 _glob.glob("/dev/ttyS*")
             )
             self._json({"ports": ports})
+        elif path == "/api/diag/usb/devices":
+            self._json(diag_usb_devices())
         else:
             self._not_found()
 
@@ -5242,6 +6576,30 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
                 device = read_config().get("DEVICE_PATH", "")
             self._json(diag_serial_test(device))
 
+        elif path == "/api/diag/jvs/probe":
+            try:
+                data = json.loads(body) if body else {}
+            except json.JSONDecodeError:
+                self._json({"error": "Invalid JSON"}, HTTPStatus.BAD_REQUEST)
+                return
+            device = data.get("device", "").strip()
+            if not device:
+                # Fall back to the currently configured DEVICE_PATH
+                device = read_config().get("DEVICE_PATH", "")
+            self._json(diag_jvs_probe(device))
+
+        elif path == "/api/diag/jvs/monitor":
+            try:
+                data = json.loads(body) if body else {}
+            except json.JSONDecodeError:
+                self._json({"error": "Invalid JSON"}, HTTPStatus.BAD_REQUEST)
+                return
+            device = data.get("device", "").strip()
+            if not device:
+                # Fall back to the currently configured DEVICE_PATH
+                device = read_config().get("DEVICE_PATH", "")
+            self._json(diag_jvs_monitor(device))
+
         elif path == "/api/diag/gpio":
             try:
                 data = json.loads(body) if body else {}
@@ -5253,6 +6611,22 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
                 # Fall back to the currently configured SENSE_LINE_PIN
                 pin = read_config().get("SENSE_LINE_PIN", "26")
             self._json(diag_gpio_test(pin))
+
+        elif path == "/api/diag/gpio/set":
+            try:
+                data = json.loads(body) if body else {}
+            except json.JSONDecodeError:
+                self._json({"error": "Invalid JSON"}, HTTPStatus.BAD_REQUEST)
+                return
+            pin      = data.get("pin", "")
+            level    = data.get("level", "")
+            duration = data.get("duration", 3)
+            if pin == "":
+                pin = read_config().get("SENSE_LINE_PIN", "26")
+            self._json(diag_gpio_set(pin, level, duration))
+
+        elif path == "/api/diag/gpio/cancel":
+            self._json(diag_gpio_cancel())
 
         else:
             self._not_found()
