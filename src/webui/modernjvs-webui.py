@@ -37,6 +37,12 @@ MAX_PROFILE_NAME_LENGTH = 64               # max filename length for profile fil
 MAX_PROFILE_CONTENT_CHARS = 65536         # max content length for profile writes
 INPUT_TEST_TIMEOUT_SECONDS = 60           # max duration for SSE input test stream
 
+# Log message strings emitted by jvs.c to track JVS connection state.
+# These must match the debug(0, ...) calls in src/jvs/jvs.c exactly.
+JVS_LOG_CONNECTED    = "JVS: Connection established"
+JVS_LOG_DISCONNECTED = "JVS: Connection reset"
+JVS_LOG_LOST         = "JVS: Connection lost"
+
 # Server-side WebUI settings persistence
 WEBUI_SETTINGS_PATH  = "/etc/modernjvs/webui-settings.json"
 WEBUI_PASSWORD_PATH  = "/etc/modernjvs/webui-password"
@@ -1098,6 +1104,7 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
         <div class="stat-card"><div class="val" id="currentIO2">—</div><div class="lbl">Secondary I/O</div></div>
         <div class="stat-card"><div class="val" id="currentGame">—</div><div class="lbl">Current Game</div></div>
         <div class="stat-card"><div class="val" id="currentDevice">—</div><div class="lbl">Device Path</div></div>
+        <div class="stat-card"><div class="val" id="jvsConnection">—</div><div class="lbl">JVS Connection</div></div>
       </div>
     </div>
 
@@ -1661,6 +1668,18 @@ async function refreshDashboard() {
   document.getElementById('currentIO2').textContent    = d.config?.emulate_second   || '—';
   document.getElementById('currentGame').textContent   = d.config?.game             || '—';
   document.getElementById('currentDevice').textContent = d.config?.device           || '—';
+
+  const jvsEl = document.getElementById('jvsConnection');
+  if (d.jvs_connected === true) {
+    jvsEl.textContent = 'Connected';
+    jvsEl.style.color = 'var(--green)';
+  } else if (d.active_state === 'active') {
+    jvsEl.textContent = 'Not connected';
+    jvsEl.style.color = 'var(--red)';
+  } else {
+    jvsEl.textContent = '—';
+    jvsEl.style.color = '';
+  }
 
   const players = d.players || [];
   const psEl = document.getElementById('playerSlots');
@@ -3491,6 +3510,40 @@ def get_player_slots():
     return [{"player": k, "profile": v} for k, v in sorted(players.items())]
 
 
+def get_jvs_connection_status():
+    """Determine JVS connection status from the most recent service run's logs.
+
+    Scans the service log for ``JVS: Connection established``,
+    ``JVS: Connection reset``, and ``JVS: Connection lost`` lines emitted by
+    jvs.c and returns the state based on which event appeared last.  Only the
+    most recent service start (identified by the last 'ModernJVS Version'
+    banner) is used so that stale entries from a previous run are not shown.
+
+    ``JVS: Connection reset`` is logged when the arcade machine sends CMD_RESET.
+    ``JVS: Connection lost`` is logged after 5 s of inactivity on an established
+    connection (e.g. arcade machine powered off without sending a reset).
+
+    Returns True if the JVS connection is currently established, False otherwise.
+    """
+    # 200 lines is enough to cover startup messages plus any connection events
+    # since the last 'ModernJVS Version' banner in a typical run.
+    logs = get_logs(200)
+    # Find index of the last service startup banner
+    start_idx = 0
+    for i in range(len(logs) - 1, -1, -1):
+        if "ModernJVS Version" in logs[i]:
+            start_idx = i
+            break
+
+    connected = False
+    for line in logs[start_idx:]:
+        if JVS_LOG_CONNECTED in line:
+            connected = True
+        elif JVS_LOG_DISCONNECTED in line or JVS_LOG_LOST in line:
+            connected = False
+    return connected
+
+
 def get_service_status():
     """Return a dict with service state information."""
     ok, out = systemctl("show", SERVICE_NAME,
@@ -3508,6 +3561,7 @@ def get_service_status():
         "active_since":  props.get("ActiveEnterTimestamp", ""),
         "config":        cfg,
         "players":       get_player_slots(),
+        "jvs_connected": get_jvs_connection_status(),
     }
 
 
