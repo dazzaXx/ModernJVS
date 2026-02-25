@@ -5217,6 +5217,10 @@ def diag_gpio_test(pin):
 
     Returns a dict with keys: ok (bool), message (str), state (str | None).
     Uses ctypes + kernel ioctl — no external CLI tools or Python C extensions required.
+
+    If a Set HIGH/LOW hold is in progress via _gpio_write_line, the cancel event
+    is signalled first and the read is retried for up to ~300 ms to let the other
+    thread release the line before giving up with an EBUSY result.
     """
     try:
         pin_int = int(pin)
@@ -5243,35 +5247,53 @@ def diag_gpio_test(pin):
     # SENSE_LINE_PIN stores the BCM GPIO line offset, used directly.
     chip = chips[0]
 
-    try:
-        val = _gpio_read_line(chip, pin_int)
-        state = "HIGH" if val else "LOW"
-        return {
-            "ok": True,
-            "message": f"Pin {pin_int} on {chip} is {state}.",
-            "state": state,
-        }
-    except PermissionError:
-        return {
-            "ok": False,
-            "message": (
-                f"Permission denied reading GPIO pin {pin_int}. "
-                "Run ModernJVS as root or add the service user to the 'gpio' group."
-            ),
-            "state": None,
-        }
-    except OSError as e:
-        import errno as _errno
-        if e.errno == _errno.EBUSY:
+    # If a Set HIGH/LOW hold is active on another thread, signal it to release
+    # early and retry the read for up to ~300 ms (6 × 50 ms) before falling
+    # through to the normal EBUSY path.
+    _gpio_set_cancel.set()
+
+    import errno as _errno
+    last_err = None
+    for _attempt in range(7):
+        try:
+            val = _gpio_read_line(chip, pin_int)
+            _gpio_set_cancel.clear()
+            state = "HIGH" if val else "LOW"
             return {
                 "ok": True,
-                "message": (
-                    f"Pin {pin_int} is currently held by the ModernJVS daemon "
-                    "(sense line active). This is expected while the service is running."
-                ),
-                "state": "IN USE",
+                "message": f"Pin {pin_int} on {chip} is {state}.",
+                "state": state,
             }
-        return {"ok": False, "message": f"Error reading GPIO pin {pin_int}: {e}", "state": None}
+        except PermissionError:
+            _gpio_set_cancel.clear()
+            return {
+                "ok": False,
+                "message": (
+                    f"Permission denied reading GPIO pin {pin_int}. "
+                    "Run ModernJVS as root or add the service user to the 'gpio' group."
+                ),
+                "state": None,
+            }
+        except OSError as e:
+            if e.errno == _errno.EBUSY and _attempt < 6:
+                # Line still held — wait one polling tick then retry
+                time.sleep(0.05)
+                last_err = e
+                continue
+            last_err = e
+            break
+
+    _gpio_set_cancel.clear()
+    if last_err is not None and last_err.errno == _errno.EBUSY:
+        return {
+            "ok": True,
+            "message": (
+                f"Pin {pin_int} is currently held by the ModernJVS daemon "
+                "(sense line active). This is expected while the service is running."
+            ),
+            "state": "IN USE",
+        }
+    return {"ok": False, "message": f"Error reading GPIO pin {pin_int}: {last_err}", "state": None}
 
 
 # ---------------------------------------------------------------------------
