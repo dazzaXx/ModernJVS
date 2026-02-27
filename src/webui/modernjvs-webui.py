@@ -35,6 +35,7 @@ MAX_SETTING_STRING_LENGTH = 64  # cap per string field in webui-settings.json
 MAX_PROFILE_UPLOAD_BYTES = 256 * 1024      # 256 KB hard cap for profile files
 MAX_PROFILE_NAME_LENGTH = 64               # max filename length for profile files
 MAX_PROFILE_CONTENT_CHARS = 65536         # max content length for profile writes
+MAX_POST_BODY_BYTES = 128 * 1024           # 128 KB hard cap for JSON POST request bodies
 INPUT_TEST_TIMEOUT_SECONDS = 60           # max duration for SSE input test stream
 
 # Log message strings emitted by jvs.c to track JVS connection state.
@@ -6372,7 +6373,12 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
     # ---- response helpers ----
 
     def _read_body(self):
-        length = int(self.headers.get("Content-Length", 0))
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+        except (ValueError, TypeError):
+            length = 0
+        if length < 0 or length > MAX_POST_BODY_BYTES:
+            return ""
         return self.rfile.read(length).decode("utf-8") if length else ""
 
     def _read_raw_body(self):
