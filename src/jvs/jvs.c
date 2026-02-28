@@ -513,6 +513,11 @@ JVSStatus processPacket(JVSIO *jvsIO)
 		{
 			debug(1, "CMD_REMAINING_PAYOUT - Returning payout status\n");
 			size = 2;
+			if (outputPacket.length + 5 > JVS_MAX_PACKET_SIZE)
+			{
+				debug(0, "Error: Output packet size exceeded in CMD_REMAINING_PAYOUT\n");
+				return JVS_STATUS_ERROR;
+			}
 			outputPacket.data[outputPacket.length] = REPORT_SUCCESS;
 			outputPacket.data[outputPacket.length + 1] = 0;
 			outputPacket.data[outputPacket.length + 2] = 0;
@@ -640,6 +645,9 @@ JVSStatus processPacket(JVSIO *jvsIO)
 			int i;
 			for (i = 0; i < 99; i++)
 			{
+				/* Prevent reading past end of the received packet data */
+				if (index + 1 + i >= (int)inputPacket.length - 1)
+					break;
 				idData[i] = (char)inputPacket.data[index + 1 + i];
 				size++;
 				if (!inputPacket.data[index + 1 + i])
@@ -657,6 +665,11 @@ JVSStatus processPacket(JVSIO *jvsIO)
 			debug(1, "CMD_READ_LIGHTGUN - Reading light gun position\n");
 			size = 2;
 
+			if (outputPacket.length + 5 > JVS_MAX_PACKET_SIZE)
+			{
+				debug(0, "Error: Output packet size exceeded in CMD_READ_LIGHTGUN\n");
+				return JVS_STATUS_ERROR;
+			}
 			int analogueXData = jvsIO->state.gunChannel[0] << jvsIO->gunXRestBits;
 			int analogueYData = jvsIO->state.gunChannel[1] << jvsIO->gunYRestBits;
 			outputPacket.data[outputPacket.length] = REPORT_SUCCESS;
@@ -683,6 +696,11 @@ JVSStatus processPacket(JVSIO *jvsIO)
 			// Read 8 bytes of memory
 			case 0x01:
 			{
+				if (outputPacket.length + 8 > JVS_MAX_PACKET_SIZE)
+				{
+					debug(0, "Error: Output packet size exceeded in CMD_NAMCO_SPECIFIC 0x01\n");
+					return JVS_STATUS_ERROR;
+				}
 				for (int i = 0; i < 8; i++)
 					outputPacket.data[outputPacket.length++] = 0xFF;
 			}
@@ -691,6 +709,11 @@ JVSStatus processPacket(JVSIO *jvsIO)
 			// Read the program date
 			case 0x02:
 			{
+				if (outputPacket.length + 8 > JVS_MAX_PACKET_SIZE)
+				{
+					debug(0, "Error: Output packet size exceeded in CMD_NAMCO_SPECIFIC 0x02\n");
+					return JVS_STATUS_ERROR;
+				}
 				// 1998 October 26th at 12:00:00 (Unsure what last 00 is)
 				unsigned char programDate[] = {0x19, 0x98, 0x10, 0x26, 0x12, 0x00, 0x00, 0x00};
 				memcpy(&outputPacket.data[outputPacket.length], programDate, 8);

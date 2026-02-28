@@ -3404,10 +3404,16 @@ def write_config(new_values):
     for api_key, directive in key_map.items():
         if api_key in new_values:
             val = new_values[api_key]
-            if directive in _optional_directives and not str(val).strip():
+            # Reject values containing newlines or carriage returns to prevent
+            # config line injection — none of the supported directives accept
+            # multi-line values.
+            val_str = str(val)
+            if '\n' in val_str or '\r' in val_str:
+                return False, f"Value for '{api_key}' must not contain newline characters."
+            if directive in _optional_directives and not val_str.strip():
                 _remove_directives.add(directive)
             else:
-                updates[directive] = val
+                updates[directive] = val_str
 
     try:
         with open(CONFIG_PATH, "r") as f:
