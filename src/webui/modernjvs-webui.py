@@ -1357,6 +1357,10 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
           <tbody id="btPairedBody"><tr><td colspan="4" style="color:var(--muted)">Loading…</td></tr></tbody>
         </table>
         </div>
+        <div style="margin-top:0.75rem;">
+          <button class="btn btn-xs" id="btSupTimeoutBtn" onclick="btSetSupervisionTimeout()">&#x23F1; Set 3s Supervision Timeout</button>
+          <span style="font-size:0.8rem;color:var(--muted);margin-left:0.5rem;">Reduces disconnect detection time to 3 seconds for all active connections.</span>
+        </div>
       </div>
 
       <div id="btScanSection" style="margin-top:1.25rem;padding-top:1rem;border-top:1px solid var(--border);">
@@ -2624,6 +2628,34 @@ async function btConnect(mac, btn) {
     showAlert('btAlert', '✓ Connected successfully.', false);
   }
   await loadBluetoothPaired();
+}
+
+async function btSetSupervisionTimeout() {
+  const btn = document.getElementById('btSupTimeoutBtn');
+  const btAlert = document.getElementById('btAlert');
+  btn.disabled = true;
+  btn.textContent = '⏳ Applying…';
+
+  const d = await api('/api/bluetooth/set_supervision_timeout', {method: 'POST'});
+
+  btn.disabled = false;
+  btn.innerHTML = '&#x23F1; Set 3s Supervision Timeout';
+
+  if (d.error) {
+    btAlert.innerText = '✗ ' + d.error;
+    btAlert.className = 'alert err';
+    btAlert.style.whiteSpace = '';
+    btAlert.style.display = 'block';
+    return;
+  }
+  const lines = (d.output || []).join('\n');
+  const isPartial = !!d.partial;
+  btAlert.innerText = isPartial
+    ? '⚠ Some connections could not be updated.\n\n' + lines
+    : (d.count === 0 ? lines : '✓ Supervision timeout set for ' + d.count + ' connection(s).\n\n' + lines);
+  btAlert.className = 'alert ' + (isPartial ? 'err' : 'ok');
+  btAlert.style.whiteSpace = 'pre-wrap';
+  btAlert.style.display = 'block';
 }
 
 function downloadLogs() {
@@ -5728,6 +5760,109 @@ def setup_usb_bluetooth():
     return {"ok": True, "reboot_needed": reboot_needed, "output": output_lines}
 
 
+def set_bluetooth_supervision_timeout():
+    """Apply a 3-second link supervision timeout to all active Bluetooth connections.
+
+    BR/EDR (ACL) connections use ``hcitool lst <address> 4800``
+    (4800 × 0.625 ms = 3 s).
+    LE connections use ``hcitool lecup <handle> 6 12 0 300``
+    (300 × 10 ms = 3 s, with low-latency 7.5–15 ms connection intervals).
+
+    Returns {"ok": True, "output": [...lines], "count": N} on success, or
+    {"ok": True, "partial": True, "output": [...lines]} if some connections
+    could not be updated, or {"error": ...} on a hard failure.
+    """
+    supervision_timeout_bredr = 4800  # 3 s in 0.625 ms BR/EDR slots
+    supervision_timeout_le    = 300   # 3 s in 10 ms LE units
+    le_interval_min = 6
+    le_interval_max = 12
+    le_latency      = 0
+
+    if not shutil.which("hcitool"):
+        return {"error": "hcitool not found. Please install bluez: sudo apt install bluez"}
+
+    try:
+        r = subprocess.run(
+            ["hcitool", "con"],
+            capture_output=True, text=True, timeout=5,
+        )
+    except Exception as e:
+        return {"error": f"Failed to list connections: {e}"}
+
+    output_lines = []
+    failed = False
+    count = 0
+
+    for line in r.stdout.splitlines():
+        # Lines look like:
+        #   < ACL XX:XX:XX:XX:XX:XX handle N state 1 lm MASTER  (BR/EDR)
+        #   < LE  XX:XX:XX:XX:XX:XX handle N state 1 lm MASTER  (LE)
+        parts = line.split()
+        if len(parts) < 5 or parts[0] != '<' or "handle" not in parts:
+            continue
+        try:
+            handle_idx = parts.index("handle")
+            if handle_idx + 1 >= len(parts):
+                continue
+            conn_type = parts[1]   # "ACL" or "LE"
+            address   = parts[2]
+            handle    = parts[handle_idx + 1]
+        except (IndexError, ValueError):
+            continue
+
+        if not _validate_bt_mac(address):
+            output_lines.append(f"⚠ Skipping connection with unexpected address format: {address}")
+            continue
+
+        try:
+            if conn_type == "ACL":
+                sub = subprocess.run(
+                    ["hcitool", "lst", address, str(supervision_timeout_bredr)],
+                    capture_output=True, text=True, timeout=5,
+                )
+                if sub.returncode == 0:
+                    output_lines.append(
+                        f"✓ Set supervision timeout to 3 s for {address} (handle {handle}) [BR/EDR]"
+                    )
+                    count += 1
+                else:
+                    output_lines.append(
+                        f"✗ Failed for {address} [BR/EDR]: {(sub.stdout + sub.stderr).strip()}"
+                    )
+                    failed = True
+            elif conn_type == "LE":
+                sub = subprocess.run(
+                    ["hcitool", "lecup", handle,
+                     str(le_interval_min), str(le_interval_max),
+                     str(le_latency), str(supervision_timeout_le)],
+                    capture_output=True, text=True, timeout=5,
+                )
+                if sub.returncode == 0:
+                    output_lines.append(
+                        f"✓ Set supervision timeout to 3 s for {address} (handle {handle}) [LE]"
+                    )
+                    count += 1
+                else:
+                    output_lines.append(
+                        f"✗ Failed for {address} [LE]: {(sub.stdout + sub.stderr).strip()}"
+                    )
+                    failed = True
+            else:
+                output_lines.append(
+                    f"⚠ Skipping unknown connection type '{conn_type}' for {address}"
+                )
+        except Exception as e:
+            output_lines.append(f"✗ Error processing {address}: {e}")
+            failed = True
+
+    if count == 0 and not failed:
+        output_lines.append("No active Bluetooth connections found.")
+
+    if failed:
+        return {"ok": True, "partial": True, "output": output_lines}
+    return {"ok": True, "output": output_lines, "count": count}
+
+
 class WebUIHandler(http.server.BaseHTTPRequestHandler):
     """Simple HTTP handler that serves the WebUI and its JSON API."""
 
@@ -6144,6 +6279,9 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
 
         elif path == "/api/bluetooth/setup_usb":
             self._json(setup_usb_bluetooth())
+
+        elif path == "/api/bluetooth/set_supervision_timeout":
+            self._json(set_bluetooth_supervision_timeout())
 
         elif path == "/api/webui/password":
             try:
