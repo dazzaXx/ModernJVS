@@ -10,8 +10,10 @@ import hmac
 import ipaddress
 import json
 import os
+import pty
 import re
 import secrets
+import select
 import shutil
 import subprocess
 import threading
@@ -484,6 +486,9 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>ModernJVS WebUI</title>
 <link rel="icon" type="image/png" href="__STICKS__">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5/css/xterm.css"/>
+<script src="https://cdn.jsdelivr.net/npm/xterm@5/lib/xterm.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10/lib/addon-fit.js"></script>
 <style>
   :root {
     --bg:      #0d0d14;
@@ -1078,6 +1083,7 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
     <button class="tab" onclick="showTab('devices', this)">Devices</button>
     <button class="tab" onclick="showTab('diagnostics', this)">&#x26A0; Diagnostics</button>
     <button class="tab" onclick="showTab('webui-settings', this)">&#9881; WebUI Settings</button>
+    <button class="tab" onclick="showTab('terminal', this)">&#128279; Terminal</button>
   </div>
 
   <!-- ====== DASHBOARD ====== -->
@@ -1605,8 +1611,36 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
       <button class="btn btn-refresh" onclick="resetAppearanceSettings()">&#8635; Reset to Defaults</button>
     </div>
   </div>
-</div>
 
+  <!-- ====== TERMINAL ====== -->
+  <div id="panel-terminal" class="panel" style="padding:0 1rem 1rem;">
+    <div class="card">
+      <h2>&#128279; SSH Terminal</h2>
+      <div class="settings-grid" style="grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:0.75rem;margin-bottom:1rem;">
+        <div class="settings-field">
+          <label>Host</label>
+          <input type="text" id="termHost" value="localhost" maxlength="253" style="width:100%;padding:0.4rem 0.6rem;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);">
+        </div>
+        <div class="settings-field">
+          <label>Port</label>
+          <input type="number" id="termPort" value="22" min="1" max="65535" style="width:100%;padding:0.4rem 0.6rem;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);">
+        </div>
+        <div class="settings-field">
+          <label>Username</label>
+          <input type="text" id="termUser" value="pi" maxlength="64" style="width:100%;padding:0.4rem 0.6rem;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);">
+        </div>
+      </div>
+      <div class="control-row" style="margin-bottom:0.75rem;">
+        <button class="btn btn-start" id="termConnectBtn" onclick="termConnect()">&#9654; Connect</button>
+        <button class="btn btn-stop"  id="termDisconnectBtn" onclick="termDisconnect()" style="display:none;">&#9632; Disconnect</button>
+      </div>
+      <div id="termMsg" style="font-size:0.85rem;min-height:1.2em;margin-bottom:0.5rem;color:var(--muted);"></div>
+    </div>
+    <div class="card" style="padding:0;">
+      <div id="terminal-container" style="width:100%;height:420px;background:#000;border-radius:var(--radius);overflow:hidden;"></div>
+    </div>
+  </div>
+</div>
 <footer><span>ModernJVS <span id="footerVer" class="footer-ver"></span>WebUI &mdash; <a href="https://github.com/dazzaXx/ModernJVS" target="_blank">github.com/dazzaXx/ModernJVS</a></span>
 <div id="footerSysInfo" style="display:none;font-size:0.75rem;color:var(--muted);"></div>
 <div id="footerPiModel" style="display:none;font-size:0.75rem;color:var(--muted);"></div>
@@ -3263,6 +3297,69 @@ api('/api/version').then(d => {
     if (footerVer) footerVer.textContent = 'v' + d.version + ' ';
   }
 });
+
+// ---- SSH Terminal ----
+let _term = null;
+let _termWs = null;
+let _termFit = null;
+
+function _termEnsureInit() {
+  if (_term) return;
+  const container = document.getElementById('terminal-container');
+  if (typeof Terminal === 'undefined' || !container) return;
+  _term = new Terminal({ cursorBlink: true, fontSize: 14, fontFamily: 'monospace' });
+  if (typeof FitAddon !== 'undefined') {
+    _termFit = new FitAddon();
+    _term.loadAddon(_termFit);
+  }
+  _term.open(container);
+  if (_termFit) _termFit.fit();
+  window.addEventListener('resize', () => { if (_termFit) _termFit.fit(); });
+}
+
+function termConnect() {
+  _termEnsureInit();
+  if (!_term) { document.getElementById('termMsg').textContent = 'xterm.js not loaded yet — check internet connectivity.'; return; }
+  const host = document.getElementById('termHost').value.trim() || 'localhost';
+  const port = parseInt(document.getElementById('termPort').value) || 22;
+  const user = document.getElementById('termUser').value.trim() || 'pi';
+  const wsUrl = `ws://${location.hostname}:${location.port || 8080}/terminal/ws?host=${encodeURIComponent(host)}&port=${port}&user=${encodeURIComponent(user)}`;
+  document.getElementById('termMsg').textContent = 'Connecting…';
+  _termWs = new WebSocket(wsUrl);
+  _termWs.binaryType = 'arraybuffer';
+  _termWs.onopen = () => {
+    document.getElementById('termMsg').textContent = '';
+    document.getElementById('termConnectBtn').style.display = 'none';
+    document.getElementById('termDisconnectBtn').style.display = '';
+    _term.focus();
+    if (_termFit) _termFit.fit();
+  };
+  _termWs.onmessage = (ev) => {
+    if (ev.data instanceof ArrayBuffer) {
+      _term.write(new Uint8Array(ev.data));
+    } else {
+      _term.write(ev.data);
+    }
+  };
+  _termWs.onclose = (ev) => {
+    document.getElementById('termMsg').textContent = 'Disconnected' + (ev.reason ? ': ' + ev.reason : '.');
+    document.getElementById('termConnectBtn').style.display = '';
+    document.getElementById('termDisconnectBtn').style.display = 'none';
+    _termWs = null;
+  };
+  _termWs.onerror = () => {
+    document.getElementById('termMsg').textContent = 'WebSocket error — see browser console.';
+  };
+  _term.onData(data => {
+    if (_termWs && _termWs.readyState === WebSocket.OPEN) _termWs.send(data);
+  });
+}
+
+function termDisconnect() {
+  if (_termWs) { _termWs.close(); _termWs = null; }
+  document.getElementById('termConnectBtn').style.display = '';
+  document.getElementById('termDisconnectBtn').style.display = 'none';
+}
 </script>
 </body>
 </html>
@@ -6004,6 +6101,8 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
             self._json({"ports": ports})
         elif path == "/api/diag/usb/devices":
             self._json(diag_usb_devices())
+        elif path == "/terminal/ws":
+            self._handle_terminal_ws(query)
         else:
             self._not_found()
 
@@ -6413,6 +6512,176 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
             self._json({"ok": True, "size": len(raw)})
         except OSError as e:
             self._json({"error": str(e)}, HTTPStatus.INTERNAL_SERVER_ERROR)
+
+    def _handle_terminal_ws(self, query):
+        """Upgrade the connection to a WebSocket and proxy an SSH session."""
+        # ---- Validate SSH target host ----
+        host = query.get("host", ["localhost"])[0]
+        try:
+            port = int(query.get("port", ["22"])[0])
+            if port < 1 or port > 65535:
+                raise ValueError
+        except ValueError:
+            port = 22
+        user = query.get("user", [os.environ.get("USER", "pi")])[0]
+        # Strip characters unsafe for shell args
+        if not re.fullmatch(r"[A-Za-z0-9._@-]{1,253}", host):
+            self._access_denied(self.client_address[0])
+            return
+        if not re.fullmatch(r"[A-Za-z0-9._-]{1,64}", user):
+            self._access_denied(self.client_address[0])
+            return
+        # Only allow private/local SSH targets
+        if not is_private_ip(host) and host != "localhost":
+            self._access_denied(self.client_address[0])
+            return
+
+        # ---- WebSocket handshake (RFC 6455) ----
+        key = self.headers.get("Sec-WebSocket-Key", "")
+        if not key:
+            self.send_response(HTTPStatus.BAD_REQUEST)
+            self.send_header("Content-Length", 0)
+            self.end_headers()
+            return
+        magic = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+        accept = base64.b64encode(
+            hashlib.sha1((key + magic).encode()).digest()
+        ).decode()
+        self.send_response(101, "Switching Protocols")
+        self.send_header("Upgrade", "websocket")
+        self.send_header("Connection", "Upgrade")
+        self.send_header("Sec-WebSocket-Accept", accept)
+        self.end_headers()
+        self.wfile.flush()
+
+        audit_log("SSH terminal connect", f"{user}@{host}:{port}", ip=self.client_address[0])
+
+        # ---- Spawn SSH via PTY ----
+        master_fd, slave_fd = pty.openpty()
+        try:
+            proc = subprocess.Popen(
+                ["ssh", "-tt", "-o", "StrictHostKeyChecking=accept-new",
+                 "-p", str(port), f"{user}@{host}"],
+                stdin=slave_fd, stdout=slave_fd, stderr=slave_fd,
+                close_fds=True,
+            )
+        except OSError:
+            os.close(master_fd)
+            os.close(slave_fd)
+            return
+        os.close(slave_fd)
+
+        sock = self.request
+        sock.setblocking(False)
+
+        def _ws_send(data: bytes):
+            """Frame *data* as a binary WebSocket frame and write it."""
+            hdr = bytearray()
+            hdr.append(0x82)  # FIN + opcode=binary
+            length = len(data)
+            if length < 126:
+                hdr.append(length)
+            elif length < 65536:
+                hdr.append(126)
+                hdr += struct.pack(">H", length)
+            else:
+                hdr.append(127)
+                hdr += struct.pack(">Q", length)
+            try:
+                sock.sendall(bytes(hdr) + data)
+            except OSError:
+                pass
+
+        def _ws_recv_frame(buf: bytearray):
+            """Parse the first complete WebSocket frame from *buf*.
+
+            Returns (opcode, payload_bytes, remaining_buf) or None if incomplete.
+            """
+            if len(buf) < 2:
+                return None
+            b0, b1 = buf[0], buf[1]
+            masked = bool(b1 & 0x80)
+            length = b1 & 0x7F
+            offset = 2
+            if length == 126:
+                if len(buf) < 4:
+                    return None
+                length = struct.unpack_from(">H", buf, 2)[0]
+                offset = 4
+            elif length == 127:
+                if len(buf) < 10:
+                    return None
+                length = struct.unpack_from(">Q", buf, 2)[0]
+                offset = 10
+            mask_len = 4 if masked else 0
+            if len(buf) < offset + mask_len + length:
+                return None
+            mask = buf[offset:offset + mask_len]
+            offset += mask_len
+            payload = bytearray(buf[offset:offset + length])
+            if masked:
+                for i in range(len(payload)):
+                    payload[i] ^= mask[i % 4]
+            remaining = buf[offset + length:]
+            opcode = b0 & 0x0F
+            return opcode, bytes(payload), bytearray(remaining)
+
+        recv_buf = bytearray()
+        done = False
+        try:
+            while not done:
+                rlist = [master_fd, sock]
+                try:
+                    readable, _, _ = select.select(rlist, [], [], 0.05)
+                except (ValueError, OSError):
+                    break
+
+                # PTY → WebSocket
+                if master_fd in readable:
+                    try:
+                        data = os.read(master_fd, 4096)
+                    except OSError:
+                        break
+                    if data:
+                        _ws_send(data)
+
+                # WebSocket → PTY
+                if sock in readable:
+                    try:
+                        chunk = sock.recv(4096)
+                    except BlockingIOError:
+                        chunk = b""
+                    except OSError:
+                        break
+                    if not chunk:
+                        break
+                    recv_buf += chunk
+                    while True:
+                        result = _ws_recv_frame(recv_buf)
+                        if result is None:
+                            break
+                        opcode, payload, recv_buf = result
+                        if opcode == 0x8:   # close
+                            done = True
+                            break
+                        if opcode in (0x1, 0x2) and payload:
+                            try:
+                                os.write(master_fd, payload)
+                            except OSError:
+                                done = True
+                                break
+
+                if proc.poll() is not None:
+                    break
+        finally:
+            try:
+                proc.terminate()
+            except OSError:
+                pass
+            try:
+                os.close(master_fd)
+            except OSError:
+                pass
 
     def _send_html(self, html):
         data = html.encode("utf-8")
