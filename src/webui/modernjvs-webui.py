@@ -6646,20 +6646,15 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
 def _apply_supervision_timeout_for_connection(conn_type, address, handle):
     """Apply a 3-second link supervision timeout to a single Bluetooth connection.
 
+    For LE connections where a valid HCI handle is available, ``hcitool lecup``
+    is used.  For all other connections (BR/EDR ACL or LE without a handle),
+    ``hcitool lst <address>`` is used — it takes the device address and does not
+    require the HCI handle.
+
     Returns True on success, False on failure.
     """
     try:
-        if conn_type == "ACL":
-            sub = subprocess.run(
-                ["hcitool", "lst", address, str(BT_SUPERVISION_TIMEOUT_BREDR)],
-                capture_output=True, text=True, timeout=5,
-            )
-            if sub.returncode == 0:
-                print(f"[webui] BT supervision: set 3 s timeout for {address} (handle {handle}) [BR/EDR]", flush=True)
-                return True
-            else:
-                print(f"[webui] BT supervision: failed for {address} [BR/EDR]: {(sub.stdout + sub.stderr).strip()}", flush=True)
-        elif conn_type == "LE":
+        if conn_type == "LE" and handle and handle != "?":
             sub = subprocess.run(
                 ["hcitool", "lecup", handle,
                  str(BT_SUPERVISION_LE_INTERVAL_MIN), str(BT_SUPERVISION_LE_INTERVAL_MAX),
@@ -6671,54 +6666,106 @@ def _apply_supervision_timeout_for_connection(conn_type, address, handle):
                 return True
             else:
                 print(f"[webui] BT supervision: failed for {address} [LE]: {(sub.stdout + sub.stderr).strip()}", flush=True)
+        else:
+            # ACL (BR/EDR) or LE without a known handle: hcitool lst takes the
+            # device address directly and does not require the connection handle.
+            sub = subprocess.run(
+                ["hcitool", "lst", address, str(BT_SUPERVISION_TIMEOUT_BREDR)],
+                capture_output=True, text=True, timeout=5,
+            )
+            if sub.returncode == 0:
+                handle_info = f" (handle {handle})" if handle and handle != "?" else ""
+                print(f"[webui] BT supervision: set 3 s timeout for {address}{handle_info} [BR/EDR]", flush=True)
+                return True
+            else:
+                print(f"[webui] BT supervision: failed for {address} [BR/EDR]: {(sub.stdout + sub.stderr).strip()}", flush=True)
     except Exception as e:
         print(f"[webui] BT supervision: error processing {address}: {e}", flush=True)
     return False
+
+
+def _hcitool_connection_info():
+    """Return a dict mapping Bluetooth address → (conn_type, handle) from
+    ``hcitool con``.
+
+    This is a best-effort call; an empty dict is returned on any failure so
+    that callers can fall back gracefully.
+    """
+    info = {}
+    if not shutil.which("hcitool"):
+        return info
+    try:
+        r = subprocess.run(
+            ["hcitool", "con"],
+            capture_output=True, text=True, timeout=5,
+        )
+        for line in r.stdout.splitlines():
+            parts = line.split()
+            # Minimum valid line: "< ACL/LE <address> handle <N>" = 5 tokens
+            if len(parts) < 5 or parts[0] != '<' or "handle" not in parts:
+                continue
+            try:
+                handle_idx = parts.index("handle")
+                if handle_idx + 1 >= len(parts):
+                    continue
+                conn_type = parts[1]
+                address   = parts[2]
+                handle    = parts[handle_idx + 1]
+            except (IndexError, ValueError):
+                continue
+            if _validate_bt_mac(address):
+                info[address] = (conn_type, handle)
+    except Exception:
+        pass
+    return info
 
 
 def _supervision_timeout_loop():
     """Background thread: watch for new Bluetooth connections and apply the
     3-second link supervision timeout immediately when each device connects.
 
-    Polls ``hcitool con`` every second and applies the timeout only to handles
-    that have not been processed yet.  When a device disconnects its handle is
-    removed from the seen-set so that a reconnect is handled correctly.
+    ``bluetoothctl devices Connected`` is the primary detection method — it is
+    the modern BlueZ API and works reliably on all systems including those
+    where ``bluetoothd`` holds the HCI device exclusively.  ``hcitool con`` is
+    called as a secondary, best-effort source to obtain the connection type
+    (ACL/LE) and HCI handle for LE devices.
+
+    The seen-set tracks MAC addresses.  When a device disconnects its address
+    is removed so that a reconnect is handled correctly.
     """
-    if not shutil.which("hcitool"):
+    if not shutil.which("bluetoothctl") or not shutil.which("hcitool"):
         return
 
-    # Set of (address, conn_type, handle) tuples that have been processed.
+    # Set of MAC addresses whose supervision timeout has been applied.
     seen = set()
 
     while True:
         try:
             r = subprocess.run(
-                ["hcitool", "con"],
+                ["bluetoothctl", "devices", "Connected"],
                 capture_output=True, text=True, timeout=5,
             )
             current = set()
             for line in r.stdout.splitlines():
-                parts = line.split()
-                # Minimum valid line: "< ACL/LE <address> handle <N>" = 5 tokens
-                if len(parts) < 5 or parts[0] != '<' or "handle" not in parts:
+                m = _BT_DEVICE_RE.match(line.strip())
+                if not m:
                     continue
-                try:
-                    handle_idx = parts.index("handle")
-                    if handle_idx + 1 >= len(parts):
-                        continue
-                    conn_type = parts[1]
-                    address   = parts[2]
-                    handle    = parts[handle_idx + 1]
-                except (IndexError, ValueError):
-                    continue
-                if not _validate_bt_mac(address):
-                    continue
-                key = (address, conn_type, handle)
-                current.add(key)
-                if key not in seen:
+                address = m.group(1)
+                if _validate_bt_mac(address):
+                    current.add(address)
+
+            new_addresses = current - seen
+            if new_addresses:
+                # Fetch HCI details only when there are new devices to handle.
+                hci_info = _hcitool_connection_info()
+                for address in new_addresses:
+                    conn_type, handle = hci_info.get(address, ("ACL", "?"))
+                    if address not in hci_info:
+                        print(f"[webui] BT supervision: no HCI info for {address}, assuming BR/EDR", flush=True)
                     if _apply_supervision_timeout_for_connection(conn_type, address, handle):
-                        seen.add(key)
-            # Forget handles that have disconnected so reconnects are processed.
+                        seen.add(address)
+
+            # Forget disconnected devices so reconnects are processed.
             seen &= current
         except Exception as e:
             print(f"[webui] WARNING: BT supervision watch error: {e}", flush=True)
