@@ -290,7 +290,7 @@ JVSStatus processPacket(JVSIO *jvsIO)
 			JVSIO *ioToAssign = jvsIO;
 			while (ioToAssign->chainedIO != NULL && ioToAssign->chainedIO->deviceID == -1)
 			{
-				ioToAssign = jvsIO->chainedIO;
+				ioToAssign = ioToAssign->chainedIO;
 			}
 
 			ioToAssign->deviceID = inputPacket.data[index + 1];
@@ -372,11 +372,23 @@ JVSStatus processPacket(JVSIO *jvsIO)
 			size = 3;
 			debug(1, "CMD_READ_SWITCHES - Players: %d, Switches: %d\n", 
 				inputPacket.data[index + 1], inputPacket.data[index + 2]);
+			// Bounds check before writing the 2-byte header (REPORT_SUCCESS + system switch byte)
+			if (outputPacket.length + 2 > JVS_MAX_PACKET_SIZE)
+			{
+				debug(0, "Error: Output packet size exceeded in CMD_READ_SWITCHES\n");
+				return JVS_STATUS_ERROR;
+			}
 			outputPacket.data[outputPacket.length] = REPORT_SUCCESS;
 			outputPacket.data[outputPacket.length + 1] = jvsIO->state.inputSwitch[0];
 			outputPacket.length += 2;
 			for (int i = 0; i < inputPacket.data[index + 1]; i++)
 			{
+				// Bounds check to prevent inputSwitch array overflow
+				if (i + 1 >= JVS_MAX_STATE_SIZE)
+				{
+					debug(0, "Error: Player index out of bounds in CMD_READ_SWITCHES\n");
+					return JVS_STATUS_ERROR;
+				}
 				for (int j = 0; j < inputPacket.data[index + 2]; j++)
 				{
 					// Bounds check to prevent buffer overflow
@@ -484,8 +496,14 @@ JVSStatus processPacket(JVSIO *jvsIO)
 			int numberBytes = inputPacket.data[index + 1];
 			debug(1, "CMD_READ_GPI - Reading %d byte(s) of GPI data\n", numberBytes);
 			outputPacket.data[outputPacket.length++] = REPORT_SUCCESS;
-			for (int i = 0; i < inputPacket.data[index + 1]; i++)
+			for (int i = 0; i < numberBytes; i++)
 			{
+				// Bounds check to prevent buffer overflow
+				if (outputPacket.length + 1 > JVS_MAX_PACKET_SIZE)
+				{
+					debug(0, "Error: Output packet size exceeded in CMD_READ_GPI\n");
+					return JVS_STATUS_ERROR;
+				}
 				outputPacket.data[outputPacket.length++] = 0x00;
 			}
 		}
@@ -495,6 +513,11 @@ JVSStatus processPacket(JVSIO *jvsIO)
 		{
 			debug(1, "CMD_REMAINING_PAYOUT - Returning payout status\n");
 			size = 2;
+			if (outputPacket.length + 5 > JVS_MAX_PACKET_SIZE)
+			{
+				debug(0, "Error: Output packet size exceeded in CMD_REMAINING_PAYOUT\n");
+				return JVS_STATUS_ERROR;
+			}
 			outputPacket.data[outputPacket.length] = REPORT_SUCCESS;
 			outputPacket.data[outputPacket.length + 1] = 0;
 			outputPacket.data[outputPacket.length + 2] = 0;
@@ -565,6 +588,13 @@ JVSStatus processPacket(JVSIO *jvsIO)
 			int coin_increment = ((int)(inputPacket.data[index + 3]) | ((int)(inputPacket.data[index + 2]) << 8));
 			debug(1, "CMD_WRITE_COINS - Slot %d, incrementing by %d\n", slot_index + 1, coin_increment);
 
+			/* Validate slot index to prevent out-of-bounds array access */
+			if (slot_index < 0 || slot_index >= JVS_MAX_STATE_SIZE)
+			{
+				debug(0, "Error: Slot index out of bounds in CMD_WRITE_COINS\n");
+				return JVS_STATUS_ERROR;
+			}
+
 			outputPacket.data[outputPacket.length++] = REPORT_SUCCESS;
 
 			/* Prevent overflow of coins */
@@ -590,6 +620,13 @@ JVSStatus processPacket(JVSIO *jvsIO)
 			int coin_decrement = ((int)(inputPacket.data[index + 3]) | ((int)(inputPacket.data[index + 2]) << 8));
 			debug(1, "CMD_DECREASE_COINS - Slot %d, decrementing by %d\n", slot_index + 1, coin_decrement);
 
+			/* Validate slot index to prevent out-of-bounds array access */
+			if (slot_index < 0 || slot_index >= JVS_MAX_STATE_SIZE)
+			{
+				debug(0, "Error: Slot index out of bounds in CMD_DECREASE_COINS\n");
+				return JVS_STATUS_ERROR;
+			}
+
 			outputPacket.data[outputPacket.length++] = REPORT_SUCCESS;
 
 			/* Prevent underflow of coins */
@@ -608,6 +645,9 @@ JVSStatus processPacket(JVSIO *jvsIO)
 			int i;
 			for (i = 0; i < 99; i++)
 			{
+				/* Prevent reading past end of the received packet data */
+				if (index + 1 + i >= (int)inputPacket.length - 1)
+					break;
 				idData[i] = (char)inputPacket.data[index + 1 + i];
 				size++;
 				if (!inputPacket.data[index + 1 + i])
@@ -625,6 +665,11 @@ JVSStatus processPacket(JVSIO *jvsIO)
 			debug(1, "CMD_READ_LIGHTGUN - Reading light gun position\n");
 			size = 2;
 
+			if (outputPacket.length + 5 > JVS_MAX_PACKET_SIZE)
+			{
+				debug(0, "Error: Output packet size exceeded in CMD_READ_LIGHTGUN\n");
+				return JVS_STATUS_ERROR;
+			}
 			int analogueXData = jvsIO->state.gunChannel[0] << jvsIO->gunXRestBits;
 			int analogueYData = jvsIO->state.gunChannel[1] << jvsIO->gunYRestBits;
 			outputPacket.data[outputPacket.length] = REPORT_SUCCESS;
@@ -651,6 +696,11 @@ JVSStatus processPacket(JVSIO *jvsIO)
 			// Read 8 bytes of memory
 			case 0x01:
 			{
+				if (outputPacket.length + 8 > JVS_MAX_PACKET_SIZE)
+				{
+					debug(0, "Error: Output packet size exceeded in CMD_NAMCO_SPECIFIC 0x01\n");
+					return JVS_STATUS_ERROR;
+				}
 				for (int i = 0; i < 8; i++)
 					outputPacket.data[outputPacket.length++] = 0xFF;
 			}
@@ -659,6 +709,11 @@ JVSStatus processPacket(JVSIO *jvsIO)
 			// Read the program date
 			case 0x02:
 			{
+				if (outputPacket.length + 8 > JVS_MAX_PACKET_SIZE)
+				{
+					debug(0, "Error: Output packet size exceeded in CMD_NAMCO_SPECIFIC 0x02\n");
+					return JVS_STATUS_ERROR;
+				}
 				// 1998 October 26th at 12:00:00 (Unsure what last 00 is)
 				unsigned char programDate[] = {0x19, 0x98, 0x10, 0x26, 0x12, 0x00, 0x00, 0x00};
 				memcpy(&outputPacket.data[outputPacket.length], programDate, 8);
