@@ -56,6 +56,16 @@ static void *watchdogThread(void *_args)
         sleep(TIME_POLL_DEVICES);
     }
 
+    // If an input thread detected a device error (e.g. ENODEV/EIO on Bluetooth
+    // disconnect) and called setThreadsRunning(0), the loop above exits without
+    // having set *args->running.  Ensure the main loop is signaled to
+    // reinitialize, unless the main loop is already stopping (running != 1).
+    if (*args->running == 1)
+    {
+        debug(1, "Watchdog: Input thread signaled stop, triggering reinitialization\n");
+        *args->running = 0;
+    }
+
     if (_args != NULL)
     {
         free(_args);
