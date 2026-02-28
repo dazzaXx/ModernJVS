@@ -5291,6 +5291,13 @@ BT_INFO_TIMEOUT    = 10  # info / trust / remove commands
 BT_CONNECT_RETRY_DELAY = 2  # seconds to wait before retrying a failed connection attempt
 BT_CONNECT_MAX_RETRIES = 5  # number of automatic retries after an initial failed connect
 
+# Link supervision timeout constants applied to all active Bluetooth connections.
+BT_SUPERVISION_TIMEOUT_BREDR = 4800  # 3 s in 0.625 ms BR/EDR slots
+BT_SUPERVISION_TIMEOUT_LE    = 300   # 3 s in 10 ms LE units
+BT_SUPERVISION_LE_INTERVAL_MIN = 6
+BT_SUPERVISION_LE_INTERVAL_MAX = 12
+BT_SUPERVISION_LE_LATENCY      = 0
+
 # Known RS-485 / serial adapter VID:PID → human-readable chip name.
 # Used by diag_usb_devices() to highlight adapters in the USB inspector.
 _USB_RS485_KNOWN = {
@@ -5802,12 +5809,6 @@ def set_bluetooth_supervision_timeout():
     {"ok": True, "partial": True, "output": [...lines]} if some connections
     could not be updated, or {"error": ...} on a hard failure.
     """
-    supervision_timeout_bredr = 4800  # 3 s in 0.625 ms BR/EDR slots
-    supervision_timeout_le    = 300   # 3 s in 10 ms LE units
-    le_interval_min = 6
-    le_interval_max = 12
-    le_latency      = 0
-
     if not shutil.which("hcitool"):
         return {"error": "hcitool not found. Please install bluez: sudo apt install bluez"}
 
@@ -5847,7 +5848,7 @@ def set_bluetooth_supervision_timeout():
         try:
             if conn_type == "ACL":
                 sub = subprocess.run(
-                    ["hcitool", "lst", address, str(supervision_timeout_bredr)],
+                    ["hcitool", "lst", address, str(BT_SUPERVISION_TIMEOUT_BREDR)],
                     capture_output=True, text=True, timeout=5,
                 )
                 if sub.returncode == 0:
@@ -5863,8 +5864,8 @@ def set_bluetooth_supervision_timeout():
             elif conn_type == "LE":
                 sub = subprocess.run(
                     ["hcitool", "lecup", handle,
-                     str(le_interval_min), str(le_interval_max),
-                     str(le_latency), str(supervision_timeout_le)],
+                     str(BT_SUPERVISION_LE_INTERVAL_MIN), str(BT_SUPERVISION_LE_INTERVAL_MAX),
+                     str(BT_SUPERVISION_LE_LATENCY), str(BT_SUPERVISION_TIMEOUT_LE)],
                     capture_output=True, text=True, timeout=5,
                 )
                 if sub.returncode == 0:
@@ -6642,14 +6643,86 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
 # Entry point
 # ---------------------------------------------------------------------------
 
+def _apply_supervision_timeout_for_connection(conn_type, address, handle):
+    """Apply a 3-second link supervision timeout to a single Bluetooth connection.
+
+    Returns True on success, False on failure.
+    """
+    try:
+        if conn_type == "ACL":
+            sub = subprocess.run(
+                ["hcitool", "lst", address, str(BT_SUPERVISION_TIMEOUT_BREDR)],
+                capture_output=True, text=True, timeout=5,
+            )
+            if sub.returncode == 0:
+                print(f"[webui] BT supervision: set 3 s timeout for {address} (handle {handle}) [BR/EDR]", flush=True)
+                return True
+            else:
+                print(f"[webui] BT supervision: failed for {address} [BR/EDR]: {(sub.stdout + sub.stderr).strip()}", flush=True)
+        elif conn_type == "LE":
+            sub = subprocess.run(
+                ["hcitool", "lecup", handle,
+                 str(BT_SUPERVISION_LE_INTERVAL_MIN), str(BT_SUPERVISION_LE_INTERVAL_MAX),
+                 str(BT_SUPERVISION_LE_LATENCY), str(BT_SUPERVISION_TIMEOUT_LE)],
+                capture_output=True, text=True, timeout=5,
+            )
+            if sub.returncode == 0:
+                print(f"[webui] BT supervision: set 3 s timeout for {address} (handle {handle}) [LE]", flush=True)
+                return True
+            else:
+                print(f"[webui] BT supervision: failed for {address} [LE]: {(sub.stdout + sub.stderr).strip()}", flush=True)
+    except Exception as e:
+        print(f"[webui] BT supervision: error processing {address}: {e}", flush=True)
+    return False
+
+
 def _supervision_timeout_loop():
-    """Background thread: apply BT supervision timeout every 30 s automatically."""
+    """Background thread: watch for new Bluetooth connections and apply the
+    3-second link supervision timeout immediately when each device connects.
+
+    Polls ``hcitool con`` every second and applies the timeout only to handles
+    that have not been processed yet.  When a device disconnects its handle is
+    removed from the seen-set so that a reconnect is handled correctly.
+    """
+    if not shutil.which("hcitool"):
+        return
+
+    # Set of (address, conn_type, handle) tuples that have been processed.
+    seen = set()
+
     while True:
         try:
-            set_bluetooth_supervision_timeout()
+            r = subprocess.run(
+                ["hcitool", "con"],
+                capture_output=True, text=True, timeout=5,
+            )
+            current = set()
+            for line in r.stdout.splitlines():
+                parts = line.split()
+                # Minimum valid line: "< ACL/LE <address> handle <N>" = 5 tokens
+                if len(parts) < 5 or parts[0] != '<' or "handle" not in parts:
+                    continue
+                try:
+                    handle_idx = parts.index("handle")
+                    if handle_idx + 1 >= len(parts):
+                        continue
+                    conn_type = parts[1]
+                    address   = parts[2]
+                    handle    = parts[handle_idx + 1]
+                except (IndexError, ValueError):
+                    continue
+                if not _validate_bt_mac(address):
+                    continue
+                key = (address, conn_type, handle)
+                current.add(key)
+                if key not in seen:
+                    if _apply_supervision_timeout_for_connection(conn_type, address, handle):
+                        seen.add(key)
+            # Forget handles that have disconnected so reconnects are processed.
+            seen &= current
         except Exception as e:
-            print(f"[webui] WARNING: supervision timeout apply failed: {e}", flush=True)
-        time.sleep(30)
+            print(f"[webui] WARNING: BT supervision watch error: {e}", flush=True)
+        time.sleep(1)
 
 
 def main():
