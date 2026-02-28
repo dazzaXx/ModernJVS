@@ -110,7 +110,16 @@ static void *wiiDeviceThread(void *_args)
         if (select(fd + 1, &file_descriptor, NULL, NULL, &tv) < 1)
             continue;
 
-        if (read(fd, &event, sizeof(event)) == sizeof(event))
+        ssize_t wiiBytes = read(fd, &event, sizeof(event));
+        int wiiReadErrno = errno;
+        /* ENODEV/EIO are returned when the Bluetooth device has disconnected */
+        if (wiiBytes < 0 && (wiiReadErrno == ENODEV || wiiReadErrno == EIO))
+        {
+            debug(1, "Wii Remote disconnected (errno %d), triggering reinitialization\n", wiiReadErrno);
+            setThreadsRunning(0);
+            break;
+        }
+        if (wiiBytes == (ssize_t)sizeof(event))
         {
             switch (event.type)
             {
@@ -307,7 +316,16 @@ static void *deviceThread(void *_args)
         if (select(fd + 1, &file_descriptor, NULL, NULL, &tv) < 1)
             continue;
 
-        if (read(fd, &event, sizeof(event)) == sizeof(event))
+        ssize_t bytes = read(fd, &event, sizeof(event));
+        int readErrno = errno;
+        /* ENODEV/EIO are returned when the Bluetooth device has disconnected */
+        if (bytes < 0 && (readErrno == ENODEV || readErrno == EIO))
+        {
+            debug(1, "Device disconnected (errno %d), triggering reinitialization\n", readErrno);
+            setThreadsRunning(0);
+            break;
+        }
+        if (bytes == (ssize_t)sizeof(event))
         {
             switch (event.type)
             {
