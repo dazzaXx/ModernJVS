@@ -272,6 +272,11 @@ try:
 except (KeyError, AttributeError):
     _DEFAULT_TERM_USER = os.environ.get("USER", os.environ.get("LOGNAME", "pi"))
 
+# How long to wait for SSH's password prompt before giving up auto-injection.
+_SSH_PASS_PROMPT_TIMEOUT = 10.0
+# How long to wait for the browser's initial password init message.
+_WS_INIT_TIMEOUT = 5.0
+
 def is_private_ip(addr):
     """Return True if addr is a private/local address that should be allowed.
 
@@ -1651,6 +1656,10 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
         <div class="settings-field">
           <label>Username</label>
           <input type="text" id="termUser" value="__TERMUSER__" maxlength="64" style="width:100%;padding:0.4rem 0.6rem;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);">
+        </div>
+        <div class="settings-field">
+          <label>Password</label>
+          <input type="password" id="termPass" maxlength="128" autocomplete="current-password" style="width:100%;padding:0.4rem 0.6rem;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);">
         </div>
       </div>
       <div class="control-row" style="margin-bottom:0.75rem;">
@@ -3366,11 +3375,15 @@ function termConnect() {
   const host = document.getElementById('termHost').value.trim() || 'localhost';
   const port = parseInt(document.getElementById('termPort').value) || 22;
   const user = document.getElementById('termUser').value.trim() || 'pi';
+  const pass = document.getElementById('termPass').value;
   const wsUrl = `ws://${location.hostname}:${location.port || 8080}/terminal/ws?host=${encodeURIComponent(host)}&port=${port}&user=${encodeURIComponent(user)}`;
   document.getElementById('termMsg').textContent = 'Connecting…';
   _termWs = new WebSocket(wsUrl);
   _termWs.binaryType = 'arraybuffer';
   _termWs.onopen = () => {
+    // Send password as the first message (NUL-prefixed so server can
+    // distinguish it from keystrokes).  Empty string means no password.
+    _termWs.send('\x00' + pass);
     document.getElementById('termMsg').textContent = '';
     document.getElementById('termConnectBtn').style.display = 'none';
     document.getElementById('termDisconnectBtn').style.display = '';
@@ -6687,6 +6700,67 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
 
         recv_buf = bytearray()
         done = False
+
+        # ---- Read password from first WS message (NUL-prefixed init frame) ----
+        # The browser sends '\x00' + password as its very first message so the
+        # password never appears in the WebSocket URL or server logs.
+        password = ""
+        init_deadline = time.monotonic() + _WS_INIT_TIMEOUT
+        while time.monotonic() < init_deadline:
+            try:
+                r, _, _ = select.select([sock], [], [], 0.1)
+            except (ValueError, OSError):
+                done = True
+                break
+            if r:
+                try:
+                    chunk = sock.recv(4096)
+                except OSError:
+                    done = True
+                    break
+                if not chunk:
+                    done = True
+                    break
+                recv_buf += chunk
+                result = _ws_recv_frame(recv_buf)
+                if result is not None:
+                    opcode, payload, recv_buf = result
+                    if opcode == 0x8:
+                        done = True
+                    elif opcode in (0x1, 0x2) and payload[:1] == b"\x00":
+                        password = payload[1:].decode("utf-8", errors="replace")
+                    break
+
+        # ---- Auto-inject password when SSH prompts ----
+        if password and not done:
+            prompt_buf = b""
+            deadline = time.monotonic() + _SSH_PASS_PROMPT_TIMEOUT
+            while time.monotonic() < deadline:
+                try:
+                    r, _, _ = select.select([master_fd], [], [], 0.1)
+                except (ValueError, OSError):
+                    break
+                if r:
+                    try:
+                        data = os.read(master_fd, 4096)
+                    except OSError:
+                        done = True
+                        break
+                    if data:
+                        prompt_buf += data
+                        _ws_send(data)
+                        # SSH prompts end with " password: " (e.g. "root@host's password: ")
+                        if prompt_buf.lower().endswith(b" password: "):
+                            try:
+                                os.write(master_fd, password.encode("utf-8") + b"\r")
+                            except OSError:
+                                done = True
+                            password = None
+                            break
+                if proc.poll() is not None:
+                    done = True
+                    break
+
         try:
             while not done:
                 rlist = [master_fd, sock]
