@@ -107,8 +107,17 @@ static void *wiiDeviceThread(void *_args)
         tv.tv_sec = 0;
         tv.tv_usec = 2 * 1000L;
 
-        if (select(fd + 1, &file_descriptor, NULL, NULL, &tv) < 1)
-            continue;
+        int wiiSelRet = select(fd + 1, &file_descriptor, NULL, NULL, &tv);
+        if (wiiSelRet == 0) continue;
+        if (wiiSelRet < 0)
+        {
+            /* EINTR means interrupted by a signal — safe to retry */
+            if (errno == EINTR) continue;
+            /* Any other select() error means the fd is no longer usable */
+            debug(1, "Wii Remote select() error (errno %d), triggering reinitialization\n", errno);
+            setThreadsRunning(0);
+            break;
+        }
 
         ssize_t wiiBytes = read(fd, &event, sizeof(event));
         int wiiReadErrno = errno;
@@ -313,8 +322,17 @@ static void *deviceThread(void *_args)
         tv.tv_sec = 0;
         tv.tv_usec = 2 * 1000L;
 
-        if (select(fd + 1, &file_descriptor, NULL, NULL, &tv) < 1)
-            continue;
+        int selRet = select(fd + 1, &file_descriptor, NULL, NULL, &tv);
+        if (selRet == 0) continue;
+        if (selRet < 0)
+        {
+            /* EINTR means interrupted by a signal — safe to retry */
+            if (errno == EINTR) continue;
+            /* Any other select() error means the fd is no longer usable */
+            debug(1, "Device select() error (errno %d), triggering reinitialization\n", errno);
+            setThreadsRunning(0);
+            break;
+        }
 
         ssize_t bytes = read(fd, &event, sizeof(event));
         int readErrno = errno;

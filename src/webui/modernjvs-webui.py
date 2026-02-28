@@ -1697,8 +1697,9 @@ async function refreshDashboard() {
   ).join('');
   // Poll faster when controllers are disconnected or JVS is not yet connected
   // so the UI reflects changes promptly in both directions.
+  // Use 3 s even when players are connected so a disconnect is shown quickly.
   const jvsWaiting = d.active_state === 'active' && d.jvs_connected !== true;
-  _dashTimer = setTimeout(refreshDashboard, (players.length > 0 && !jvsWaiting) ? 10000 : 2000);
+  _dashTimer = setTimeout(refreshDashboard, (players.length > 0 && !jvsWaiting) ? 3000 : 2000);
 }
 
 async function refreshSysinfo() {
