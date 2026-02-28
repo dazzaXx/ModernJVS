@@ -1357,10 +1357,6 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
           <tbody id="btPairedBody"><tr><td colspan="4" style="color:var(--muted)">Loading…</td></tr></tbody>
         </table>
         </div>
-        <div style="margin-top:0.75rem;">
-          <button class="btn btn-xs" id="btSupTimeoutBtn" onclick="btSetSupervisionTimeout()">&#x23F1; Set 3s Supervision Timeout</button>
-          <span style="font-size:0.8rem;color:var(--muted);margin-left:0.5rem;">Reduces disconnect detection time to 3 seconds for all active connections.</span>
-        </div>
       </div>
 
       <div id="btScanSection" style="margin-top:1.25rem;padding-top:1rem;border-top:1px solid var(--border);">
@@ -2628,34 +2624,6 @@ async function btConnect(mac, btn) {
     showAlert('btAlert', '✓ Connected successfully.', false);
   }
   await loadBluetoothPaired();
-}
-
-async function btSetSupervisionTimeout() {
-  const btn = document.getElementById('btSupTimeoutBtn');
-  const btAlert = document.getElementById('btAlert');
-  btn.disabled = true;
-  btn.textContent = '⏳ Applying…';
-
-  const d = await api('/api/bluetooth/set_supervision_timeout', {method: 'POST'});
-
-  btn.disabled = false;
-  btn.innerHTML = '&#x23F1; Set 3s Supervision Timeout';
-
-  if (d.error) {
-    btAlert.innerText = '✗ ' + d.error;
-    btAlert.className = 'alert err';
-    btAlert.style.whiteSpace = '';
-    btAlert.style.display = 'block';
-    return;
-  }
-  const lines = (d.output || []).join('\n');
-  const isPartial = !!d.partial;
-  btAlert.innerText = isPartial
-    ? '⚠ Some connections could not be updated.\n\n' + lines
-    : (d.count === 0 ? lines : '✓ Supervision timeout set for ' + d.count + ' connection(s).\n\n' + lines);
-  btAlert.className = 'alert ' + (isPartial ? 'err' : 'ok');
-  btAlert.style.whiteSpace = 'pre-wrap';
-  btAlert.style.display = 'block';
 }
 
 function downloadLogs() {
@@ -6674,7 +6642,19 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
 # Entry point
 # ---------------------------------------------------------------------------
 
+def _supervision_timeout_loop():
+    """Background thread: apply BT supervision timeout every 30 s automatically."""
+    while True:
+        try:
+            set_bluetooth_supervision_timeout()
+        except Exception as e:
+            print(f"[webui] WARNING: supervision timeout apply failed: {e}", flush=True)
+        time.sleep(30)
+
+
 def main():
+    t = threading.Thread(target=_supervision_timeout_loop, daemon=True)
+    t.start()
     server = http.server.ThreadingHTTPServer(("0.0.0.0", WEBUI_PORT), WebUIHandler)
     print(f"ModernJVS WebUI running on http://0.0.0.0:{WEBUI_PORT}")
     try:
