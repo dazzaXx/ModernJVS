@@ -3494,9 +3494,15 @@ def get_player_slots():
     service start (identified by the last 'ModernJVS Version' banner) is used
     so that stale entries from a previous run are not shown.
 
+    If controllers are subsequently disconnected (indicated by a
+    ``Controllers:     None`` or ``No controllers detected`` log line appearing
+    after the last player assignment), an empty list is returned so the UI
+    reflects the current disconnected state rather than stale assignments.
+
     Returns a list of dicts: [{"player": int, "profile": str}, ...]
     """
-    logs = get_logs(200)
+    since = _get_service_active_since()
+    logs = get_logs(since=since) if since else get_logs(200)
     # Find index of the last service startup banner
     start_idx = 0
     for i in range(len(logs) - 1, -1, -1):
@@ -3509,11 +3515,22 @@ def get_player_slots():
     #   Player 1 (Fixed via config):  sony-dualshock4
     _player_re = re.compile(r'Player\s+(\d+)(?:\s+\([^)]*\))?\s*:\s+(\S[^\n]*)')
     players = {}
-    for line in logs[start_idx:]:
+    last_player_idx = -1
+    last_no_controllers_idx = -1
+    for idx, line in enumerate(logs[start_idx:], start=start_idx):
         m = _player_re.search(line)
         if m:
             num = int(m.group(1))
             players[num] = m.group(2).strip()
+            last_player_idx = idx
+        if "Controllers:     None" in line or "No controllers detected" in line:
+            last_no_controllers_idx = idx
+
+    # If the most recent reinit cycle reported no controllers (after the last
+    # player assignment), return an empty list to reflect the disconnected state.
+    if last_no_controllers_idx > last_player_idx:
+        return []
+
     return [{"player": k, "profile": v} for k, v in sorted(players.items())]
 
 
@@ -3530,11 +3547,14 @@ def get_jvs_connection_status():
     ``JVS: Connection lost`` is logged after 5 s of inactivity on an established
     connection (e.g. arcade machine powered off without sending a reset).
 
+    Uses the service's active start timestamp (``--since``) rather than a fixed
+    line count so that debug-mode log flooding does not hide the connection
+    events from the query window.
+
     Returns True if the JVS connection is currently established, False otherwise.
     """
-    # 200 lines is enough to cover startup messages plus any connection events
-    # since the last 'ModernJVS Version' banner in a typical run.
-    logs = get_logs(200)
+    since = _get_service_active_since()
+    logs = get_logs(since=since) if since else get_logs(200)
     # Find index of the last service startup banner
     start_idx = 0
     for i in range(len(logs) - 1, -1, -1):
@@ -3572,21 +3592,31 @@ def get_service_status():
     }
 
 
-def get_logs(lines=100):
+def get_logs(lines=100, since=None):
     """Return recent log lines for the modernjvs service.
 
     Tries journalctl first (works on Raspberry Pi OS and DietPi with journald).
     Falls back to grepping syslog files on systems without a persistent journal
     (e.g. DietPi configured with volatile-only journald or syslog-only logging).
+
+    If ``since`` is provided it is passed to journalctl as ``--since`` so that
+    all entries from that timestamp onward are returned regardless of volume
+    (useful when debug mode floods the journal and a fixed line-count window
+    would miss the service startup messages).  When ``since`` is used the
+    ``lines`` parameter is ignored for the journalctl path.
     """
     lines_count = int(lines)
     lines_str = str(lines_count)
 
     # Primary: journalctl (systemd journal – works on RPiOS and most DietPi setups)
     try:
+        cmd = ["journalctl", "-u", SERVICE_NAME, "--no-pager", "--output=short-iso"]
+        if since:
+            cmd += ["--since", since]
+        else:
+            cmd += ["-n", lines_str]
         result = subprocess.run(
-            ["journalctl", "-u", SERVICE_NAME, "-n", lines_str,
-             "--no-pager", "--output=short-iso"],
+            cmd,
             capture_output=True, text=True, timeout=15
         )
         if result.returncode == 0 and result.stdout.strip():
@@ -3613,6 +3643,23 @@ def get_logs(lines=100):
             continue
 
     return [f"No log source found. Run:  journalctl -u {SERVICE_NAME}  to check manually."]
+
+
+def _get_service_active_since():
+    """Return the ActiveEnterTimestamp for the modernjvs service, or None.
+
+    Returns the timestamp string that can be passed directly to journalctl
+    ``--since`` to retrieve all log entries from the current service run.
+    Returns None if the timestamp cannot be determined (e.g. service inactive).
+    """
+    ok, out = systemctl("show", SERVICE_NAME, "--property=ActiveEnterTimestamp")
+    if not ok:
+        return None
+    for line in out.splitlines():
+        if line.startswith("ActiveEnterTimestamp="):
+            ts = line.split("=", 1)[1].strip()
+            return ts if ts else None
+    return None
 
 
 # Module-level CPU sampling state for delta calculation between API calls
@@ -5149,9 +5196,11 @@ def get_version():
             ["modernjvs", "--version"],
             capture_output=True, text=True, timeout=5
         )
-        ver = (result.stdout + result.stderr).strip()
-        if ver:
-            return ver
+        # Take the last non-empty line so that any warning messages printed
+        # before the version number (e.g. the debug-mode warning) are ignored.
+        lines = [l.strip() for l in (result.stdout + result.stderr).splitlines() if l.strip()]
+        if lines:
+            return lines[-1]
     except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
         pass
     return "unknown"
