@@ -1651,9 +1651,15 @@ function showAlert(id, msg, isErr) {
 }
 
 // ---- Dashboard ----
+let _dashTimer = null;
 async function refreshDashboard() {
+  clearTimeout(_dashTimer);
   const d = await api('/api/status');
-  if (d.error) { showAlert('dashAlert', 'Error: ' + d.error, true); return; }
+  if (d.error) {
+    showAlert('dashAlert', 'Error: ' + d.error, true);
+    _dashTimer = setTimeout(refreshDashboard, 10000);
+    return;
+  }
 
   const dot  = document.getElementById('statusDot');
   const txt  = document.getElementById('statusText');
@@ -1689,6 +1695,10 @@ async function refreshDashboard() {
   psEl.innerHTML = [1, 2, 3, 4].map(n =>
     `<div class="stat-card"><div class="val" style="font-size:0.85rem;word-break:break-all;">${_escHtml(playerMap[n] || 'Not assigned')}</div><div class="lbl">Player ${n}</div></div>`
   ).join('');
+  // Poll faster when controllers are disconnected or JVS is not yet connected
+  // so the UI reflects changes promptly in both directions.
+  const jvsWaiting = d.active_state === 'active' && d.jvs_connected !== true;
+  _dashTimer = setTimeout(refreshDashboard, (players.length > 0 && !jvsWaiting) ? 10000 : 2000);
 }
 
 async function refreshSysinfo() {
@@ -3251,7 +3261,6 @@ api('/api/webui/settings').then(s => {
 });
 refreshDashboard();
 refreshSysinfo();
-setInterval(refreshDashboard, 10000);
 setInterval(refreshSysinfo, 5000);
 
 // Fetch version once and show in header badge (desktop) and footer (mobile)
