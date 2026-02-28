@@ -110,6 +110,14 @@ if(ENABLE_WEBUI)
         COMPONENT ${PROJECT_NAME}
         DESTINATION "/usr/share/modernjvs/"
     )
+
+    install(FILES
+        ${CMAKE_SOURCE_DIR}/src/webui/xterm.js
+        ${CMAKE_SOURCE_DIR}/src/webui/xterm.css
+        ${CMAKE_SOURCE_DIR}/src/webui/addon-fit.js
+        COMPONENT ${PROJECT_NAME}
+        DESTINATION "/usr/share/modernjvs/"
+    )
 else()
     message(STATUS "WebUI: disabled")
 endif()
