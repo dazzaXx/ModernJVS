@@ -3251,7 +3251,7 @@ api('/api/webui/settings').then(s => {
 });
 refreshDashboard();
 refreshSysinfo();
-setInterval(refreshDashboard, 10000);
+setInterval(refreshDashboard, 3000);
 setInterval(refreshSysinfo, 5000);
 
 // Fetch version once and show in header badge (desktop) and footer (mobile)
