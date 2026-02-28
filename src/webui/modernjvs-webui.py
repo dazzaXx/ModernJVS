@@ -3251,7 +3251,7 @@ api('/api/webui/settings').then(s => {
 });
 refreshDashboard();
 refreshSysinfo();
-setInterval(refreshDashboard, 3000);
+setInterval(refreshDashboard, 2000);
 setInterval(refreshSysinfo, 5000);
 
 // Fetch version once and show in header badge (desktop) and footer (mobile)
@@ -3486,7 +3486,7 @@ def systemctl(*args):
         return False, str(e)
 
 
-def get_player_slots():
+def get_player_slots(logs=None):
     """Parse player slot assignments from the most recent service run's logs.
 
     Scans the service log for ``Player N:`` lines emitted by initInputs()
@@ -3499,10 +3499,14 @@ def get_player_slots():
     after the last player assignment), an empty list is returned so the UI
     reflects the current disconnected state rather than stale assignments.
 
+    ``logs`` may be passed in to avoid a redundant journalctl call when the
+    caller has already fetched the log lines.
+
     Returns a list of dicts: [{"player": int, "profile": str}, ...]
     """
-    since = _get_service_active_since()
-    logs = get_logs(since=since) if since else get_logs(200)
+    if logs is None:
+        since = _get_service_active_since()
+        logs = get_logs(since=since) if since else get_logs(200)
     # Find index of the last service startup banner
     start_idx = 0
     for i in range(len(logs) - 1, -1, -1):
@@ -3534,7 +3538,7 @@ def get_player_slots():
     return [{"player": k, "profile": v} for k, v in sorted(players.items())]
 
 
-def get_jvs_connection_status():
+def get_jvs_connection_status(logs=None):
     """Determine JVS connection status from the most recent service run's logs.
 
     Scans the service log for ``JVS: Connection established``,
@@ -3551,10 +3555,14 @@ def get_jvs_connection_status():
     line count so that debug-mode log flooding does not hide the connection
     events from the query window.
 
+    ``logs`` may be passed in to avoid a redundant journalctl call when the
+    caller has already fetched the log lines.
+
     Returns True if the JVS connection is currently established, False otherwise.
     """
-    since = _get_service_active_since()
-    logs = get_logs(since=since) if since else get_logs(200)
+    if logs is None:
+        since = _get_service_active_since()
+        logs = get_logs(since=since) if since else get_logs(200)
     # Find index of the last service startup banner
     start_idx = 0
     for i in range(len(logs) - 1, -1, -1):
@@ -3581,14 +3589,19 @@ def get_service_status():
             k, _, v = line.partition("=")
             props[k.strip()] = v.strip()
 
+    # Fetch logs once and share between player-slot and JVS-status parsing so
+    # that journalctl is only invoked once per /api/status request.
+    since = props.get("ActiveEnterTimestamp") or None
+    logs = get_logs(since=since) if since else get_logs(200)
+
     cfg = config_to_api(read_config())
     return {
         "active_state":  props.get("ActiveState", "unknown"),
         "main_pid":      props.get("MainPID", ""),
         "active_since":  props.get("ActiveEnterTimestamp", ""),
         "config":        cfg,
-        "players":       get_player_slots(),
-        "jvs_connected": get_jvs_connection_status(),
+        "players":       get_player_slots(logs=logs),
+        "jvs_connected": get_jvs_connection_status(logs=logs),
     }
 
 
