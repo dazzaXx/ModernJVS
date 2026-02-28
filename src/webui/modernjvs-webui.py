@@ -5292,7 +5292,7 @@ BT_CONNECT_RETRY_DELAY = 2  # seconds to wait before retrying a failed connectio
 BT_CONNECT_MAX_RETRIES = 5  # number of automatic retries after an initial failed connect
 
 # Link supervision timeout constants applied to all active Bluetooth connections.
-BT_SUPERVISION_TIMEOUT_BREDR = 4800  # 3 s in 0.625 ms BR/EDR slots
+BT_SUPERVISION_TIMEOUT_BREDR = 1000  # 0.625 s in 0.625 ms BR/EDR slots
 BT_SUPERVISION_TIMEOUT_LE    = 300   # 3 s in 10 ms LE units
 BT_SUPERVISION_LE_INTERVAL_MIN = 6
 BT_SUPERVISION_LE_INTERVAL_MAX = 12
