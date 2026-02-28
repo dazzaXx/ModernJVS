@@ -3494,9 +3494,51 @@ def get_player_slots():
     service start (identified by the last 'ModernJVS Version' banner) is used
     so that stale entries from a previous run are not shown.
 
+    In debug mode the service emits hundreds of lines per second (one per JVS
+    packet), which would push startup messages out of a fixed-size tail window.
+    Use journalctl --grep to retrieve only the lines we care about.
+
     Returns a list of dicts: [{"player": int, "profile": str}, ...]
     """
-    logs = get_logs(200)
+    grep_pattern = "ModernJVS Version|Player "
+    logs = None
+
+    try:
+        result = subprocess.run(
+            ["journalctl", "-u", SERVICE_NAME, "--no-pager",
+             "--output=short-iso", "--grep", grep_pattern],
+            capture_output=True, text=True, timeout=15
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            logs = result.stdout.splitlines()
+    except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
+        pass
+
+    if logs is None:
+        # Fallback: read syslog files and filter manually
+        syslog_paths = [
+            "/var/log/syslog",
+            "/var/log/daemon.log",
+            "/var/log/messages",
+        ]
+        for path in syslog_paths:
+            try:
+                result = subprocess.run(
+                    ["grep", SERVICE_NAME, path],
+                    capture_output=True, text=True, timeout=10
+                )
+                if result.returncode == 0 and result.stdout.strip():
+                    logs = [
+                        l for l in result.stdout.splitlines()
+                        if re.search(grep_pattern, l)
+                    ]
+                    break
+            except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
+                continue
+
+    if not logs:
+        return []
+
     # Find index of the last service startup banner
     start_idx = 0
     for i in range(len(logs) - 1, -1, -1):
@@ -3532,9 +3574,50 @@ def get_jvs_connection_status():
 
     Returns True if the JVS connection is currently established, False otherwise.
     """
-    # 200 lines is enough to cover startup messages plus any connection events
-    # since the last 'ModernJVS Version' banner in a typical run.
-    logs = get_logs(200)
+    # In debug mode the service can emit hundreds of lines per second (one per
+    # JVS packet), which would quickly push the connection events and the
+    # startup banner out of a fixed-size tail window.  Use journalctl --grep to
+    # retrieve only the lines we care about so the result is correct regardless
+    # of the debug log volume.
+    grep_pattern = "ModernJVS Version|JVS: Connection"
+    logs = None
+
+    try:
+        result = subprocess.run(
+            ["journalctl", "-u", SERVICE_NAME, "--no-pager",
+             "--output=short-iso", "--grep", grep_pattern],
+            capture_output=True, text=True, timeout=15
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            logs = result.stdout.splitlines()
+    except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
+        pass
+
+    if logs is None:
+        # Fallback: read syslog files and filter manually
+        syslog_paths = [
+            "/var/log/syslog",
+            "/var/log/daemon.log",
+            "/var/log/messages",
+        ]
+        for path in syslog_paths:
+            try:
+                result = subprocess.run(
+                    ["grep", SERVICE_NAME, path],
+                    capture_output=True, text=True, timeout=10
+                )
+                if result.returncode == 0 and result.stdout.strip():
+                    logs = [
+                        l for l in result.stdout.splitlines()
+                        if re.search(grep_pattern, l)
+                    ]
+                    break
+            except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
+                continue
+
+    if not logs:
+        return False
+
     # Find index of the last service startup banner
     start_idx = 0
     for i in range(len(logs) - 1, -1, -1):
@@ -5149,9 +5232,11 @@ def get_version():
             ["modernjvs", "--version"],
             capture_output=True, text=True, timeout=5
         )
-        ver = (result.stdout + result.stderr).strip()
-        if ver:
-            return ver
+        # Take the last non-empty line to avoid capturing any warning messages
+        # that may be printed before the version number (e.g. debug mode warning)
+        lines = [l.strip() for l in (result.stdout + result.stderr).splitlines() if l.strip()]
+        if lines:
+            return lines[-1]
     except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
         pass
     return "unknown"

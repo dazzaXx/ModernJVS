@@ -35,11 +35,9 @@ int main(int argc, char **argv)
         printf("Warning: No valid config file found, defaults are being used\n");
     }
 
-    /* Initialise the debug output */
-    initDebug(config.debugLevel);
-
-    /* Get the correct game output mapping */
-    JVSCLIStatus argumentsStatus = parseArguments(argc, argv, config.defaultGamePath);
+    /* Get the correct game output mapping before debug init so that
+     * --version and --help exit cleanly without printing the debug warning */
+    JVSCLIStatus argumentsStatus = parseArguments(argc, argv, config.defaultGamePath, &config.debugLevel);
     switch (argumentsStatus)
     {
     case JVS_CLI_STATUS_ERROR:
@@ -53,6 +51,9 @@ int main(int argc, char **argv)
     default:
         break;
     }
+
+    /* Initialise the debug output */
+    initDebug(config.debugLevel);
 
     debug(0, "ModernJVS Version %s\n\n", PROJECT_VER);
 

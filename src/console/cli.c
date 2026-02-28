@@ -394,7 +394,7 @@ static JVSCLIStatus printListing(void)
  * @param map Pointer to a char array holding the map name
  * @returns The status of the action performed
  **/
-JVSCLIStatus parseArguments(int argc, char **argv, char *map)
+JVSCLIStatus parseArguments(int argc, char **argv, char *map, int *debugLevel)
 {
     // If there are no arguments simply continue
     if (argc <= 1)
@@ -431,7 +431,7 @@ JVSCLIStatus parseArguments(int argc, char **argv, char *map)
     }
     else if (strcmp(argv[1], "--debug") == 0)
     {
-        initDebug(1);
+        *debugLevel = 1;
         return JVS_CLI_STATUS_SUCCESS_CONTINUE;
     }
     else if (strcmp(argv[1], "--edit") == 0)

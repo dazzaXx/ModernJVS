@@ -8,6 +8,6 @@ typedef enum
     JVS_CLI_STATUS_SUCCESS_CONTINUE,
 } JVSCLIStatus;
 
-JVSCLIStatus parseArguments(int argc, char **argv, char *map);
+JVSCLIStatus parseArguments(int argc, char **argv, char *map, int *debugLevel);
 
 #endif // CLI_H_
