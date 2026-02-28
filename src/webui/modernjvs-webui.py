@@ -276,6 +276,9 @@ except (KeyError, AttributeError):
 _SSH_PASS_PROMPT_TIMEOUT = 10.0
 # How long to wait for the browser's initial password init message.
 _WS_INIT_TIMEOUT = 5.0
+# Maximum number of password injections per SSH session (mirrors SSH's default
+# MaxAuthTries so every server-side retry is handled automatically).
+_SSH_MAX_INJECT = 3
 
 def is_private_ip(addr):
     """Return True if addr is a private/local address that should be allowed.
@@ -6621,7 +6624,15 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
         try:
             proc = subprocess.Popen(
                 ["ssh", "-tt",
-                 "-o", "StrictHostKeyChecking=accept-new",
+                 # StrictHostKeyChecking=no / UserKnownHostsFile=/dev/null:
+                 # Host key verification is intentionally skipped.  The target
+                 # host is already constrained to private/local addresses by
+                 # is_private_ip(), so MITM risk is negligible for this use
+                 # case, and bypassing it avoids blocking or interactive prompts
+                 # caused by stale known_hosts entries or older SSH clients that
+                 # don't recognise "accept-new".
+                 "-o", "StrictHostKeyChecking=no",
+                 "-o", "UserKnownHostsFile=/dev/null",
                  "-o", "PreferredAuthentications=keyboard-interactive,password",
                  "-p", str(port), f"{user}@{host}"],
                 stdin=slave_fd, stdout=slave_fd, stderr=slave_fd,
@@ -6734,10 +6745,14 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
                     break
 
         # ---- Auto-inject password when SSH prompts ----
+        # Stay in this loop for the full auth phase so that each retry prompt
+        # ("Permission denied, please try again." + new prompt) is also handled.
+        # SSH allows up to MaxAuthTries attempts; we mirror that with _SSH_MAX_INJECT.
+        inject_count = 0
         if password and not done:
             prompt_buf = b""
             deadline = time.monotonic() + _SSH_PASS_PROMPT_TIMEOUT
-            while time.monotonic() < deadline:
+            while time.monotonic() < deadline and inject_count < _SSH_MAX_INJECT:
                 try:
                     r, _, _ = select.select([master_fd], [], [], 0.1)
                 except (ValueError, OSError):
@@ -6751,15 +6766,19 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
                     if data:
                         prompt_buf += data
                         _ws_send(data)
-                        # Match both "Password: " (keyboard-interactive) and
-                        # "root@host's password: " (direct password auth).
-                        if b"password: " in prompt_buf.lower():
+                        # Match "Password:" (keyboard-interactive / PAM) and
+                        # "root@host's password:" (direct password auth).
+                        # No trailing-space requirement – some configs omit it.
+                        if b"password:" in prompt_buf.lower():
+                            inject_count += 1
                             try:
                                 os.write(master_fd, password.encode("utf-8") + b"\r")
                             except OSError:
                                 done = True
-                            password = None
-                            break
+                                break
+                            # Reset buffer so the next SSH retry prompt is
+                            # detected fresh rather than re-matching the old one.
+                            prompt_buf = b""
                 if proc.poll() is not None:
                     done = True
                     break
