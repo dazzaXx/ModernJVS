@@ -3331,11 +3331,27 @@ function _termEnsureInit() {
   const container = document.getElementById('terminal-container');
   if (typeof Terminal === 'undefined' || !container) return;
   _term = new Terminal({ cursorBlink: true, fontSize: 14, fontFamily: 'monospace' });
-  if (typeof FitAddon !== 'undefined') {
-    _termFit = new FitAddon();
-    _term.loadAddon(_termFit);
+  // addon-fit.js UMD exports the module object as globalThis.FitAddon so the
+  // class is at FitAddon.FitAddon, not at FitAddon directly.
+  try {
+    const FitAddonClass = (typeof FitAddon !== 'undefined')
+      ? (FitAddon.FitAddon || FitAddon)
+      : null;
+    if (FitAddonClass) {
+      _termFit = new FitAddonClass();
+      _term.loadAddon(_termFit);
+    }
+  } catch(e) {
+    console.warn('FitAddon initialization failed:', e);
+    _termFit = null;
   }
-  _term.open(container);
+  try {
+    _term.open(container);
+  } catch(e) {
+    console.error('Terminal open failed:', e);
+    _term = null;
+    return;
+  }
   if (_termFit) { try { _termFit.fit(); } catch(e) {} }
   window.addEventListener('resize', () => { if (_termFit) { try { _termFit.fit(); } catch(e) {} } });
   // Register data handler once so typing sends to the active WebSocket.
