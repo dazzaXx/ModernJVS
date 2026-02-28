@@ -59,12 +59,13 @@ check_dependencies() {
 	fi
 }
 
-# Set the supervision timeout for a single BR/EDR (ACL) connection handle
+# Set the supervision timeout for a single BR/EDR (ACL) connection
+# hcitool lst takes the Bluetooth address and timeout in 0.625 ms slots
 set_supervision_timeout_bredr() {
 	local handle="$1"
 	local address="$2"
 
-	if hcitool lsup "$handle" "$SUPERVISION_TIMEOUT_BREDR" >/dev/null 2>&1; then
+	if hcitool lst "$address" "$SUPERVISION_TIMEOUT_BREDR" >/dev/null 2>&1; then
 		print_success "Set supervision timeout to 3 seconds for $address (handle $handle) [BR/EDR]"
 		return 0
 	else
