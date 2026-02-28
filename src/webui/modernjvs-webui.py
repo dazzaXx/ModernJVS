@@ -3487,12 +3487,17 @@ def systemctl(*args):
 
 
 def get_player_slots():
-    """Parse player slot assignments from the most recent service run's logs.
+    """Parse player slot assignments from the most recent init cycle's logs.
 
     Scans the service log for ``Player N:`` lines emitted by initInputs()
-    and returns them as a list sorted by player number.  Only the most recent
-    service start (identified by the last 'ModernJVS Version' banner) is used
-    so that stale entries from a previous run are not shown.
+    and returns them as a list sorted by player number.
+
+    ModernJVS prints ``  Output:`` after *every* call to initInputs() (whether
+    controllers were found or not).  The ``Player N:`` lines for a given init
+    cycle always appear immediately before their ``  Output:`` line.  Using
+    these ``  Output:`` markers as cycle boundaries means that when a controller
+    is fully disconnected (no new ``Player`` lines are emitted) the previous
+    cycle's assignments are correctly discarded rather than shown as stale data.
 
     In debug mode the service emits hundreds of lines per second (one per JVS
     packet), which would push startup messages out of a fixed-size tail window.
@@ -3500,7 +3505,7 @@ def get_player_slots():
 
     Returns a list of dicts: [{"player": int, "profile": str}, ...]
     """
-    grep_pattern = "ModernJVS Version|Player "
+    grep_pattern = "ModernJVS Version|Player |  Output:"
     logs = None
 
     try:
@@ -3539,19 +3544,44 @@ def get_player_slots():
     if not logs:
         return []
 
-    # Find index of the last service startup banner
-    start_idx = 0
+    # Find the last "  Output:" line – it marks the end of the most recent
+    # initInputs() cycle (printed after every call regardless of whether
+    # controllers were found).
+    last_output_idx = -1
     for i in range(len(logs) - 1, -1, -1):
-        if "ModernJVS Version" in logs[i]:
-            start_idx = i
+        if "  Output:" in logs[i]:
+            last_output_idx = i
             break
+
+    if last_output_idx == -1:
+        # "  Output:" not yet written (very early in startup); fall back to
+        # anchoring on the service version banner and scanning to end.
+        start_idx = 0
+        for i in range(len(logs) - 1, -1, -1):
+            if "ModernJVS Version" in logs[i]:
+                start_idx = i
+                break
+        scan_logs = logs[start_idx:]
+    else:
+        # Find the boundary that precedes the current cycle's Player lines:
+        # the previous "  Output:" line, or "ModernJVS Version" if none exists.
+        prev_boundary = 0
+        for i in range(last_output_idx - 1, -1, -1):
+            if "  Output:" in logs[i] or "ModernJVS Version" in logs[i]:
+                prev_boundary = i
+                break
+        # Player lines for the current cycle sit between prev_boundary and
+        # last_output_idx.  Anything outside this window belongs to an earlier
+        # cycle and must be ignored.  Start from prev_boundary + 1 to exclude
+        # the boundary marker line itself from the scan.
+        scan_logs = logs[prev_boundary + 1:last_output_idx]
 
     # Pattern matches both variants:
     #   Player 1:                  nintendo-wii-remote (Wiimote+Nunchuk)
     #   Player 1 (Fixed via config):  sony-dualshock4
     _player_re = re.compile(r'Player\s+(\d+)(?:\s+\([^)]*\))?\s*:\s+(\S[^\n]*)')
     players = {}
-    for line in logs[start_idx:]:
+    for line in scan_logs:
         m = _player_re.search(line)
         if m:
             num = int(m.group(1))
