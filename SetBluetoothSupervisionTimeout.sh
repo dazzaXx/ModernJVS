@@ -3,8 +3,9 @@ set -euo pipefail
 
 # Set Bluetooth Supervision Timeout Script
 # This script sets the Bluetooth link supervision timeout to 3 seconds for all currently
-# connected Bluetooth devices. A shorter supervision timeout allows faster detection of
-# disconnected devices (e.g. Wiimotes), reducing lag when a controller drops connection.
+# connected Bluetooth devices (both BR/EDR and LE). A shorter supervision timeout allows
+# faster detection of disconnected devices (e.g. Wiimotes), reducing lag when a controller
+# drops connection.
 # Note: Re-run this script after pairing new Bluetooth devices to apply the timeout.
 
 # Color codes for output
@@ -13,9 +14,20 @@ readonly GREEN='\033[0;32m'
 readonly YELLOW='\033[1;33m'
 readonly NC='\033[0m' # No Color
 
-# Supervision timeout in Bluetooth slots (1 slot = 0.625 ms)
+# Supervision timeout for BR/EDR connections in Bluetooth slots (1 slot = 0.625 ms)
 # 3 seconds = 3000 ms / 0.625 ms = 4800 slots
-readonly SUPERVISION_TIMEOUT=4800
+readonly SUPERVISION_TIMEOUT_BREDR=4800
+
+# Supervision timeout for LE connections in units of 10 ms
+# 3 seconds = 3000 ms / 10 ms = 300 units
+readonly SUPERVISION_TIMEOUT_LE=300
+
+# LE connection interval parameters (units of 1.25 ms) used with hcitool lecup.
+# These are low-latency defaults suitable for gaming controllers.
+# 6 * 1.25 ms = 7.5 ms (minimum interval), 12 * 1.25 ms = 15 ms (maximum interval)
+readonly LE_INTERVAL_MIN=6
+readonly LE_INTERVAL_MAX=12
+readonly LE_LATENCY=0
 
 # Print colored messages
 print_error() {
@@ -47,28 +59,43 @@ check_dependencies() {
 	fi
 }
 
-# Set the supervision timeout for a single connection handle
-set_supervision_timeout() {
+# Set the supervision timeout for a single BR/EDR (ACL) connection handle
+set_supervision_timeout_bredr() {
 	local handle="$1"
 	local address="$2"
 
-	if hcitool lsup "$handle" "$SUPERVISION_TIMEOUT" >/dev/null 2>&1; then
-		print_success "Set supervision timeout to 3 seconds for $address (handle $handle)"
+	if hcitool lsup "$handle" "$SUPERVISION_TIMEOUT_BREDR" >/dev/null 2>&1; then
+		print_success "Set supervision timeout to 3 seconds for $address (handle $handle) [BR/EDR]"
 		return 0
 	else
-		print_error "Failed to set supervision timeout for $address (handle $handle)"
+		print_error "Failed to set supervision timeout for $address (handle $handle) [BR/EDR]"
 		return 1
 	fi
 }
 
-# Iterate over all active ACL connections and apply the timeout
+# Set the supervision timeout for a single LE connection handle
+set_supervision_timeout_le() {
+	local handle="$1"
+	local address="$2"
+
+	if hcitool lecup "$handle" "$LE_INTERVAL_MIN" "$LE_INTERVAL_MAX" "$LE_LATENCY" "$SUPERVISION_TIMEOUT_LE" >/dev/null 2>&1; then
+		print_success "Set supervision timeout to 3 seconds for $address (handle $handle) [LE]"
+		return 0
+	else
+		print_error "Failed to set supervision timeout for $address (handle $handle) [LE]"
+		return 1
+	fi
+}
+
+# Iterate over all active ACL and LE connections and apply the timeout
 set_all_supervision_timeouts() {
 	print_info "Scanning for active Bluetooth connections..."
 
 	# hcitool con output lines look like:
-	#   < ACL XX:XX:XX:XX:XX:XX handle N state 1 lm MASTER
+	#   < ACL XX:XX:XX:XX:XX:XX handle N state 1 lm MASTER  (BR/EDR)
+	#   < LE  XX:XX:XX:XX:XX:XX handle N state 1 lm MASTER  (Bluetooth LE)
 	local connections
-	connections=$(hcitool con 2>/dev/null | awk '/handle/ {print $3, $5}')
+	connections=$(hcitool con 2>/dev/null | awk '/handle/ {print $2, $3, $5}')
 
 	if [ -z "$connections" ]; then
 		print_info "No active Bluetooth connections found."
@@ -79,10 +106,21 @@ set_all_supervision_timeouts() {
 	local failed=0
 	local count=0
 
-	while IFS=' ' read -r address handle; do
+	while IFS=' ' read -r type address handle; do
 		if [ -n "$handle" ]; then
-			set_supervision_timeout "$handle" "$address" || failed=1
-			count=$((count + 1))
+			case "$type" in
+				ACL)
+					set_supervision_timeout_bredr "$handle" "$address" || failed=1
+					count=$((count + 1))
+					;;
+				LE)
+					set_supervision_timeout_le "$handle" "$address" || failed=1
+					count=$((count + 1))
+					;;
+				*)
+					print_info "Skipping unknown connection type '$type' for $address (handle $handle)"
+					;;
+			esac
 		fi
 	done <<< "$connections"
 
@@ -97,7 +135,7 @@ set_all_supervision_timeouts() {
 # Main function
 main() {
 	print_info "=== Bluetooth Supervision Timeout Configuration Script ==="
-	print_info "Target timeout: 3 seconds ($SUPERVISION_TIMEOUT Bluetooth slots)"
+	print_info "Target timeout: 3 seconds (BR/EDR: $SUPERVISION_TIMEOUT_BREDR slots @ 0.625 ms, LE: $SUPERVISION_TIMEOUT_LE units @ 10 ms)"
 
 	check_sudo
 	check_dependencies
