@@ -11,6 +11,7 @@ import ipaddress
 import json
 import os
 import pty
+import pwd
 import re
 import secrets
 import select
@@ -263,6 +264,13 @@ _PRIVATE_NETS = [
     ipaddress.ip_network("fe80::/10"),      # IPv6 link-local
 ]
 
+
+# Default SSH username for the terminal (actual user running the service;
+# on DietPi this is "root", on Raspberry Pi OS it is typically "pi").
+try:
+    _DEFAULT_TERM_USER = pwd.getpwuid(os.getuid()).pw_name
+except (KeyError, AttributeError):
+    _DEFAULT_TERM_USER = os.environ.get("USER", os.environ.get("LOGNAME", "pi"))
 
 def is_private_ip(addr):
     """Return True if addr is a private/local address that should be allowed.
@@ -1642,7 +1650,7 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
         </div>
         <div class="settings-field">
           <label>Username</label>
-          <input type="text" id="termUser" value="pi" maxlength="64" style="width:100%;padding:0.4rem 0.6rem;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);">
+          <input type="text" id="termUser" value="__TERMUSER__" maxlength="64" style="width:100%;padding:0.4rem 0.6rem;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);">
         </div>
       </div>
       <div class="control-row" style="margin-bottom:0.75rem;">
@@ -3328,8 +3336,12 @@ function _termEnsureInit() {
     _term.loadAddon(_termFit);
   }
   _term.open(container);
-  if (_termFit) _termFit.fit();
-  window.addEventListener('resize', () => { if (_termFit) _termFit.fit(); });
+  if (_termFit) { try { _termFit.fit(); } catch(e) {} }
+  window.addEventListener('resize', () => { if (_termFit) { try { _termFit.fit(); } catch(e) {} } });
+  // Register data handler once so typing sends to the active WebSocket.
+  _term.onData(data => {
+    if (_termWs && _termWs.readyState === WebSocket.OPEN) _termWs.send(data);
+  });
 }
 
 function termConnect() {
@@ -3347,7 +3359,7 @@ function termConnect() {
     document.getElementById('termConnectBtn').style.display = 'none';
     document.getElementById('termDisconnectBtn').style.display = '';
     _term.focus();
-    if (_termFit) _termFit.fit();
+    if (_termFit) { try { _termFit.fit(); } catch(e) {} }
   };
   _termWs.onmessage = (ev) => {
     if (ev.data instanceof ArrayBuffer) {
@@ -3365,9 +3377,6 @@ function termConnect() {
   _termWs.onerror = () => {
     document.getElementById('termMsg').textContent = 'WebSocket error — see browser console.';
   };
-  _term.onData(data => {
-    if (_termWs && _termWs.readyState === WebSocket.OPEN) _termWs.send(data);
-  });
 }
 
 function termDisconnect() {
@@ -3411,6 +3420,7 @@ def _build_html_page():
         _HTML_TEMPLATE
         .replace("__LOGO__",           _logo_data_uri())
         .replace("__STICKS__",         _sticks_data_uri())
+        .replace("__TERMUSER__",       _DEFAULT_TERM_USER)
     )
 
 
@@ -6586,6 +6596,18 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
                 stdin=slave_fd, stdout=slave_fd, stderr=slave_fd,
                 close_fds=True,
             )
+        except FileNotFoundError:
+            os.close(master_fd)
+            os.close(slave_fd)
+            # Send readable error text via WebSocket before closing
+            sock = self.request
+            msg = b"\r\nssh: command not found - install the OpenSSH client (openssh-client).\r\n"
+            hdr = bytearray([0x82, len(msg)])
+            try:
+                sock.sendall(bytes(hdr) + msg)
+            except OSError:
+                pass
+            return
         except OSError:
             os.close(master_fd)
             os.close(slave_fd)
@@ -6695,6 +6717,24 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
                 if proc.poll() is not None:
                     break
         finally:
+            # Drain remaining PTY output so SSH error messages reach the terminal.
+            deadline = time.monotonic() + 0.5
+            while time.monotonic() < deadline:
+                try:
+                    r, _, _ = select.select([master_fd], [], [], 0.05)
+                    if not r:
+                        break
+                    tail = os.read(master_fd, 4096)
+                    if tail:
+                        _ws_send(tail)
+                except OSError:
+                    break
+            # WebSocket close frame: FIN+opcode=0x8, payload_len=2, status=1000 (normal).
+            _WS_CLOSE_NORMAL = b"\x88\x02\x03\xe8"
+            try:
+                sock.sendall(_WS_CLOSE_NORMAL)
+            except OSError:
+                pass
             try:
                 proc.terminate()
             except OSError:
