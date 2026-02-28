@@ -36,6 +36,7 @@ typedef struct
     char name[MAX_PATH];
     char path[MAX_PATH];
     char physicalLocation[MAX_PATH];
+    char uniqueId[MAX_PATH];
     int bus;
     int productID;
     int vendorID;

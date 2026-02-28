@@ -3496,6 +3496,27 @@ def systemctl(*args):
         return False, str(e)
 
 
+def _bt_device_connected(mac):
+    """Return True if the Bluetooth device with the given MAC address reports
+    'Connected: yes' via bluetoothctl.
+
+    Falls back to True on any error (missing tool, timeout, etc.) so that
+    non-BT setups or temporary bluetoothctl hiccups don't clear player slots
+    incorrectly.
+    """
+    # Validate MAC format (AA:BB:CC:DD:EE:FF) before passing to subprocess
+    if not re.match(r'^[0-9A-Fa-f]{2}(?::[0-9A-Fa-f]{2}){5}$', mac):
+        return True
+    try:
+        r = subprocess.run(
+            ["bluetoothctl", "info", mac],
+            capture_output=True, text=True, timeout=5,
+        )
+        return "Connected: yes" in r.stdout
+    except Exception:
+        return True
+
+
 def get_player_slots():
     """Parse player slot assignments from the most recent init cycle's logs.
 
@@ -3589,14 +3610,36 @@ def get_player_slots():
     # Pattern matches both variants:
     #   Player 1:                  nintendo-wii-remote (Wiimote+Nunchuk)
     #   Player 1 (Fixed via config):  sony-dualshock4
+    # Bluetooth devices also carry a [BT:XX:XX:XX:XX:XX:XX] tag appended by
+    # initInputs() which is used below to verify the device is still connected.
     _player_re = re.compile(r'Player\s+(\d+)(?:\s+\([^)]*\))?\s*:\s+(\S[^\n]*)')
+    _bt_tag_re = re.compile(r'\s*\[BT:([0-9A-Fa-f]{2}(?::[0-9A-Fa-f]{2}){5})\]')
     players = {}
     for line in scan_logs:
         m = _player_re.search(line)
         if m:
             num = int(m.group(1))
             players[num] = m.group(2).strip()
-    return [{"player": k, "profile": v} for k, v in sorted(players.items())]
+
+    # For BT players, verify via BlueZ that the device is still connected.
+    # This makes a clean disconnect (power button) visible in the UI within one
+    # poll cycle (~3 s) because BlueZ marks "Connected: no" immediately, long
+    # before the evdev device is removed (which can take 7–20 s depending on
+    # the reconnect-attempt window and the link supervision timeout).
+    result = {}
+    for num, profile in players.items():
+        bt_m = _bt_tag_re.search(profile)
+        if bt_m:
+            mac = bt_m.group(1)
+            clean_profile = _bt_tag_re.sub('', profile).strip()
+            if _bt_device_connected(mac):
+                result[num] = clean_profile
+            # else: BlueZ reports disconnected — omit this slot so the UI
+            # reflects the disconnect without waiting for evdev removal
+        else:
+            result[num] = profile  # non-BT device: trust journal data
+
+    return [{"player": k, "profile": v} for k, v in sorted(result.items())]
 
 
 def get_jvs_connection_status():

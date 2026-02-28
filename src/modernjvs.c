@@ -16,7 +16,7 @@
 #include "version.h"
 
 /* Time between reinit in ms */
-#define TIME_REINIT (200 * 1000)
+#define TIME_REINIT (100 * 1000)
 
 void cleanup(void);
 void handleSignal(int signal);

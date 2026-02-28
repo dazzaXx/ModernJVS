@@ -53,7 +53,12 @@ static void *watchdogThread(void *_args)
             *args->running = 0;
             break;
         }
-        sleep(TIME_POLL_DEVICES);
+        /* Sleep in short increments so that when setThreadsRunning(0) is
+         * called by a device thread the watchdog wakes within ~100 ms and
+         * immediately signals the main loop, rather than blocking for the
+         * full TIME_POLL_DEVICES second. */
+        for (int tick = 0; tick < TIME_POLL_DEVICES * 10 && getThreadsRunning(); tick++)
+            usleep(100 * 1000);
     }
 
     // If an input thread detected a device error (e.g. ENODEV/EIO on Bluetooth

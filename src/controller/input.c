@@ -689,6 +689,26 @@ static int compare_devices(const void *a, const void *b)
     return strcmp(dev_a->physicalLocation, dev_b->physicalLocation);
 }
 
+/* Returns 1 if str looks like a Bluetooth MAC address (AA:BB:CC:DD:EE:FF). */
+static int isBtMac(const char *str)
+{
+    if (strlen(str) != 17)
+        return 0;
+    for (int i = 0; i < 17; i++)
+    {
+        if (i % 3 == 2)
+        {
+            if (str[i] != ':')
+                return 0;
+        }
+        else if (!isxdigit((unsigned char)str[i]))
+        {
+            return 0;
+        }
+    }
+    return 1;
+}
+
 int getNumberOfDevices(void)
 {
     struct dirent **namelist = NULL;
@@ -784,6 +804,11 @@ JVSInputStatus getInputs(DeviceList *deviceList)
                 break;
             }
         }
+
+        // Get unique identifier — for Bluetooth HID devices this is the BT MAC address
+        dev->uniqueId[0] = '\0';
+        ioctl(device, EVIOCGUNIQ(sizeof(dev->uniqueId) - 1), dev->uniqueId);
+        dev->uniqueId[sizeof(dev->uniqueId) - 1] = '\0';
 
         // Make it lower case and replace letters
         for (size_t j = 0; j < strlen(dev->fullName); j++)
@@ -1092,14 +1117,20 @@ JVSInputStatus initInputs(char *outputMappingPath, char *configPath, char *secon
             
             // Don't print player message for merged Nunchuk or IR device to avoid duplicate output
             int shouldPrintPlayerMessage = !isMergedNunchuk && !isWiimoteIR;
-            
+
+            /* Append BT MAC to the log line so the webUI can verify the device
+             * is still connected via BlueZ without waiting for evdev removal. */
+            char btTag[32] = "";
+            if (isBtMac(device->uniqueId))
+                snprintf(btTag, sizeof(btTag), " [BT:%s]", device->uniqueId);
+
             if (isFixedConfig && shouldPrintPlayerMessage)
             {
-                debug(0, "  Player %d (Fixed via config):  %s%s\n", effectivePlayerNumber, originalName, specialMap);
+                debug(0, "  Player %d (Fixed via config):  %s%s%s\n", effectivePlayerNumber, originalName, specialMap, btTag);
             }
             else if (shouldIncrementPlayer && shouldPrintPlayerMessage)
             {
-                debug(0, "  Player %d:                  %s%s\n", effectivePlayerNumber, deviceName, specialMap);
+                debug(0, "  Player %d:                  %s%s%s\n", effectivePlayerNumber, deviceName, specialMap, btTag);
                 playerNumber++;
             }
             
