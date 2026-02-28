@@ -6620,7 +6620,9 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
         master_fd, slave_fd = pty.openpty()
         try:
             proc = subprocess.Popen(
-                ["ssh", "-tt", "-o", "StrictHostKeyChecking=accept-new",
+                ["ssh", "-tt",
+                 "-o", "StrictHostKeyChecking=accept-new",
+                 "-o", "PreferredAuthentications=keyboard-interactive,password",
                  "-p", str(port), f"{user}@{host}"],
                 stdin=slave_fd, stdout=slave_fd, stderr=slave_fd,
                 close_fds=True,
@@ -6749,8 +6751,9 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
                     if data:
                         prompt_buf += data
                         _ws_send(data)
-                        # SSH prompts end with " password: " (e.g. "root@host's password: ")
-                        if prompt_buf.lower().endswith(b" password: "):
+                        # Match both "Password: " (keyboard-interactive) and
+                        # "root@host's password: " (direct password auth).
+                        if b"password: " in prompt_buf.lower():
                             try:
                                 os.write(master_fd, password.encode("utf-8") + b"\r")
                             except OSError:
