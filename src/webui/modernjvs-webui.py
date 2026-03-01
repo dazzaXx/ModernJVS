@@ -1770,7 +1770,7 @@ async function refreshSysinfo() {
   }
 }
 
-async function serviceAction(action, alertId) {
+async function serviceAction(action, alertId, successMsg) {
   const targetAlert = alertId || 'dashAlert';
   const d = await api('/api/control', {
     method: 'POST',
@@ -1778,7 +1778,7 @@ async function serviceAction(action, alertId) {
     body: JSON.stringify({action})
   });
   if (d.error) { showAlert(targetAlert, 'Error: ' + d.error, true); }
-  else { showAlert(targetAlert, 'Service ' + action + ' successful.', false); }
+  else { showAlert(targetAlert, successMsg || ('Service ' + action + ' successful.'), false); }
   setTimeout(refreshDashboard, 1200);
 }
 
@@ -1843,7 +1843,7 @@ function validateConfigInputs() {
   return warnings;
 }
 
-async function saveConfig() {
+async function saveConfig(silent = false) {
   const warnings = validateConfigInputs();
   if (warnings.length > 0) {
     const msg = 'Configuration warnings:\n\n' + warnings.join('\n') + '\n\nSave anyway?';
@@ -1868,17 +1868,14 @@ async function saveConfig() {
     headers: {'Content-Type':'application/json'},
     body: JSON.stringify(payload)
   });
-  if (d.error) showAlert('cfgAlert', 'Error: ' + d.error, true);
-  else showAlert('cfgAlert', 'Configuration saved. Restart the service to apply changes.', false);
-  return !d.error;
+  if (d.error) { showAlert('cfgAlert', 'Error: ' + d.error, true); return false; }
+  if (!silent) showAlert('cfgAlert', 'Configuration saved. Restart the service to apply changes.', false);
+  return true;
 }
 
 async function saveConfigAndRestart() {
-  const saved = await saveConfig();
-  if (saved) {
-    showAlert('cfgAlert', 'Configuration saved. Restarting service\u2026', false);
-    await serviceAction('restart', 'cfgAlert');
-  }
+  const saved = await saveConfig(true);
+  if (saved) await serviceAction('restart', 'cfgAlert', 'Configuration saved. Service restarted successfully.');
 }
 
 function resetConfig() {
