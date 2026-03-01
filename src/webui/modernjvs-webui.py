@@ -235,7 +235,11 @@ _audit_lock = threading.Lock()
 
 
 def audit_log(action, detail="", ip=""):
-    """Append one line to the WebUI audit log (best-effort, never raises)."""
+    """Append one line to the WebUI audit log (best-effort, never raises).
+
+    The log is trimmed to the most recent MAX_AUDIT_LOG_LINES lines whenever
+    it exceeds that limit, keeping the file from growing without bound.
+    """
     timestamp = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
     parts = [f"[{timestamp}]", action]
     if detail:
@@ -245,8 +249,17 @@ def audit_log(action, detail="", ip=""):
     line = " ".join(parts) + "\n"
     try:
         with _audit_lock:
-            with open(AUDIT_LOG_PATH, "a") as f:
-                f.write(line)
+            os.makedirs(os.path.dirname(AUDIT_LOG_PATH), exist_ok=True)
+            try:
+                with open(AUDIT_LOG_PATH, "r") as f:
+                    lines = f.readlines()
+            except OSError:
+                lines = []
+            lines.append(line)
+            if len(lines) > MAX_AUDIT_LOG_LINES:
+                lines = lines[-MAX_AUDIT_LOG_LINES:]
+            with open(AUDIT_LOG_PATH, "w") as f:
+                f.writelines(lines)
     except OSError:
         pass
 
@@ -610,6 +623,7 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
   .btn-restart{ background: var(--yellow); color: #0d0d14; }
   .btn-save   { background: var(--accent); color: #fff; }
   .btn-refresh{ background: var(--border); color: var(--text); }
+  .btn-danger { background: var(--red);    color: #fff; }
 
   /* --- form --- */
   .form-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1rem; }
@@ -1272,7 +1286,7 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
       <div id="logFilterHint" style="display:none;font-size:0.8rem;color:var(--yellow);margin-bottom:0.5rem;padding:0.35rem 0.5rem;border-left:3px solid var(--yellow);background:rgba(255,200,0,0.06);">
         ⚠ <strong>JVS Activity</strong> shows <code style="color:var(--accent2)">CMD_</code> debug messages —
         these are only logged when <strong>Debug Mode</strong> is set to <strong>1</strong> or <strong>2</strong>
-        in the <a href="#" onclick="showTab('config',document.querySelector('[onclick*=showTab].tab'));return false;"
+        in the <a href="#" onclick="showTab('config',document.querySelector('.tab[onclick*=\'config\']'));return false;"
           style="color:var(--accent)">Configuration</a> tab.
       </div>
       <div class="log-wrap" id="jvsBox" style="height:340px;"></div>
@@ -1291,7 +1305,7 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
       <h2>Profile Editor</h2>
       <div id="profilesAlert" class="alert"></div>
       <div style="display:flex;gap:0.5rem;margin-bottom:1rem;flex-wrap:wrap;align-items:center;">
-        <button class="btn btn-xs" id="profTabGames"   onclick="setProfileTab('games')"   style="background:var(--accent);color:#000;">Games</button>
+        <button class="btn btn-xs" id="profTabGames"   onclick="setProfileTab('games')"   style="background:var(--accent);color:#fff;">Games</button>
         <button class="btn btn-xs" id="profTabDevices" onclick="setProfileTab('devices')" style="">Devices</button>
         <button class="btn btn-xs" id="profTabIos"     onclick="setProfileTab('ios')"     style="">I/O Boards</button>
         <span style="flex:1"></span>
@@ -1756,14 +1770,15 @@ async function refreshSysinfo() {
   }
 }
 
-async function serviceAction(action) {
+async function serviceAction(action, alertId, successMsg) {
+  const targetAlert = alertId || 'dashAlert';
   const d = await api('/api/control', {
     method: 'POST',
     headers: {'Content-Type':'application/json'},
     body: JSON.stringify({action})
   });
-  if (d.error) { showAlert('dashAlert', 'Error: ' + d.error, true); }
-  else { showAlert('dashAlert', 'Service ' + action + ' successful.', false); }
+  if (d.error) { showAlert(targetAlert, 'Error: ' + d.error, true); }
+  else { showAlert(targetAlert, successMsg || ('Service ' + action + ' successful.'), false); }
   setTimeout(refreshDashboard, 1200);
 }
 
@@ -1816,8 +1831,8 @@ async function loadConfig() {
 function validateConfigInputs() {
   const warnings = [];
   const device = document.getElementById('cfgDevice').value.trim();
-  if (device && !/^\/dev\/(ttyUSB|ttyAMA)/.test(device))
-    warnings.push('DEVICE_PATH "' + device + '" does not look like a serial port (/dev/ttyUSB* or /dev/ttyAMA*).');
+  if (device && !/^\/dev\/(ttyUSB|ttyAMA|ttyS|ttyACM|serial)/.test(device))
+    warnings.push('DEVICE_PATH "' + device + '" does not look like a serial port (/dev/ttyUSB*, /dev/ttyAMA*, /dev/ttyS*, /dev/ttyACM*, /dev/serial*).');
   const pin = parseInt(document.getElementById('cfgPin').value, 10);
   if (!isNaN(pin) && (pin < 1 || pin > 40))
     warnings.push('SENSE_LINE_PIN (' + pin + ') is outside the valid Raspberry Pi GPIO range (1–40).');
@@ -1828,7 +1843,7 @@ function validateConfigInputs() {
   return warnings;
 }
 
-async function saveConfig() {
+async function saveConfig(silent = false) {
   const warnings = validateConfigInputs();
   if (warnings.length > 0) {
     const msg = 'Configuration warnings:\n\n' + warnings.join('\n') + '\n\nSave anyway?';
@@ -1853,17 +1868,14 @@ async function saveConfig() {
     headers: {'Content-Type':'application/json'},
     body: JSON.stringify(payload)
   });
-  if (d.error) showAlert('cfgAlert', 'Error: ' + d.error, true);
-  else showAlert('cfgAlert', 'Configuration saved. Restart the service to apply changes.', false);
-  return !d.error;
+  if (d.error) { showAlert('cfgAlert', 'Error: ' + d.error, true); return false; }
+  if (!silent) showAlert('cfgAlert', 'Configuration saved. Restart the service to apply changes.', false);
+  return true;
 }
 
 async function saveConfigAndRestart() {
-  const saved = await saveConfig();
-  if (saved) {
-    showAlert('cfgAlert', 'Configuration saved. Restarting service\u2026', false);
-    await serviceAction('restart');
-  }
+  const saved = await saveConfig(true);
+  if (saved) await serviceAction('restart', 'cfgAlert', 'Configuration saved. Service restarted successfully.');
 }
 
 function resetConfig() {
@@ -1877,6 +1889,8 @@ function resetConfig() {
   document.getElementById('cfgDz2').value = '0.2';
   document.getElementById('cfgDz3').value = '0.2';
   document.getElementById('cfgDz4').value = '0.2';
+  document.getElementById('cfgEmulate').value = 'namco-FCA1';
+  document.getElementById('cfgGame').value    = 'generic-driving';
   document.getElementById('cfgEmulate2').value   = '';
   showAlert('cfgAlert', 'Fields reset to defaults. Click Save to write the configuration.', false);
 }
@@ -1897,7 +1911,7 @@ function setProfileTab(tab) {
   ['games','devices','ios'].forEach(t => {
     const btn = document.getElementById('profTab' + t.charAt(0).toUpperCase() + t.slice(1));
     if (btn) btn.style.background = (t === tab) ? 'var(--accent)' : '';
-    if (btn) btn.style.color      = (t === tab) ? '#000' : '';
+    if (btn) btn.style.color      = (t === tab) ? '#fff' : '';
   });
   // Re-render with current data
   api('/api/profiles/list').then(d => { if (!d.error) renderProfilesTable(d); });
@@ -2361,7 +2375,7 @@ async function loadDevices() {
     const statusHtml = dev.ignored
       ? '<span style="color:var(--yellow);font-size:0.8rem;">⚠ Ignored by ModernJVS</span>'
       : '<span style="color:var(--green);font-size:0.8rem;">✓ Active</span>';
-    return `<tr><td><code>${dev.event}</code></td><td>${dev.name}</td><td>${statusHtml}</td></tr>`;
+    return `<tr><td><code>${_escHtml(dev.event)}</code></td><td>${_escHtml(dev.name)}</td><td>${statusHtml}</td></tr>`;
   }).join('');
 }
 
@@ -4257,7 +4271,7 @@ def diag_jvs_probe(device_path):
             except OSError:
                 pass
 
-            # Collect bytes for up to 500 ms
+            # Collect bytes for up to 2 s
             deadline  = time.monotonic() + 2.0
             received  = bytearray()
 
@@ -5810,7 +5824,7 @@ def set_bluetooth_supervision_timeout():
     could not be updated, or {"error": ...} on a hard failure.
     """
     if not shutil.which("hcitool"):
-        return {"error": "hcitool not found. Please install bluez: sudo apt install bluez"}
+        return {"error": "hcitool not found. hcitool was removed from BlueZ >= 5.65 — the automatic background supervision timeout handles this instead."}
 
     try:
         r = subprocess.run(
@@ -6034,10 +6048,6 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
             self._json({"devices": list_dir(DEVICES_PATH)})
         elif path == "/api/input_devices":
             self._json({"devices": get_input_devices()})
-        elif path == "/api/version":
-            self._json({"version": get_version()})
-        elif path == "/api/webui/settings":
-            self._json(read_webui_settings())
         elif path == "/api/profiles/list":
             self._json({
                 "games":   list_dir(GAMES_PATH),
@@ -6130,7 +6140,7 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
                             self.wfile.write(msg)
                             self.wfile.flush()
                 except OSError as e:
-                    err_msg = f'data: {{"error":"{str(e)}"}}\n\n'.encode("utf-8")
+                    err_msg = ("data: " + json.dumps({"error": str(e)}) + "\n\n").encode("utf-8")
                     try:
                         self.wfile.write(err_msg)
                         self.wfile.flush()
@@ -6139,7 +6149,7 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
                 finally:
                     os.close(fd)
             except OSError as e:
-                err_msg = f'data: {{"error":"{str(e)}"}}\n\n'.encode("utf-8")
+                err_msg = ("data: " + json.dumps({"error": str(e)}) + "\n\n").encode("utf-8")
                 try:
                     self.wfile.write(err_msg)
                     self.wfile.flush()
@@ -6203,6 +6213,8 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
             return
 
         body = self._read_body()
+        if body is None:
+            return
 
         if path == "/api/config":
             try:
@@ -6517,6 +6529,8 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
     def _handle_api_login(self):
         """Validate password and issue a session cookie on success."""
         body = self._read_body()
+        if body is None:
+            return
         try:
             data = json.loads(body) if body else {}
         except json.JSONDecodeError:
@@ -6553,12 +6567,16 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
         except (ValueError, TypeError):
             length = 0
         if length < 0 or length > MAX_POST_BODY_BYTES:
-            return ""
+            self._json({"error": "Request body too large."}, HTTPStatus.REQUEST_ENTITY_TOO_LARGE)
+            return None
         return self.rfile.read(length).decode("utf-8") if length else ""
 
     def _read_raw_body(self):
         """Read the raw request body as bytes (for binary uploads)."""
-        length = int(self.headers.get("Content-Length", 0))
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+        except (ValueError, TypeError):
+            length = 0
         return self.rfile.read(length) if length else b""
 
     def _handle_profile_upload(self):
@@ -6569,7 +6587,10 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
         if fpath is None:
             self._json({"error": "Invalid type or name."}, HTTPStatus.BAD_REQUEST)
             return
-        content_length = int(self.headers.get("Content-Length", 0))
+        try:
+            content_length = int(self.headers.get("Content-Length", 0))
+        except (ValueError, TypeError):
+            content_length = 0
         if content_length > MAX_PROFILE_UPLOAD_BYTES:
             self._json(
                 {"error": f"File too large. Maximum size is {MAX_PROFILE_UPLOAD_BYTES // 1024} KB."},
@@ -6732,8 +6753,12 @@ def _supervision_timeout_loop():
 
     The seen-set tracks MAC addresses.  When a device disconnects its address
     is removed so that a reconnect is handled correctly.
+
+    ``hcitool`` was removed from BlueZ >= 5.65.  The loop runs regardless;
+    if ``hcitool`` is absent, BR/EDR connections are assumed and only the
+    ``bluetoothctl`` supervision timeout approach is used.
     """
-    if not shutil.which("bluetoothctl") or not shutil.which("hcitool"):
+    if not shutil.which("bluetoothctl"):
         return
 
     # Set of MAC addresses whose supervision timeout has been applied.
@@ -6757,13 +6782,15 @@ def _supervision_timeout_loop():
             new_addresses = current - seen
             if new_addresses:
                 # Fetch HCI details only when there are new devices to handle.
-                hci_info = _hcitool_connection_info()
+                hci_info = _hcitool_connection_info() if shutil.which("hcitool") else {}
                 for address in new_addresses:
                     conn_type, handle = hci_info.get(address, ("ACL", "?"))
-                    if address not in hci_info:
+                    if hci_info and address not in hci_info:
                         print(f"[webui] BT supervision: no HCI info for {address}, assuming BR/EDR", flush=True)
-                    if _apply_supervision_timeout_for_connection(conn_type, address, handle):
-                        seen.add(address)
+                    _apply_supervision_timeout_for_connection(conn_type, address, handle)
+                    # Always mark as seen to avoid hammering the system with
+                    # repeated attempts every second.
+                    seen.add(address)
 
             # Forget disconnected devices so reconnects are processed.
             seen &= current
