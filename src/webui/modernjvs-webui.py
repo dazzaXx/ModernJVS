@@ -1892,10 +1892,8 @@ function resetConfig() {
   document.getElementById('cfgDz2').value = '0.2';
   document.getElementById('cfgDz3').value = '0.2';
   document.getElementById('cfgDz4').value = '0.2';
-  const cfgEmulate = document.getElementById('cfgEmulate');
-  if (cfgEmulate && cfgEmulate.options.length > 0) cfgEmulate.selectedIndex = 0;
-  const cfgGame = document.getElementById('cfgGame');
-  if (cfgGame && cfgGame.options.length > 0) cfgGame.selectedIndex = 0;
+  document.getElementById('cfgEmulate').value = 'namco-FCA1';
+  document.getElementById('cfgGame').value    = 'generic-driving';
   document.getElementById('cfgEmulate2').value   = '';
   showAlert('cfgAlert', 'Fields reset to defaults. Click Save to write the configuration.', false);
 }
