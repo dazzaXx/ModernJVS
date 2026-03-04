@@ -51,6 +51,13 @@ WEBUI_PASSWORD_PATH  = "/etc/modernjvs/webui-password"
 AUDIT_LOG_PATH       = "/etc/modernjvs/webui-audit.log"
 MAX_AUDIT_LOG_LINES  = 1000
 
+# Runtime state file written by the daemon to expose testButtonActive
+TESTMODE_STATE_PATH  = "/run/modernjvs/testmode"
+# How long to wait after signalling the daemon before reading back the state
+# file.  One daemon processing cycle is well under 1 ms, but a small buffer
+# accounts for scheduler latency between the signal delivery and the file write.
+DAEMON_STATE_UPDATE_DELAY = 0.05  # seconds
+
 # Session cookie settings
 SESSION_COOKIE_NAME = "mjvs_session"
 SESSION_MAX_AGE     = 7 * 24 * 3600   # 7 days
@@ -68,22 +75,37 @@ _test_button_active = False
 
 
 def get_test_button_active():
-    """Return True if the software test button is currently active (test mode on)."""
-    with _test_button_lock:
-        return _test_button_active
+    """Return True if the software test button is currently active (test mode on).
+
+    Reads the daemon's runtime state file (/run/modernjvs/testmode) when
+    available so the WebUI reflects changes made by either the dashboard or a
+    bound controller button.  Falls back to the in-memory mirror when the
+    daemon is not running or hasn't written the file yet.
+    """
+    global _test_button_active
+    try:
+        with open(TESTMODE_STATE_PATH, "r") as f:
+            val = f.read().strip() == "1"
+        with _test_button_lock:
+            _test_button_active = val
+        return val
+    except OSError:
+        with _test_button_lock:
+            return _test_button_active
 
 
 def toggle_test_button():
     """Toggle the JVS test button state.
 
-    Signals the running daemon (via SIGUSR1) to toggle its BUTTON_TEST bit,
-    then flips the local in-memory state to match.  If the daemon is not
-    running (MainPID == 0) the local state is still toggled so the UI stays
-    responsive; when the daemon next starts it will reset to inactive and
-    refreshDashboard() will sync the button.
+    Signals the running daemon (via SIGUSR1) to toggle its testButtonActive
+    latch, waits briefly for the daemon to update its runtime state file, then
+    reads back the new state.  If the daemon is not running the local mirror is
+    toggled so the UI stays responsive; when the daemon next starts it will
+    write the state file and refreshDashboard() will sync the button.
     Returns (ok, new_active_state, error_message).
     """
     global _test_button_active
+    pid_signalled = False
     ok, props_out = systemctl("show", SERVICE_NAME, "--property=MainPID")
     if ok:
         for line in props_out.splitlines():
@@ -92,13 +114,20 @@ def toggle_test_button():
                     pid = int(line.split("=", 1)[1].strip())
                     if pid > 0:
                         os.kill(pid, signal.SIGUSR1)
+                        pid_signalled = True
                 except (ValueError, ProcessLookupError, PermissionError) as exc:
-                    return False, _test_button_active, str(exc)
+                    return False, get_test_button_active(), str(exc)
                 break
 
-    with _test_button_lock:
-        _test_button_active = not _test_button_active
-        new_state = _test_button_active
+    if pid_signalled:
+        # Give the daemon one processing cycle to update the state file.
+        time.sleep(DAEMON_STATE_UPDATE_DELAY)
+        new_state = get_test_button_active()
+    else:
+        # Daemon not running — toggle the local mirror as a fallback.
+        with _test_button_lock:
+            _test_button_active = not _test_button_active
+            new_state = _test_button_active
     return True, new_state, ""
 
 
@@ -3687,11 +3716,15 @@ def get_service_status():
     cfg = config_to_api(read_config())
     active_state = props.get("ActiveState", "unknown")
     # If the daemon is not running, test mode cannot be active.  Reset the
-    # in-memory mirror so stale state does not linger after a crash or stop.
+    # in-memory mirror and skip the state file (which may be stale if the
+    # daemon crashed before it could delete it).
     if active_state not in ("active", "activating"):
         global _test_button_active
         with _test_button_lock:
             _test_button_active = False
+        test_active = False
+    else:
+        test_active = get_test_button_active()
     return {
         "active_state":       active_state,
         "main_pid":           props.get("MainPID", ""),
@@ -3699,7 +3732,7 @@ def get_service_status():
         "config":             cfg,
         "players":            get_player_slots(logs=logs),
         "jvs_connected":      get_jvs_connection_status(logs=logs),
-        "test_button_active": get_test_button_active(),
+        "test_button_active": test_active,
     }
 
 

@@ -2,6 +2,8 @@
 #include <signal.h>
 #include <string.h>
 #include <unistd.h>
+#include <errno.h>
+#include <sys/stat.h>
 
 #include "console/cli.h"
 #include "console/config.h"
@@ -18,11 +20,27 @@
 /* Time between reinit in ms */
 #define TIME_REINIT (200 * 1000)
 
+/* Runtime state file: records the current testButtonActive value (0 or 1)
+ * so the WebUI can read it without relying on signal bookkeeping. */
+#define TESTMODE_STATE_PATH "/run/modernjvs/testmode"
+
 void cleanup(void);
 void handleSignal(int signal);
 
 volatile int running = 1;
 volatile int testButtonActive = 0;
+
+static void writeTestModeState(int active)
+{
+    FILE *f = fopen(TESTMODE_STATE_PATH, "w");
+    if (!f)
+    {
+        debug(1, "Warning: Could not write test mode state file: %s\n", TESTMODE_STATE_PATH);
+        return;
+    }
+    fprintf(f, "%d", active);
+    fclose(f);
+}
 
 int main(int argc, char **argv)
 {
@@ -57,6 +75,12 @@ int main(int argc, char **argv)
     }
 
     debug(0, "ModernJVS Version %s\n\n", PROJECT_VER);
+
+    /* Create runtime directory and write initial test-mode state.
+     * mkdir() is a no-op if the directory already exists (errno == EEXIST). */
+    if (mkdir("/run/modernjvs", 0755) != 0 && errno != EEXIST)
+        debug(0, "Warning: Could not create /run/modernjvs directory: %s\n", strerror(errno));
+    writeTestModeState(0);
 
     /* Init the thread manager */
     ThreadStatus threadStatus = initThreadManager();
@@ -241,6 +265,7 @@ int main(int argc, char **argv)
             {
                 lastTestButtonActive = activeSnapshot;
                 setSwitch(&io, SYSTEM, BUTTON_TEST, activeSnapshot);
+                writeTestModeState(activeSnapshot);
             }
             else if (activeSnapshot)
             {
@@ -274,6 +299,9 @@ int main(int argc, char **argv)
         cleanup();
     }
 
+    /* Remove the runtime state file now that the daemon is stopping. */
+    unlink(TESTMODE_STATE_PATH);
+
     /* Close the file pointer */
     if (!disconnectJVS())
     {
@@ -302,6 +330,8 @@ void handleSignal(int signal)
     }
     else if (signal == SIGUSR1)
     {
-        testButtonActive = !testButtonActive;
+        /* Atomic toggle: safe to call from both signal handler and controller
+         * threads without a mutex (which is not async-signal-safe). */
+        __sync_fetch_and_xor(&testButtonActive, 1);
     }
 }

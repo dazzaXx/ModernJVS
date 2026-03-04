@@ -6,6 +6,7 @@ User=root
 Type=simple
 Restart=always
 RestartSec=10
+RuntimeDirectory=modernjvs
 ExecStart=/usr/bin/modernjvs
 
 [Install]
