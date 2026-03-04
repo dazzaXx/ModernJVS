@@ -13,6 +13,7 @@ import os
 import re
 import secrets
 import shutil
+import signal
 import subprocess
 import threading
 import time
@@ -50,6 +51,13 @@ WEBUI_PASSWORD_PATH  = "/etc/modernjvs/webui-password"
 AUDIT_LOG_PATH       = "/etc/modernjvs/webui-audit.log"
 MAX_AUDIT_LOG_LINES  = 1000
 
+# Runtime state file written by the daemon to expose testButtonActive
+TESTMODE_STATE_PATH  = "/run/modernjvs/testmode"
+# How long to wait after signalling the daemon before reading back the state
+# file.  One daemon processing cycle is well under 1 ms, but a small buffer
+# accounts for scheduler latency between the signal delivery and the file write.
+DAEMON_STATE_UPDATE_DELAY = 0.05  # seconds
+
 # Session cookie settings
 SESSION_COOKIE_NAME = "mjvs_session"
 SESSION_MAX_AGE     = 7 * 24 * 3600   # 7 days
@@ -61,6 +69,66 @@ _SETTINGS_DEFAULTS = {
 }
 
 _settings_lock = threading.Lock()
+
+_test_button_lock = threading.Lock()
+_test_button_active = False
+
+
+def get_test_button_active():
+    """Return True if the software test button is currently active (test mode on).
+
+    Reads the daemon's runtime state file (/run/modernjvs/testmode) when
+    available so the WebUI reflects changes made by either the dashboard or a
+    bound controller button.  Falls back to the in-memory mirror when the
+    daemon is not running or hasn't written the file yet.
+    """
+    global _test_button_active
+    try:
+        with open(TESTMODE_STATE_PATH, "r") as f:
+            val = f.read().strip() == "1"
+        with _test_button_lock:
+            _test_button_active = val
+        return val
+    except OSError:
+        with _test_button_lock:
+            return _test_button_active
+
+
+def toggle_test_button():
+    """Toggle the JVS test button state.
+
+    Signals the running daemon (via SIGUSR1) to toggle its testButtonActive
+    latch, waits briefly for the daemon to update its runtime state file, then
+    reads back the new state.  If the daemon is not running the local mirror is
+    toggled so the UI stays responsive; when the daemon next starts it will
+    write the state file and refreshDashboard() will sync the button.
+    Returns (ok, new_active_state, error_message).
+    """
+    global _test_button_active
+    pid_signalled = False
+    ok, props_out = systemctl("show", SERVICE_NAME, "--property=MainPID")
+    if ok:
+        for line in props_out.splitlines():
+            if line.startswith("MainPID="):
+                try:
+                    pid = int(line.split("=", 1)[1].strip())
+                    if pid > 0:
+                        os.kill(pid, signal.SIGUSR1)
+                        pid_signalled = True
+                except (ValueError, ProcessLookupError, PermissionError) as exc:
+                    return False, get_test_button_active(), str(exc)
+                break
+
+    if pid_signalled:
+        # Give the daemon one processing cycle to update the state file.
+        time.sleep(DAEMON_STATE_UPDATE_DELAY)
+        new_state = get_test_button_active()
+    else:
+        # Daemon not running — toggle the local mirror as a fallback.
+        with _test_button_lock:
+            _test_button_active = not _test_button_active
+            new_state = _test_button_active
+    return True, new_state, ""
 
 
 def read_webui_settings():
@@ -673,6 +741,10 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
   }
   .stat-card .val { font-size: 1.4rem; font-weight: 700; color: var(--accent2); }
   .stat-card .lbl { font-size: 0.78rem; color: var(--muted); margin-top: 0.3rem; text-transform: uppercase; letter-spacing: 0.06em; }
+  .stat-card-btn { cursor: pointer; transition: border-color 0.15s, background 0.15s, transform 0.1s; user-select: none; }
+  .stat-card-btn:hover:not(.stat-card-disabled) { border-color: var(--accent); background: rgba(151,0,17,0.15); }
+  .stat-card-btn:active:not(.stat-card-disabled) { transform: scale(0.97); }
+  .stat-card-btn.stat-card-disabled { opacity: 0.45; cursor: not-allowed; }
 
   /* --- version badge in header --- */
   .ver-badge {
@@ -1120,6 +1192,10 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
         <div class="stat-card"><div class="val" id="currentGame">—</div><div class="lbl">Current Game</div></div>
         <div class="stat-card"><div class="val" id="currentDevice">—</div><div class="lbl">Device Path</div></div>
         <div class="stat-card"><div class="val" id="jvsConnection">—</div><div class="lbl">JVS Connection</div></div>
+        <div class="stat-card stat-card-btn stat-card-disabled" id="testBtnToggle" onclick="toggleTestButton()" title="No active JVS connection" role="button" tabindex="0" onkeydown="if((event.key==='Enter'||event.key===' ')&&!this.classList.contains('stat-card-disabled')){event.preventDefault();toggleTestButton();}">
+          <div class="val" id="testModeVal" style="color:var(--muted);">Inactive</div>
+          <div class="lbl">Test Mode</div>
+        </div>
       </div>
     </div>
 
@@ -1703,6 +1779,29 @@ async function refreshDashboard() {
   psEl.innerHTML = [1, 2, 3, 4].map(n =>
     `<div class="stat-card"><div class="val" style="font-size:0.85rem;word-break:break-all;">${_escHtml(playerMap[n] || 'Not assigned')}</div><div class="lbl">Player ${n}</div></div>`
   ).join('');
+
+  updateTestButtonUI(!!d.test_button_active, d.jvs_connected === true);
+}
+
+function updateTestButtonUI(active, jvsConnected) {
+  const card = document.getElementById('testBtnToggle');
+  const val  = document.getElementById('testModeVal');
+  if (!card) return;
+  const canUse = !!jvsConnected;
+  card.classList.toggle('stat-card-disabled', !canUse);
+  card.title = canUse ? (active ? 'Click to deactivate test mode' : 'Click to activate test mode') : 'No active JVS connection';
+  if (val) {
+    val.textContent = active ? 'Active' : 'Inactive';
+    val.style.color = active ? 'var(--green)' : 'var(--muted)';
+  }
+}
+
+async function toggleTestButton() {
+  const card = document.getElementById('testBtnToggle');
+  if (card && card.classList.contains('stat-card-disabled')) return;
+  const d = await api('/api/control/test_button', {method: 'POST'});
+  if (d.error) { showAlert('dashAlert', 'Error: ' + d.error, true); return; }
+  updateTestButtonUI(!!d.test_button_active, d.jvs_connected === true);
 }
 
 async function refreshSysinfo() {
@@ -1778,7 +1877,13 @@ async function serviceAction(action, alertId, successMsg) {
     body: JSON.stringify({action})
   });
   if (d.error) { showAlert(targetAlert, 'Error: ' + d.error, true); }
-  else { showAlert(targetAlert, successMsg || ('Service ' + action + ' successful.'), false); }
+  else {
+    showAlert(targetAlert, successMsg || ('Service ' + action + ' successful.'), false);
+    // Daemon resets test mode to inactive on start/restart; disable the button
+    // immediately — refreshDashboard() fires 1.2s later and will re-enable it
+    // once a JVS connection is confirmed.
+    if (action === 'start' || action === 'restart') updateTestButtonUI(false, false);
+  }
   setTimeout(refreshDashboard, 1200);
 }
 
@@ -3609,13 +3714,25 @@ def get_service_status():
     logs = get_logs(since=since) if since else get_logs(200)
 
     cfg = config_to_api(read_config())
+    active_state = props.get("ActiveState", "unknown")
+    # If the daemon is not running, test mode cannot be active.  Reset the
+    # in-memory mirror and skip the state file (which may be stale if the
+    # daemon crashed before it could delete it).
+    if active_state not in ("active", "activating"):
+        global _test_button_active
+        with _test_button_lock:
+            _test_button_active = False
+        test_active = False
+    else:
+        test_active = get_test_button_active()
     return {
-        "active_state":  props.get("ActiveState", "unknown"),
-        "main_pid":      props.get("MainPID", ""),
-        "active_since":  props.get("ActiveEnterTimestamp", ""),
-        "config":        cfg,
-        "players":       get_player_slots(logs=logs),
-        "jvs_connected": get_jvs_connection_status(logs=logs),
+        "active_state":       active_state,
+        "main_pid":           props.get("MainPID", ""),
+        "active_since":       props.get("ActiveEnterTimestamp", ""),
+        "config":             cfg,
+        "players":            get_player_slots(logs=logs),
+        "jvs_connected":      get_jvs_connection_status(logs=logs),
+        "test_button_active": test_active,
     }
 
 
@@ -6242,9 +6359,27 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
             ok, msg = systemctl(action, SERVICE_NAME)
             if ok:
                 audit_log(f"Service {action}", SERVICE_NAME, ip=self.client_address[0])
+                # Daemon always starts with test mode inactive; reset the
+                # in-memory mirror so the next status poll reflects reality.
+                if action in ("start", "restart"):
+                    global _test_button_active
+                    with _test_button_lock:
+                        _test_button_active = False
                 self._json({"ok": True})
             else:
                 self._json({"error": msg}, HTTPStatus.INTERNAL_SERVER_ERROR)
+
+        elif path == "/api/control/test_button":
+            ok, active, err = toggle_test_button()
+            if ok:
+                audit_log(
+                    "Test mode " + ("activated" if active else "deactivated"),
+                    ip=self.client_address[0],
+                )
+                self._json({"ok": True, "test_button_active": active,
+                            "jvs_connected": get_jvs_connection_status()})
+            else:
+                self._json({"error": err}, HTTPStatus.INTERNAL_SERVER_ERROR)
 
         elif path == "/api/webui/restart":
             # Send the response BEFORE restarting — systemctl kills this

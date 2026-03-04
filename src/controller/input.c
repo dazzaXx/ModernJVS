@@ -24,6 +24,9 @@
 #include "console/config.h"
 #include "controller/threading.h"
 
+/* Shared software test-button latch, owned by modernjvs.c */
+extern volatile int testButtonActive;
+
 #define BITS_PER_LONG (sizeof(long) * 8)
 #define NBITS(x) ((((x)-1) / BITS_PER_LONG) + 1)
 #define OFF(x) ((x) % BITS_PER_LONG)
@@ -326,6 +329,22 @@ static void *deviceThread(void *_args)
                     if (event.value == 1)
                         incrementCoin(io, args->inputs.key[event.code].jvsPlayer, 1);
 
+                    continue;
+                }
+
+                /* BUTTON_TEST on the SYSTEM player is a software latch managed by
+                 * the main thread via testButtonActive.  Toggle the latch on the
+                 * key-down edge so the controller button behaves the same way as
+                 * the dashboard toggle, and skip the direct setSwitch call.
+                 * NOTE: BUTTON_TEST and BUTTON_3 share the same numeric value;
+                 * the jvsPlayer check distinguishes them. */
+                if (args->inputs.key[event.code].output == BUTTON_TEST &&
+                    args->inputs.key[event.code].jvsPlayer == SYSTEM)
+                {
+                    if (event.value != 0)
+                        /* Atomic toggle — safe when multiple controller threads
+                         * or the SIGUSR1 signal handler may toggle concurrently. */
+                        __sync_fetch_and_xor(&testButtonActive, 1);
                     continue;
                 }
 
