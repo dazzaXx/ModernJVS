@@ -1161,7 +1161,7 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
         <div class="stat-card"><div class="val" id="jvsConnection">—</div><div class="lbl">JVS Connection</div></div>
       </div>
       <div class="control-row" style="margin-top:1rem;">
-        <button class="btn" id="testBtnToggle" onclick="toggleTestButton()">&#128994; Activate Test Mode</button>
+        <button class="btn btn-start" id="testBtnToggle" onclick="toggleTestButton()" disabled title="No active JVS connection">&#9654; Activate Test Mode</button>
       </div>
     </div>
 
@@ -1746,27 +1746,29 @@ async function refreshDashboard() {
     `<div class="stat-card"><div class="val" style="font-size:0.85rem;word-break:break-all;">${_escHtml(playerMap[n] || 'Not assigned')}</div><div class="lbl">Player ${n}</div></div>`
   ).join('');
 
-  updateTestButtonUI(!!d.test_button_active);
+  updateTestButtonUI(!!d.test_button_active, d.jvs_connected === true);
 }
 
-function updateTestButtonUI(active) {
+function updateTestButtonUI(active, jvsConnected) {
   const btn = document.getElementById('testBtnToggle');
   if (!btn) return;
+  btn.classList.remove('btn-start', 'btn-stop');
   if (active) {
-    btn.textContent = '\uD83D\uDD34 Deactivate Test Mode';
-    btn.style.background = 'var(--red, #c0392b)';
-    btn.style.color = '#fff';
+    btn.classList.add('btn-stop');
+    btn.textContent = '\u25A0 Deactivate Test Mode';
   } else {
-    btn.textContent = '\uD83D\uDFE2 Activate Test Mode';
-    btn.style.background = '';
-    btn.style.color = '';
+    btn.classList.add('btn-start');
+    btn.textContent = '\u25BA Activate Test Mode';
   }
+  const canUse = !!jvsConnected;
+  btn.disabled = !canUse;
+  btn.title = canUse ? '' : 'No active JVS connection';
 }
 
 async function toggleTestButton() {
   const d = await api('/api/control/test_button', {method: 'POST'});
   if (d.error) { showAlert('dashAlert', 'Error: ' + d.error, true); return; }
-  updateTestButtonUI(!!d.test_button_active);
+  updateTestButtonUI(!!d.test_button_active, d.jvs_connected === true);
 }
 
 async function refreshSysinfo() {
@@ -1844,8 +1846,10 @@ async function serviceAction(action, alertId, successMsg) {
   if (d.error) { showAlert(targetAlert, 'Error: ' + d.error, true); }
   else {
     showAlert(targetAlert, successMsg || ('Service ' + action + ' successful.'), false);
-    // Daemon resets test mode to inactive on start/restart
-    if (action === 'start' || action === 'restart') updateTestButtonUI(false);
+    // Daemon resets test mode to inactive on start/restart; disable the button
+    // immediately — refreshDashboard() fires 1.2s later and will re-enable it
+    // once a JVS connection is confirmed.
+    if (action === 'start' || action === 'restart') updateTestButtonUI(false, false);
   }
   setTimeout(refreshDashboard, 1200);
 }
@@ -6322,7 +6326,8 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
                     "Test mode " + ("activated" if active else "deactivated"),
                     ip=self.client_address[0],
                 )
-                self._json({"ok": True, "test_button_active": active})
+                self._json({"ok": True, "test_button_active": active,
+                            "jvs_connected": get_jvs_connection_status()})
             else:
                 self._json({"error": err}, HTTPStatus.INTERNAL_SERVER_ERROR)
 
