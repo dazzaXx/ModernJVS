@@ -1191,6 +1191,12 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
         <div class="stat-card"><div class="val" id="currentIO2">—</div><div class="lbl">Secondary I/O</div></div>
         <div class="stat-card"><div class="val" id="currentGame">—</div><div class="lbl">Current Game</div></div>
         <div class="stat-card"><div class="val" id="currentDevice">—</div><div class="lbl">Device Path</div></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>JVS Overview</h2>
+      <div class="stat-grid">
         <div class="stat-card"><div class="val" id="jvsConnection">—</div><div class="lbl">JVS Connection</div></div>
         <div class="stat-card stat-card-btn stat-card-disabled" id="testBtnToggle" onclick="toggleTestButton()" title="No active JVS connection" role="button" tabindex="0" onkeydown="if((event.key==='Enter'||event.key===' ')&&!this.classList.contains('stat-card-disabled')){event.preventDefault();toggleTestButton();}">
           <div class="val" id="testModeVal" style="color:var(--muted);">Inactive</div>
