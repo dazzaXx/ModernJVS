@@ -13,6 +13,7 @@ ThreadStatus initThreadManager(void)
     memset(&ThreadManagerData, 0, sizeof(ThreadManagerData));
     pthread_mutex_init(&ThreadManagerData.mutex_manager, NULL);
     pthread_rwlock_init(&ThreadManagerData.rwlock_threads, NULL);
+    ThreadManagerData.testButtonEnabled = 1;
     return THREAD_STATUS_SUCCESS;
 }
 
@@ -66,5 +67,21 @@ void setThreadsRunning(int running)
 {
     pthread_rwlock_wrlock(&ThreadManagerData.rwlock_threads);
     ThreadManagerData.ThreadsRunning = running;
+    pthread_rwlock_unlock(&ThreadManagerData.rwlock_threads);
+}
+
+int getTestButtonEnabled(void)
+{
+    int enabled;
+    pthread_rwlock_rdlock(&ThreadManagerData.rwlock_threads);
+    enabled = ThreadManagerData.testButtonEnabled;
+    pthread_rwlock_unlock(&ThreadManagerData.rwlock_threads);
+    return enabled;
+}
+
+void setTestButtonEnabled(int enabled)
+{
+    pthread_rwlock_wrlock(&ThreadManagerData.rwlock_threads);
+    ThreadManagerData.testButtonEnabled = enabled;
     pthread_rwlock_unlock(&ThreadManagerData.rwlock_threads);
 }

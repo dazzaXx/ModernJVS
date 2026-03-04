@@ -13,6 +13,7 @@ import os
 import re
 import secrets
 import shutil
+import signal
 import subprocess
 import threading
 import time
@@ -30,6 +31,7 @@ LOGO_PATH = "/usr/share/modernjvs/modernjvs2.png"
 STICKS_PATH = "/usr/share/modernjvs/Sticks4.png"
 SERVICE_NAME = "modernjvs"
 WEBUI_SERVICE_NAME = "modernjvs-webui"
+TEST_BUTTON_DISABLED_FILE = "/var/run/modernjvs/test_button_disabled"
 
 MAX_SETTING_STRING_LENGTH = 64  # cap per string field in webui-settings.json
 MAX_PROFILE_UPLOAD_BYTES = 256 * 1024      # 256 KB hard cap for profile files
@@ -61,6 +63,53 @@ _SETTINGS_DEFAULTS = {
 }
 
 _settings_lock = threading.Lock()
+
+_test_button_lock = threading.Lock()
+_test_button_enabled = not os.path.exists(TEST_BUTTON_DISABLED_FILE)
+
+
+def get_test_button_enabled():
+    """Return True if the JVS test button is enabled (not suppressed)."""
+    with _test_button_lock:
+        return _test_button_enabled
+
+
+def set_test_button_enabled(enabled):
+    """Enable or disable the JVS test button and persist the state to disk.
+
+    Creates/removes the flag file that the daemon reads on startup, then
+    signals the running daemon (via SIGUSR1) to update its in-memory flag.
+    Returns (ok, error_message).
+    """
+    global _test_button_enabled
+    try:
+        os.makedirs(os.path.dirname(TEST_BUTTON_DISABLED_FILE), exist_ok=True)
+        if enabled:
+            try:
+                os.remove(TEST_BUTTON_DISABLED_FILE)
+            except FileNotFoundError:
+                pass
+        else:
+            with open(TEST_BUTTON_DISABLED_FILE, "w"):
+                pass
+    except OSError as exc:
+        return False, str(exc)
+
+    with _test_button_lock:
+        _test_button_enabled = enabled
+
+    # Signal the daemon to pick up the new state immediately
+    ok, props_out = systemctl("show", SERVICE_NAME, "--property=MainPID")
+    if ok:
+        for line in props_out.splitlines():
+            if line.startswith("MainPID="):
+                try:
+                    pid = int(line.split("=", 1)[1].strip())
+                    if pid > 0:
+                        os.kill(pid, signal.SIGUSR1)
+                except (ValueError, ProcessLookupError, PermissionError):
+                    pass
+    return True, ""
 
 
 def read_webui_settings():
@@ -1121,6 +1170,9 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
         <div class="stat-card"><div class="val" id="currentDevice">—</div><div class="lbl">Device Path</div></div>
         <div class="stat-card"><div class="val" id="jvsConnection">—</div><div class="lbl">JVS Connection</div></div>
       </div>
+      <div class="control-row" style="margin-top:1rem;">
+        <button class="btn" id="testBtnToggle" onclick="toggleTestButton()">&#128994; Test Button: Enabled</button>
+      </div>
     </div>
 
     <div class="card">
@@ -1703,6 +1755,28 @@ async function refreshDashboard() {
   psEl.innerHTML = [1, 2, 3, 4].map(n =>
     `<div class="stat-card"><div class="val" style="font-size:0.85rem;word-break:break-all;">${_escHtml(playerMap[n] || 'Not assigned')}</div><div class="lbl">Player ${n}</div></div>`
   ).join('');
+
+  updateTestButtonUI(d.test_button_enabled !== false);
+}
+
+function updateTestButtonUI(enabled) {
+  const btn = document.getElementById('testBtnToggle');
+  if (!btn) return;
+  if (enabled) {
+    btn.textContent = '\uD83D\uDFE2 Test Button: Enabled';
+    btn.style.background = '';
+    btn.style.color = '';
+  } else {
+    btn.textContent = '\uD83D\uDD34 Test Button: Disabled';
+    btn.style.background = 'var(--red, #c0392b)';
+    btn.style.color = '#fff';
+  }
+}
+
+async function toggleTestButton() {
+  const d = await api('/api/control/test_button', {method: 'POST'});
+  if (d.error) { showAlert('dashAlert', 'Error: ' + d.error, true); return; }
+  updateTestButtonUI(d.test_button_enabled);
 }
 
 async function refreshSysinfo() {
@@ -3610,12 +3684,13 @@ def get_service_status():
 
     cfg = config_to_api(read_config())
     return {
-        "active_state":  props.get("ActiveState", "unknown"),
-        "main_pid":      props.get("MainPID", ""),
-        "active_since":  props.get("ActiveEnterTimestamp", ""),
-        "config":        cfg,
-        "players":       get_player_slots(logs=logs),
-        "jvs_connected": get_jvs_connection_status(logs=logs),
+        "active_state":       props.get("ActiveState", "unknown"),
+        "main_pid":           props.get("MainPID", ""),
+        "active_since":       props.get("ActiveEnterTimestamp", ""),
+        "config":             cfg,
+        "players":            get_player_slots(logs=logs),
+        "jvs_connected":      get_jvs_connection_status(logs=logs),
+        "test_button_enabled": get_test_button_enabled(),
     }
 
 
@@ -6245,6 +6320,18 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
                 self._json({"ok": True})
             else:
                 self._json({"error": msg}, HTTPStatus.INTERNAL_SERVER_ERROR)
+
+        elif path == "/api/control/test_button":
+            ok, err = set_test_button_enabled(not get_test_button_enabled())
+            if ok:
+                enabled = get_test_button_enabled()
+                audit_log(
+                    "Test button " + ("enabled" if enabled else "disabled"),
+                    ip=self.client_address[0],
+                )
+                self._json({"ok": True, "test_button_enabled": enabled})
+            else:
+                self._json({"error": err}, HTTPStatus.INTERNAL_SERVER_ERROR)
 
         elif path == "/api/webui/restart":
             # Send the response BEFORE restarting — systemctl kills this

@@ -329,6 +329,13 @@ static void *deviceThread(void *_args)
                     continue;
                 }
 
+                /* Suppress the test button if it has been disabled */
+                if (args->inputs.key[event.code].output == BUTTON_TEST && !getTestButtonEnabled())
+                {
+                    setSwitch(io, args->inputs.key[event.code].jvsPlayer, BUTTON_TEST, 0);
+                    continue;
+                }
+
                 setSwitch(io, args->inputs.key[event.code].jvsPlayer, args->inputs.key[event.code].output, event.value == 0 ? 0 : 1);
 
                 if (args->inputs.key[event.code].outputSecondary != NONE)

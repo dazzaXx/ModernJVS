@@ -26,6 +26,7 @@ volatile int running = 1;
 int main(int argc, char **argv)
 {
     signal(SIGINT, handleSignal);
+    signal(SIGUSR1, handleSignal);
 
     /* Read the initial config */
     JVSConfig config;
@@ -63,6 +64,10 @@ int main(int argc, char **argv)
         debug(0, "Critical: Could not initialise the thread manager.\n");
         return EXIT_FAILURE;
     }
+
+    /* Restore persisted test-button state */
+    if (access("/var/run/modernjvs/test_button_disabled", F_OK) == 0)
+        setTestButtonEnabled(0);
 
     /* Init the connection to the Naomi */
     if (!initDevice(config.devicePath, config.senseLineType, config.senseLinePin))
@@ -279,5 +284,9 @@ void handleSignal(int signal)
     {
         debug(0, "\nModernJVS is stopping...\n");
         running = -1;
+    }
+    else if (signal == SIGUSR1)
+    {
+        setTestButtonEnabled(!getTestButtonEnabled());
     }
 }
