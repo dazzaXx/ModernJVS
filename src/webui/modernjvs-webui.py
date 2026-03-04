@@ -1794,11 +1794,12 @@ function updateTestButtonUI(active, jvsConnected) {
   const val  = document.getElementById('testModeVal');
   if (!card) return;
   const canUse = !!jvsConnected;
+  const isActive = canUse && !!active;
   card.classList.toggle('stat-card-disabled', !canUse);
-  card.title = canUse ? (active ? 'Click to deactivate test mode' : 'Click to activate test mode') : 'No active JVS connection';
+  card.title = canUse ? (isActive ? 'Click to deactivate test mode' : 'Click to activate test mode') : 'No active JVS connection';
   if (val) {
-    val.textContent = active ? 'Active' : 'Inactive';
-    val.style.color = active ? 'var(--green)' : 'var(--muted)';
+    val.textContent = isActive ? 'Active' : 'Inactive';
+    val.style.color = isActive ? 'var(--green)' : 'var(--muted)';
   }
 }
 
@@ -3731,13 +3732,20 @@ def get_service_status():
         test_active = False
     else:
         test_active = get_test_button_active()
+    jvs_connected = get_jvs_connection_status(logs=logs)
+    # Test mode is only meaningful with an active JVS connection.  A controller
+    # button mapped to BUTTON_TEST can toggle the daemon's latch even before a
+    # JVS connection is established; suppress the active state here so the
+    # dashboard never shows "Active" without a live connection.
+    if not jvs_connected:
+        test_active = False
     return {
         "active_state":       active_state,
         "main_pid":           props.get("MainPID", ""),
         "active_since":       props.get("ActiveEnterTimestamp", ""),
         "config":             cfg,
         "players":            get_player_slots(logs=logs),
-        "jvs_connected":      get_jvs_connection_status(logs=logs),
+        "jvs_connected":      jvs_connected,
         "test_button_active": test_active,
     }
 
