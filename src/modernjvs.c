@@ -230,14 +230,21 @@ int main(int argc, char **argv)
         {
             processingStatus = processPacket(&io);
 
-            /* Apply software test-button state whenever it changes.
+            /* Apply software test-button state.
              * Snapshot the volatile once so both the comparison and the
-             * setSwitch call operate on the same consistent value. */
+             * setSwitch call operate on the same consistent value.
+             * When active, re-assert on every iteration so that a controller
+             * button mapped to BUTTON_TEST cannot override the software latch
+             * via its key-up event. */
             int activeSnapshot = testButtonActive;
             if (activeSnapshot != lastTestButtonActive)
             {
                 lastTestButtonActive = activeSnapshot;
                 setSwitch(&io, SYSTEM, BUTTON_TEST, activeSnapshot);
+            }
+            else if (activeSnapshot)
+            {
+                setSwitch(&io, SYSTEM, BUTTON_TEST, 1);
             }
             switch (processingStatus)
             {

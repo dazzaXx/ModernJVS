@@ -3685,8 +3685,15 @@ def get_service_status():
     logs = get_logs(since=since) if since else get_logs(200)
 
     cfg = config_to_api(read_config())
+    active_state = props.get("ActiveState", "unknown")
+    # If the daemon is not running, test mode cannot be active.  Reset the
+    # in-memory mirror so stale state does not linger after a crash or stop.
+    if active_state not in ("active", "activating"):
+        global _test_button_active
+        with _test_button_lock:
+            _test_button_active = False
     return {
-        "active_state":       props.get("ActiveState", "unknown"),
+        "active_state":       active_state,
         "main_pid":           props.get("MainPID", ""),
         "active_since":       props.get("ActiveEnterTimestamp", ""),
         "config":             cfg,
@@ -6319,6 +6326,12 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
             ok, msg = systemctl(action, SERVICE_NAME)
             if ok:
                 audit_log(f"Service {action}", SERVICE_NAME, ip=self.client_address[0])
+                # Daemon always starts with test mode inactive; reset the
+                # in-memory mirror so the next status poll reflects reality.
+                if action in ("start", "restart"):
+                    global _test_button_active
+                    with _test_button_lock:
+                        _test_button_active = False
                 self._json({"ok": True})
             else:
                 self._json({"error": msg}, HTTPStatus.INTERNAL_SERVER_ERROR)
