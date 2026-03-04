@@ -337,11 +337,15 @@ static void *deviceThread(void *_args)
                  * key-down edge so the controller button behaves the same way as
                  * the dashboard toggle, and skip the direct setSwitch call.
                  * NOTE: BUTTON_TEST and BUTTON_3 share the same numeric value;
-                 * the jvsPlayer check distinguishes them. */
+                 * the jvsPlayer check distinguishes them.
+                 * Only toggle when a JVS connection is active (deviceID != -1) so
+                 * that pressing the mapped button before the arcade machine has
+                 * enumerated us does not pre-arm the latch and cause test mode to
+                 * activate the moment the connection is established. */
                 if (args->inputs.key[event.code].output == BUTTON_TEST &&
                     args->inputs.key[event.code].jvsPlayer == SYSTEM)
                 {
-                    if (event.value != 0)
+                    if (event.value != 0 && args->jvsIO->deviceID != -1)
                         /* Atomic toggle — safe when multiple controller threads
                          * or the SIGUSR1 signal handler may toggle concurrently. */
                         __sync_fetch_and_xor(&testButtonActive, 1);
