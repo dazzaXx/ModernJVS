@@ -20,7 +20,6 @@ typedef struct
     /* Data to be shared between threads */
     pthread_rwlock_t rwlock_threads;
     int ThreadsRunning;
-    int testButtonEnabled;
 } ThreadSharedData;
 
 ThreadStatus initThreadManager(void);
@@ -28,7 +27,5 @@ ThreadStatus createThread(void *thread_entry(void *), void *args);
 void stopAllThreads(void);
 void setThreadsRunning(int Running);
 int getThreadsRunning(void);
-void setTestButtonEnabled(int enabled);
-int getTestButtonEnabled(void);
 
 #endif // THREADING_H_

@@ -22,6 +22,7 @@ void cleanup(void);
 void handleSignal(int signal);
 
 volatile int running = 1;
+volatile int testButtonActive = 0;
 
 int main(int argc, char **argv)
 {
@@ -64,10 +65,6 @@ int main(int argc, char **argv)
         debug(0, "Critical: Could not initialise the thread manager.\n");
         return EXIT_FAILURE;
     }
-
-    /* Restore persisted test-button state */
-    if (access("/var/run/modernjvs/test_button_disabled", F_OK) == 0)
-        setTestButtonEnabled(0);
 
     /* Init the connection to the Naomi */
     if (!initDevice(config.devicePath, config.senseLineType, config.senseLinePin))
@@ -228,9 +225,20 @@ int main(int argc, char **argv)
 
         /* Process packets forever */
         JVSStatus processingStatus;
+        int lastTestButtonActive = 0;
         while (running == 1)
         {
             processingStatus = processPacket(&io);
+
+            /* Apply software test-button state whenever it changes.
+             * Snapshot the volatile once so both the comparison and the
+             * setSwitch call operate on the same consistent value. */
+            int activeSnapshot = testButtonActive;
+            if (activeSnapshot != lastTestButtonActive)
+            {
+                lastTestButtonActive = activeSnapshot;
+                setSwitch(&io, SYSTEM, BUTTON_TEST, activeSnapshot);
+            }
             switch (processingStatus)
             {
             case JVS_STATUS_ERROR_CHECKSUM:
@@ -287,6 +295,6 @@ void handleSignal(int signal)
     }
     else if (signal == SIGUSR1)
     {
-        setTestButtonEnabled(!getTestButtonEnabled());
+        testButtonActive = !testButtonActive;
     }
 }
