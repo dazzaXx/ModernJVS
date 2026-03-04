@@ -712,6 +712,10 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
   }
   .stat-card .val { font-size: 1.4rem; font-weight: 700; color: var(--accent2); }
   .stat-card .lbl { font-size: 0.78rem; color: var(--muted); margin-top: 0.3rem; text-transform: uppercase; letter-spacing: 0.06em; }
+  .stat-card-btn { cursor: pointer; transition: border-color 0.15s, background 0.15s, transform 0.1s; user-select: none; }
+  .stat-card-btn:hover:not(.stat-card-disabled) { border-color: var(--accent); background: rgba(151,0,17,0.15); }
+  .stat-card-btn:active:not(.stat-card-disabled) { transform: scale(0.97); }
+  .stat-card-btn.stat-card-disabled { opacity: 0.45; cursor: not-allowed; }
 
   /* --- version badge in header --- */
   .ver-badge {
@@ -1159,9 +1163,10 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
         <div class="stat-card"><div class="val" id="currentGame">—</div><div class="lbl">Current Game</div></div>
         <div class="stat-card"><div class="val" id="currentDevice">—</div><div class="lbl">Device Path</div></div>
         <div class="stat-card"><div class="val" id="jvsConnection">—</div><div class="lbl">JVS Connection</div></div>
-      </div>
-      <div class="control-row" style="margin-top:1rem;">
-        <button class="btn btn-start" id="testBtnToggle" onclick="toggleTestButton()" disabled title="No active JVS connection">&#9654; Activate Test Mode</button>
+        <div class="stat-card stat-card-btn stat-card-disabled" id="testBtnToggle" onclick="toggleTestButton()" title="No active JVS connection" role="button" tabindex="0" onkeydown="if((event.key==='Enter'||event.key===' ')&&!this.classList.contains('stat-card-disabled')){event.preventDefault();toggleTestButton();}">
+          <div class="val" id="testModeVal" style="color:var(--muted);">Inactive</div>
+          <div class="lbl">Test Mode</div>
+        </div>
       </div>
     </div>
 
@@ -1750,22 +1755,21 @@ async function refreshDashboard() {
 }
 
 function updateTestButtonUI(active, jvsConnected) {
-  const btn = document.getElementById('testBtnToggle');
-  if (!btn) return;
-  btn.classList.remove('btn-start', 'btn-stop');
-  if (active) {
-    btn.classList.add('btn-stop');
-    btn.textContent = '\u25A0 Deactivate Test Mode';
-  } else {
-    btn.classList.add('btn-start');
-    btn.textContent = '\u25BA Activate Test Mode';
-  }
+  const card = document.getElementById('testBtnToggle');
+  const val  = document.getElementById('testModeVal');
+  if (!card) return;
   const canUse = !!jvsConnected;
-  btn.disabled = !canUse;
-  btn.title = canUse ? '' : 'No active JVS connection';
+  card.classList.toggle('stat-card-disabled', !canUse);
+  card.title = canUse ? (active ? 'Click to deactivate test mode' : 'Click to activate test mode') : 'No active JVS connection';
+  if (val) {
+    val.textContent = active ? 'Active' : 'Inactive';
+    val.style.color = active ? 'var(--green)' : 'var(--muted)';
+  }
 }
 
 async function toggleTestButton() {
+  const card = document.getElementById('testBtnToggle');
+  if (card && card.classList.contains('stat-card-disabled')) return;
   const d = await api('/api/control/test_button', {method: 'POST'});
   if (d.error) { showAlert('dashAlert', 'Error: ' + d.error, true); return; }
   updateTestButtonUI(!!d.test_button_active, d.jvs_connected === true);
