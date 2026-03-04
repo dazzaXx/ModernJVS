@@ -60,3 +60,4 @@ _codeql_detected_source_root
 # Python cache
 __pycache__/
 *.pyc
+build_check/
