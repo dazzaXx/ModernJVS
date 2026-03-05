@@ -3570,8 +3570,10 @@ def write_config(new_values):
             new_lines.append(f"{directive} {value}\n")
 
     try:
-        with open(CONFIG_PATH, "w") as f:
+        tmp_path = CONFIG_PATH + ".tmp"
+        with open(tmp_path, "w") as f:
             f.writelines(new_lines)
+        os.replace(tmp_path, CONFIG_PATH)
     except OSError as e:
         return False, str(e)
 

@@ -206,7 +206,11 @@ int setSerialAttributes(int fd, int myBaud)
 {
   struct termios options;
   int status;
-  tcgetattr(fd, &options);
+  if (tcgetattr(fd, &options) != 0)
+  {
+    debug(0, "Error: Failed to get serial attributes: %s\n", strerror(errno));
+    return -1;
+  }
 
   cfmakeraw(&options);
   cfsetispeed(&options, myBaud);
@@ -221,9 +225,13 @@ int setSerialAttributes(int fd, int myBaud)
   options.c_oflag &= ~OPOST;
 
   options.c_cc[VMIN] = 0;
-  options.c_cc[VTIME] = 0; // One seconds (10 deciseconds)
+  options.c_cc[VTIME] = 0; // No timeout (non-blocking reads)
 
-  tcsetattr(fd, TCSANOW, &options);
+  if (tcsetattr(fd, TCSANOW, &options) != 0)
+  {
+    debug(0, "Error: Failed to set serial attributes: %s\n", strerror(errno));
+    return -1;
+  }
 
   ioctl(fd, TIOCMGET, &status);
 
