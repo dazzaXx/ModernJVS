@@ -19,7 +19,12 @@ SERVICES_MSG = $(if $(filter ON,$(ENABLE_SERVICES)),enabled (use ENABLE_SERVICES
 default: $(BUILD)/Makefile
 	@cd $(BUILD) && $(MAKE) --no-print-directory
 
-install: default
+# Always reconfigure cmake with the current WEBUI flag so that switching
+# between WEBUI=ON and WEBUI=OFF is safe even with an existing build directory.
+install:
+	@mkdir -p $(BUILD)
+	@cd $(BUILD) && cmake .. -DENABLE_WEBUI=$(WEBUI)
+	@cd $(BUILD) && $(MAKE) --no-print-directory
 	@echo "-- Services: $(SERVICES_MSG)"
 	@cd $(BUILD) && cpack
 	@sudo dpkg --install $(BUILD)/*.deb
@@ -47,10 +52,13 @@ endif
 clean:
 	@rm -rf $(BUILD)
 
-# Manually enable and immediately start both services.
+# Manually enable and immediately start services.
+# Only enables modernjvs-webui if its service file has been installed.
 # Useful if ENABLE_SERVICES=OFF was used during installation.
 enable-services:
-	@sudo systemctl enable --now $(SERVICE_NAME) $(WEBUI_SERVICE_NAME)
+	@sudo systemctl enable --now $(SERVICE_NAME)
+	@test -f /etc/systemd/system/$(WEBUI_SERVICE_NAME).service && \
+		sudo systemctl enable --now $(WEBUI_SERVICE_NAME) || true
 
 $(BUILD)/Makefile:
 	@mkdir -p $(BUILD)

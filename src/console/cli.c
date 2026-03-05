@@ -327,7 +327,7 @@ static JVSCLIStatus printListing(void)
         return JVS_CLI_STATUS_ERROR;
     }
 
-    if (!getInputs(deviceList))
+    if (getInputs(deviceList) != JVS_INPUT_STATUS_SUCCESS)
     {
         debug(0, "ModernJVS failed to detect any controllers.\nMake sure you are running as root.\n");
         return JVS_CLI_STATUS_ERROR;
@@ -436,6 +436,11 @@ JVSCLIStatus parseArguments(int argc, char **argv, char *map)
     }
     else if (strcmp(argv[1], "--edit") == 0)
     {
+        if (argc < 3)
+        {
+            debug(0, "Error: --edit requires a filename argument\n");
+            return JVS_CLI_STATUS_ERROR;
+        }
         return editFile(argv[2]);
     }
 

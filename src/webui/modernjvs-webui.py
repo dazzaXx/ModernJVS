@@ -3570,8 +3570,10 @@ def write_config(new_values):
             new_lines.append(f"{directive} {value}\n")
 
     try:
-        with open(CONFIG_PATH, "w") as f:
+        tmp_path = CONFIG_PATH + ".tmp"
+        with open(tmp_path, "w") as f:
             f.writelines(new_lines)
+        os.replace(tmp_path, CONFIG_PATH)
     except OSError as e:
         return False, str(e)
 
@@ -6740,6 +6742,9 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
             content_length = int(self.headers.get("Content-Length", 0))
         except (ValueError, TypeError):
             content_length = 0
+        if content_length < 0:
+            self._json({"error": "Invalid Content-Length."}, HTTPStatus.BAD_REQUEST)
+            return
         if content_length > MAX_PROFILE_UPLOAD_BYTES:
             self._json(
                 {"error": f"File too large. Maximum size is {MAX_PROFILE_UPLOAD_BYTES // 1024} KB."},

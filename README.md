@@ -85,11 +85,13 @@ sudo make install-no-webui
 
 This target always reconfigures cmake with `-DENABLE_WEBUI=OFF` before building, so it works correctly regardless of whether a build directory already exists. The `modernjvs` service is still automatically enabled and started (only `modernjvs-webui` is skipped).
 
-Alternatively, on a **fresh checkout** (or after `sudo make clean`), you can pass the flag explicitly:
+Alternatively, you can pass the flag to the standard `install` target:
 
 ```
 sudo make install WEBUI=OFF
 ```
+
+This also always reconfigures cmake with the correct flag, so it works correctly even with an existing build directory.
 
 ### Installing without auto-enabling services
 
@@ -105,10 +107,12 @@ This applies to both `install` and `install-no-webui`. You can then enable the s
 sudo make enable-services
 ```
 
-or directly with systemctl:
+`make enable-services` automatically detects whether the WebUI service was installed and only enables it if present. Alternatively, enable services directly with systemctl:
 
 ```
-sudo systemctl enable --now modernjvs modernjvs-webui
+sudo systemctl enable --now modernjvs
+# Only if the WebUI was installed:
+sudo systemctl enable --now modernjvs-webui
 ```
 
 ## Supported Hardware

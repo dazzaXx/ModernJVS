@@ -120,23 +120,20 @@ static void *wiiDeviceThread(void *_args)
             case EV_ABS:
             {
                 bool outOfBounds = true;
-                if (event.type == EV_ABS)
+                switch (event.code)
                 {
-                    switch (event.code)
-                    {
-                    case 16:
-                        x0 = event.value;
-                        break;
-                    case 17:
-                        y0 = event.value;
-                        break;
-                    case 18:
-                        x1 = event.value;
-                        break;
-                    case 19:
-                        y1 = event.value;
-                        break;
-                    }
+                case 16:
+                    x0 = event.value;
+                    break;
+                case 17:
+                    y0 = event.value;
+                    break;
+                case 18:
+                    x1 = event.value;
+                    break;
+                case 19:
+                    y1 = event.value;
+                    break;
                 }
 
                 if ((x0 != 1023) && (x1 != 1023) && (y0 != 1023) && (y1 != 1023))
@@ -167,7 +164,7 @@ static void *wiiDeviceThread(void *_args)
                     double finalY = 1.0f - ((double)valuey / (double)1023);
 
                     // check for out-of-bound after rotation ..
-                    if ((!(finalX > 1.0f) || (finalY > 1.0f) || (finalX < 0) || (finalY < 0)))
+                    if (!(finalX > 1.0f || finalY > 1.0f || finalX < 0 || finalY < 0))
                     {
                         setAnalogue(args->jvsIO, args->inputs.abs[ABS_X].output, args->inputs.abs[ABS_X].reverse ? 1 - finalX : finalX);
                         setAnalogue(args->jvsIO, args->inputs.abs[ABS_Y].output, args->inputs.abs[ABS_Y].reverse ? 1 - finalY : finalY);
@@ -256,7 +253,10 @@ static void *deviceThread(void *_args)
             int currentValue = absoluteFeatures.value;
 
             /* Apply the same scaling calculation as in the event loop */
-            double scaled = ((double)((double)currentValue * (double)args->inputs.absMultiplier[axisIndex]) - args->inputs.absMin[axisIndex]) / (args->inputs.absMax[axisIndex] - args->inputs.absMin[axisIndex]);
+            double axisRange = args->inputs.absMax[axisIndex] - args->inputs.absMin[axisIndex];
+            if (axisRange < MIN_DIVISION_THRESHOLD)
+                continue;
+            double scaled = ((double)((double)currentValue * (double)args->inputs.absMultiplier[axisIndex]) - args->inputs.absMin[axisIndex]) / axisRange;
 
             /* Clamp to [0, 1] range */
             scaled = scaled > 1 ? 1 : scaled;
@@ -425,7 +425,10 @@ static void *deviceThread(void *_args)
                 /* Handle normally mapped analogue controls */
                 if (args->inputs.absEnabled[event.code])
                 {
-                    double scaled = ((double)((double)event.value * (double)args->inputs.absMultiplier[event.code]) - args->inputs.absMin[event.code]) / (args->inputs.absMax[event.code] - args->inputs.absMin[event.code]);
+                    double eventRange = args->inputs.absMax[event.code] - args->inputs.absMin[event.code];
+                    if (eventRange < MIN_DIVISION_THRESHOLD)
+                        continue;
+                    double scaled = ((double)((double)event.value * (double)args->inputs.absMultiplier[event.code]) - args->inputs.absMin[event.code]) / eventRange;
 
                     /* Make sure it doesn't go over 1 or below 0 if its multiplied */
                     scaled = scaled > 1 ? 1 : scaled;
@@ -592,6 +595,7 @@ static int processMappings(InputMappings *inputMappings, OutputMappings *outputM
                             tempMapping.outputSecondary = outputMappings->mappings[p].output;
                             tempMapping.type = HAT;
                             found = 1;
+                            foundSecondaryMapping = 1;
                             break;
                         }
                     }
@@ -711,8 +715,14 @@ JVSInputStatus getInputs(DeviceList *deviceList)
 
     int scannedCount = scandir(DEV_INPUT_EVENT, &namelist, isEventDevice, alphasort);
 
-    if (scannedCount == 0)
+    if (scannedCount < 0)
         return JVS_INPUT_STATUS_NO_DEVICE_ERROR;
+
+    if (scannedCount == 0)
+    {
+        free(namelist);
+        return JVS_INPUT_STATUS_NO_DEVICE_ERROR;
+    }
 
     char aimtrakRemap[3][32] = {
         AIMTRAK_DEVICE_NAME_REMAP_JOYSTICK,

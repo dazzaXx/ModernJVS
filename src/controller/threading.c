@@ -26,8 +26,15 @@ ThreadStatus createThread(void *thread_entry(void *), void *args)
 
     if (status == THREAD_STATUS_SUCCESS)
     {
-        pthread_create(&ThreadManagerData.threadID[ThreadManagerData.threadCount], NULL, thread_entry, args);
-        ThreadManagerData.threadCount++;
+        int rc = pthread_create(&ThreadManagerData.threadID[ThreadManagerData.threadCount], NULL, thread_entry, args);
+        if (rc != 0)
+        {
+            status = THREAD_STATUS_ERROR;
+        }
+        else
+        {
+            ThreadManagerData.threadCount++;
+        }
     }
 
     pthread_mutex_unlock(&ThreadManagerData.mutex_manager);

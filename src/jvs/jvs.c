@@ -271,11 +271,12 @@ JVSStatus processPacket(JVSIO *jvsIO)
 		{
 			debug(1, "CMD_RESET - Resetting all devices\n");
 			size = 2;
-			jvsIO->deviceID = -1;
-			while (jvsIO->chainedIO != NULL)
+			JVSIO *tmpIO = jvsIO;
+			tmpIO->deviceID = -1;
+			while (tmpIO->chainedIO != NULL)
 			{
-				jvsIO = jvsIO->chainedIO;
-				jvsIO->deviceID = -1;
+				tmpIO = tmpIO->chainedIO;
+				tmpIO->deviceID = -1;
 			}
 			setSenseLine(0);
 			debug(0, "JVS: Connection reset\n");
@@ -287,8 +288,9 @@ JVSStatus processPacket(JVSIO *jvsIO)
 		{
 			size = 2;
 
+			/* Find the first device in the chain that has not yet been assigned an address */
 			JVSIO *ioToAssign = jvsIO;
-			while (ioToAssign->chainedIO != NULL && ioToAssign->chainedIO->deviceID == -1)
+			while (ioToAssign->deviceID != -1 && ioToAssign->chainedIO != NULL)
 			{
 				ioToAssign = ioToAssign->chainedIO;
 			}
@@ -297,7 +299,19 @@ JVSStatus processPacket(JVSIO *jvsIO)
 			debug(1, "CMD_ASSIGN_ADDR - Assigning address 0x%02X\n", ioToAssign->deviceID);
 			outputPacket.data[outputPacket.length++] = REPORT_SUCCESS;
 
-			if (jvsIO->deviceID != -1)
+			/* Raise the sense line only after all devices in the chain have been assigned */
+			int allAssigned = 1;
+			JVSIO *checkIO = jvsIO;
+			while (checkIO != NULL)
+			{
+				if (checkIO->deviceID == -1)
+				{
+					allAssigned = 0;
+					break;
+				}
+				checkIO = checkIO->chainedIO;
+			}
+			if (allAssigned)
 			{
 				setSenseLine(1);
 				debug(0, "JVS: Connection established\n");
@@ -411,6 +425,11 @@ JVSStatus processPacket(JVSIO *jvsIO)
 			debug(1, "CMD_READ_COINS - Reading %d coin slot(s)\n", numberCoinSlots);
 			outputPacket.data[outputPacket.length++] = REPORT_SUCCESS;
 
+			if (numberCoinSlots > JVS_MAX_STATE_SIZE)
+			{
+				debug(0, "Error: Coin slot count %d exceeds maximum %d in CMD_READ_COINS\n", numberCoinSlots, JVS_MAX_STATE_SIZE);
+				return JVS_STATUS_ERROR;
+			}
 			for (int i = 0; i < numberCoinSlots; i++)
 			{
 				// Bounds check to prevent buffer overflow
@@ -435,6 +454,11 @@ JVSStatus processPacket(JVSIO *jvsIO)
 
 			outputPacket.data[outputPacket.length++] = REPORT_SUCCESS;
 
+			if (numberChannels > JVS_MAX_STATE_SIZE)
+			{
+				debug(0, "Error: Analogue channel count %d exceeds maximum %d in CMD_READ_ANALOGS\n", numberChannels, JVS_MAX_STATE_SIZE);
+				return JVS_STATUS_ERROR;
+			}
 			for (int i = 0; i < numberChannels; i++)
 			{
 				// Bounds check to prevent buffer overflow
@@ -460,6 +484,11 @@ JVSStatus processPacket(JVSIO *jvsIO)
 
 			outputPacket.data[outputPacket.length++] = REPORT_SUCCESS;
 
+			if (numberChannels > JVS_MAX_STATE_SIZE)
+			{
+				debug(0, "Error: Rotary channel count %d exceeds maximum %d in CMD_READ_ROTARY\n", numberChannels, JVS_MAX_STATE_SIZE);
+				return JVS_STATUS_ERROR;
+			}
 			for (int i = 0; i < numberChannels; i++)
 			{
 				// Bounds check to prevent buffer overflow
@@ -939,14 +968,17 @@ JVSStatus writePacket(JVSPacket *packet)
 	int written = 0, timeout = 0;
 	while (written < outputIndex)
 	{
-		if (written != 0)
-			timeout = 0;
-
 		if (timeout > JVS_RETRY_COUNT)
 			return JVS_STATUS_ERROR_WRITE_FAIL;
 
-		written += writeBytes(outputBuffer + written, outputIndex - written);
-		timeout++;
+		int result = writeBytes(outputBuffer + written, outputIndex - written);
+		if (result <= 0)
+		{
+			timeout++;
+			continue;
+		}
+		written += result;
+		timeout = 0;
 	}
 
 	return JVS_STATUS_SUCCESS;

@@ -459,7 +459,7 @@ JVSConfigStatus parseOutputMapping(char *path, OutputMappings *outputMappings, c
                 secondConfigPath[MAX_PATH_LENGTH - 1] = '\0';
             }
         }
-        else if (command[11] == 'B' || analogueToDigital)
+        else if ((strlen(command) > 11 && command[11] == 'B') || analogueToDigital)
         {
             char *token1 = getNextToken(NULL, " ", &saveptr);
             char *token2 = getNextToken(NULL, " ", &saveptr);
@@ -489,7 +489,7 @@ JVSConfigStatus parseOutputMapping(char *path, OutputMappings *outputMappings, c
             outputMappings->mappings[outputMappings->length] = mapping;
             outputMappings->length++;
         }
-        else if (command[11] == 'A')
+        else if (strlen(command) > 11 && command[11] == 'A')
         {
             char *token1 = getNextToken(NULL, " ", &saveptr);
             char *token2 = getNextToken(NULL, " ", &saveptr);
@@ -515,7 +515,7 @@ JVSConfigStatus parseOutputMapping(char *path, OutputMappings *outputMappings, c
             outputMappings->mappings[outputMappings->length] = mapping;
             outputMappings->length++;
         }
-        else if (command[11] == 'R')
+        else if (strlen(command) > 11 && command[11] == 'R')
         {
             char *token1 = getNextToken(NULL, " ", &saveptr);
             char *token2 = getNextToken(NULL, " ", &saveptr);
