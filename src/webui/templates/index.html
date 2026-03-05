@@ -1,0 +1,576 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ModernJVS WebUI</title>
+<link rel="icon" type="image/png" href="__STICKS__">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header>
+  <img id="logo" src="__LOGO__" alt="ModernJVS">
+  <h1>WebUI<span class="ver-badge" id="verBadge"></span></h1>
+  <div class="status-badge">
+    <span class="dot" id="statusDot"></span>
+    <span id="statusText">Loading…</span>
+  </div>
+</header>
+
+<div class="container">
+  <div class="tabs">
+    <button class="tab active" onclick="showTab('dashboard', this)">Dashboard</button>
+    <button class="tab" onclick="showTab('config', this)">Configuration</button>
+    <button class="tab" onclick="showTab('monitor', this)">Monitor &amp; Logs</button>
+    <button class="tab" onclick="showTab('profiles', this)">Profiles</button>
+    <button class="tab" onclick="showTab('devices', this)">Devices</button>
+    <button class="tab" onclick="showTab('diagnostics', this)">&#x26A0; Diagnostics</button>
+    <button class="tab" onclick="showTab('webui-settings', this)">&#9881; WebUI Settings</button>
+  </div>
+
+  <!-- ====== DASHBOARD ====== -->
+  <div id="panel-dashboard" class="panel active">
+    <div id="dashAlert" class="alert"></div>
+
+    <div class="card">
+      <h2>Service Control</h2>
+      <div class="control-row">
+        <button class="btn btn-start"   onclick="serviceAction('start')">▶ Start</button>
+        <button class="btn btn-stop"    onclick="serviceAction('stop')">■ Stop</button>
+        <button class="btn btn-restart" onclick="serviceAction('restart')">↺ Restart</button>
+        <button class="btn btn-refresh" onclick="refreshDashboard()">⟳ Refresh Status</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>System Overview</h2>
+      <div class="stat-grid" id="statGrid">
+        <div class="stat-card"><div class="val" id="svcState">—</div><div class="lbl">Service State</div></div>
+        <div class="stat-card"><div class="val" id="svcPid">—</div><div class="lbl">PID</div></div>
+        <div class="stat-card"><div class="val" id="svcUptime">—</div><div class="lbl">Active Since</div></div>
+        <div class="stat-card"><div class="val" id="currentIO">—</div><div class="lbl">Emulated I/O</div></div>
+        <div class="stat-card"><div class="val" id="currentIO2">—</div><div class="lbl">Secondary I/O</div></div>
+        <div class="stat-card"><div class="val" id="currentGame">—</div><div class="lbl">Current Game</div></div>
+        <div class="stat-card"><div class="val" id="currentDevice">—</div><div class="lbl">Device Path</div></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>JVS Overview</h2>
+      <div class="stat-grid">
+        <div class="stat-card"><div class="val" id="jvsConnection">—</div><div class="lbl">JVS Connection</div></div>
+        <div class="stat-card stat-card-btn stat-card-disabled" id="testBtnToggle" onclick="toggleTestButton()" title="No active JVS connection" role="button" tabindex="0" onkeydown="if((event.key==='Enter'||event.key===' ')&&!this.classList.contains('stat-card-disabled')){event.preventDefault();toggleTestButton();}">
+          <div class="val" id="testModeVal" style="color:var(--muted);">Inactive</div>
+          <div class="lbl">Test Mode</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Player Assignments</h2>
+      <div class="stat-grid" id="playerSlots">
+        <div class="stat-card"><div class="val" style="font-size:0.85rem;word-break:break-all;">—</div><div class="lbl">Player 1</div></div>
+        <div class="stat-card"><div class="val" style="font-size:0.85rem;word-break:break-all;">—</div><div class="lbl">Player 2</div></div>
+        <div class="stat-card"><div class="val" style="font-size:0.85rem;word-break:break-all;">—</div><div class="lbl">Player 3</div></div>
+        <div class="stat-card"><div class="val" style="font-size:0.85rem;word-break:break-all;">—</div><div class="lbl">Player 4</div></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Pi System Usage <button class="btn btn-refresh btn-xs" onclick="refreshSysinfo()" style="margin-left:0.5rem;vertical-align:middle;">⟳</button></h2>
+      <div class="usage-row">
+        <div class="usage-header">
+          <span class="usage-label">CPU Usage</span>
+          <span class="usage-value" id="siCpu">—</span>
+        </div>
+        <div class="progress"><div class="progress-bar" id="siCpuBar" style="width:0%"></div></div>
+      </div>
+      <div class="usage-row">
+        <div class="usage-header">
+          <span class="usage-label">Memory</span>
+          <span class="usage-value" id="siMem">—</span>
+        </div>
+        <div class="progress"><div class="progress-bar" id="siMemBar" style="width:0%"></div></div>
+      </div>
+      <div class="usage-row">
+        <div class="usage-header">
+          <span class="usage-label">CPU Temperature</span>
+          <span class="usage-value" id="siTemp">—</span>
+        </div>
+        <div class="progress"><div class="progress-bar" id="siTempBar" style="width:0%"></div></div>
+      </div>
+      <div class="usage-row">
+        <div class="usage-header">
+          <span class="usage-label">Disk Usage (/)</span>
+          <span class="usage-value" id="siDisk">—</span>
+        </div>
+        <div class="progress"><div class="progress-bar" id="siDiskBar" style="width:0%"></div></div>
+      </div>
+      <div class="sysinfo-footer">Load Average: <span id="siLoad">—</span></div>
+      <div class="ip-info">Access WebUI from other devices: <span id="siIP">—</span></div>
+    </div>
+  </div>
+
+  <!-- ====== CONFIG ====== -->
+  <div id="panel-config" class="panel">
+    <div id="cfgAlert" class="alert"></div>
+    <div class="card">
+      <h2>Game &amp; I/O Configuration</h2>
+      <div class="form-grid">
+        <div class="field">
+          <label>Emulated I/O Board</label>
+          <select id="cfgEmulate"></select>
+        </div>
+        <div class="field">
+          <label>Default Game</label>
+          <select id="cfgGame"></select>
+        </div>
+        <div class="field">
+          <label>Device Path</label>
+          <input type="text" id="cfgDevice" placeholder="/dev/ttyUSB0">
+        </div>
+        <div class="field">
+          <label>Sense Line Type (0/1)</label>
+          <select id="cfgSense">
+            <option value="0">0 – USB RS485, no sense line</option>
+            <option value="1">1 – USB RS485, with sense line</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Sense Line GPIO Pin</label>
+          <input type="number" id="cfgPin" min="1" max="40" placeholder="26">
+        </div>
+        <div class="field">
+          <label>Debug Mode (0/1/2)</label>
+          <select id="cfgDebug">
+            <option value="0">0 – Off</option>
+            <option value="1">1 – JVS outputs</option>
+            <option value="2">2 – Raw packets</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Auto Controller Detection</label>
+          <select id="cfgAutoCtrl">
+            <option value="1">Enabled</option>
+            <option value="0">Disabled</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Analog Deadzone – Player 1</label>
+          <input type="number" id="cfgDz1" step="0.01" min="0" max="0.5" placeholder="0.2">
+        </div>
+        <div class="field">
+          <label>Analog Deadzone – Player 2</label>
+          <input type="number" id="cfgDz2" step="0.01" min="0" max="0.5" placeholder="0.2">
+        </div>
+        <div class="field">
+          <label>Analog Deadzone – Player 3</label>
+          <input type="number" id="cfgDz3" step="0.01" min="0" max="0.5" placeholder="0.2">
+        </div>
+        <div class="field">
+          <label>Analog Deadzone – Player 4</label>
+          <input type="number" id="cfgDz4" step="0.01" min="0" max="0.5" placeholder="0.2">
+        </div>
+        <div class="field">
+          <label>Secondary I/O Board (EMULATE_SECOND)</label>
+          <select id="cfgEmulate2"></select>
+        </div>
+      </div>
+      <br>
+      <div class="control-row">
+        <button class="btn btn-save" onclick="saveConfig()">💾 Save Configuration</button>
+        <button class="btn btn-restart" onclick="saveConfigAndRestart()">💾↺ Save &amp; Restart Service</button>
+        <button class="btn btn-refresh" onclick="loadConfig()">⟳ Reload from Disk</button>
+        <button class="btn btn-danger" onclick="resetConfig()">↩ Reset to Defaults</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ====== MONITOR ====== -->
+  <div id="panel-monitor" class="panel">
+    <div class="card">
+      <h2>Live Log Monitor</h2>
+      <div class="log-controls">
+        <button class="btn btn-refresh" onclick="fetchLogs()">⟳ Refresh</button>
+        <button class="btn btn-refresh btn-xs" onclick="downloadLogs()" style="background:var(--border);">⬇ Download</button>
+        <label>
+          <input type="checkbox" id="autoRefresh" onchange="toggleAutoRefresh()"> Auto-refresh (5s)
+        </label>
+        <label>
+          Lines:
+          <select id="logLines" style="background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--text);padding:0.25rem 0.5rem;">
+            <option value="50">50</option>
+            <option value="100" selected>100</option>
+            <option value="200">200</option>
+            <option value="500">500</option>
+          </select>
+        </label>
+        <label>
+          <input type="checkbox" id="scrollBottom" checked> Scroll to bottom
+        </label>
+      </div>
+      <div class="log-wrap" id="logBox"></div>
+    </div>
+
+    <div class="card">
+      <h2>Log Filter</h2>
+      <div class="log-filter-bar" style="margin-bottom:0.75rem;">
+        <span style="font-size:0.82rem;color:var(--muted);">Filter:</span>
+        <select id="logFilter" onchange="applyJvsFilter()">
+          <option value="all">All Messages</option>
+          <option value="errors">Errors &amp; Critical</option>
+          <option value="warnings">Warnings</option>
+          <option value="jvs" selected>JVS Activity</option>
+          <option value="controllers">Controllers</option>
+        </select>
+        <input type="text" id="logSearch" placeholder="Search…" oninput="applyJvsFilter()">
+        <button class="btn btn-refresh btn-xs" onclick="clearLogFilter()">✕ Clear</button>
+      </div>
+      <div id="logFilterHint" style="display:none;font-size:0.8rem;color:var(--yellow);margin-bottom:0.5rem;padding:0.35rem 0.5rem;border-left:3px solid var(--yellow);background:rgba(255,200,0,0.06);">
+        ⚠ <strong>JVS Activity</strong> shows <code style="color:var(--accent2)">CMD_</code> debug messages —
+        these are only logged when <strong>Debug Mode</strong> is set to <strong>1</strong> or <strong>2</strong>
+        in the <a href="#" onclick="showTab('config',document.querySelector('.tab[onclick*=\'config\']'));return false;"
+          style="color:var(--accent)">Configuration</a> tab.
+      </div>
+      <div class="log-wrap" id="jvsBox" style="height:340px;"></div>
+    </div>
+
+    <div class="card">
+      <h2>Audit Log <button class="btn btn-refresh btn-xs" onclick="loadAuditLog()" style="margin-left:0.5rem;vertical-align:middle;">⟳ Refresh</button></h2>
+      <p style="font-size:0.82rem;color:var(--muted);margin-bottom:0.75rem;">WebUI actions: config changes, service restarts, logins, Bluetooth pairings, profile edits.</p>
+      <div class="log-wrap" id="auditLogBox" style="height:300px;"></div>
+    </div>
+  </div>
+
+  <!-- ====== PROFILES ====== -->
+  <div id="panel-profiles" class="panel">
+    <div class="card">
+      <h2>Profile Editor</h2>
+      <div id="profilesAlert" class="alert"></div>
+      <div style="display:flex;gap:0.5rem;margin-bottom:1rem;flex-wrap:wrap;align-items:center;">
+        <button class="btn btn-xs" id="profTabGames"   onclick="setProfileTab('games')"   style="background:var(--accent);color:#fff;">Games</button>
+        <button class="btn btn-xs" id="profTabDevices" onclick="setProfileTab('devices')" style="">Devices</button>
+        <button class="btn btn-xs" id="profTabIos"     onclick="setProfileTab('ios')"     style="">I/O Boards</button>
+        <span style="flex:1"></span>
+        <button class="btn btn-xs btn-refresh" onclick="newProfileFile()">+ New File</button>
+        <label class="btn btn-xs" style="cursor:pointer;margin:0;">
+          ⬆ Upload
+          <input type="file" id="profileUploadInputTop" style="display:none;" onchange="uploadProfile(this)">
+        </label>
+      </div>
+      <div class="table-wrap">
+      <table class="device-table" id="profilesTable">
+        <thead><tr><th>Name</th><th>Actions</th></tr></thead>
+        <tbody id="profilesTableBody"><tr><td colspan="2" style="color:var(--muted)">Loading…</td></tr></tbody>
+      </table>
+      </div>
+      <div id="profileEditorWrap" style="display:none;margin-top:1.25rem;padding-top:1rem;border-top:1px solid var(--border);">
+        <div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:0.5rem;flex-wrap:wrap;">
+          <span style="font-size:0.82rem;color:var(--muted);">Editing:</span>
+          <code id="profileEditName" style="color:var(--accent2);font-family:monospace;font-size:0.9rem;"></code>
+          <input type="text" id="profileNewName" placeholder="new-filename" style="display:none;background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--text);padding:0.25rem 0.5rem;font-family:monospace;font-size:0.85rem;">
+        </div>
+        <textarea id="profileEditContent" style="width:100%;box-sizing:border-box;min-height:300px;background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--text);font-family:monospace;font-size:0.85rem;padding:0.5rem;resize:vertical;"></textarea>
+        <div style="display:flex;gap:0.5rem;margin-top:0.75rem;flex-wrap:wrap;">
+          <button class="btn btn-save" onclick="saveProfile()">💾 Save</button>
+          <button class="btn btn-refresh" onclick="newProfileFile()">+ New File</button>
+          <label class="btn" style="cursor:pointer;">
+            ⬆ Upload File
+            <input type="file" id="profileUploadInput" style="display:none;" onchange="uploadProfile(this)">
+          </label>
+          <button class="btn btn-danger" onclick="closeProfileEditor()">✕ Close</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ====== DEVICES ====== -->
+  <div id="panel-devices" class="panel">
+    <div style="margin-bottom:0.75rem;text-align:right;">
+      <button class="btn btn-refresh" onclick="loadDevices();loadBluetoothSection();populateInputTesterDevices();">⟳ Refresh All</button>
+    </div>
+    <div class="card">
+      <h2>Connected Input Devices</h2>
+      <p style="font-size:0.83rem;color:var(--muted);margin-bottom:1rem;">Shows all <code style="color:var(--accent2);font-family:monospace">/dev/input/event*</code> nodes currently present on the system.</p>
+      <div class="table-wrap">
+      <table class="device-table">
+        <thead><tr><th>Event Node</th><th>Device Name</th><th>Status</th></tr></thead>
+        <tbody id="deviceTableBody"><tr><td colspan="3" style="color:var(--muted)">Loading…</td></tr></tbody>
+      </table>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:1rem;">
+      <h2>Bluetooth Controllers</h2>
+      <p style="font-size:0.83rem;color:var(--muted);margin-bottom:1rem;">Add and remove Bluetooth controllers such as Wii Remotes.</p>
+      <div id="btAlert" class="alert"></div>
+      <div id="btStatusBanner" class="alert" style="display:none;"></div>
+
+      <div id="btPairedSection">
+        <h3 style="font-size:0.85rem;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:0.5rem;">Paired Devices</h3>
+        <div class="table-wrap">
+        <table class="device-table">
+          <thead><tr><th>Device Name</th><th>MAC Address</th><th>Status</th><th></th></tr></thead>
+          <tbody id="btPairedBody"><tr><td colspan="4" style="color:var(--muted)">Loading…</td></tr></tbody>
+        </table>
+        </div>
+      </div>
+
+      <div id="btScanSection" style="margin-top:1.25rem;padding-top:1rem;border-top:1px solid var(--border);">
+        <h3 style="font-size:0.85rem;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:0.5rem;">Add Bluetooth Controller</h3>
+        <p style="font-size:0.82rem;color:var(--muted);margin-bottom:0.75rem;">
+          For Wii Remotes: press the red <strong>SYNC</strong> button inside the battery compartment, or hold <strong>1+2</strong> until the lights flash, then click Scan.
+        </p>
+        <div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;margin-bottom:0.75rem;">
+          <button class="btn btn-refresh" id="btScanBtn" onclick="btScan()">&#x1F50D; Scan for Devices (8s)</button>
+          <span id="btScanStatus" style="font-size:0.82rem;color:var(--muted);"></span>
+        </div>
+        <div class="table-wrap">
+        <table class="device-table" id="btScanTable" style="display:none;">
+          <thead><tr><th>Device Name</th><th>MAC Address</th><th></th></tr></thead>
+          <tbody id="btScanBody"></tbody>
+        </table>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" id="inputTesterCard" style="margin-top:1rem;">
+      <h2>Live Input Tester</h2>
+      <p style="font-size:0.83rem;color:var(--muted);margin-bottom:1rem;">
+        Select a controller to monitor its button presses and axis values in real time.
+      </p>
+      <div style="display:flex;gap:0.75rem;align-items:center;flex-wrap:wrap;margin-bottom:1rem;">
+        <select id="inputTesterDevice" style="background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--text);padding:0.35rem 0.6rem;"></select>
+        <button class="btn btn-start" onclick="startInputTest()">&#9654; Start</button>
+        <button class="btn btn-stop"  onclick="stopInputTest()" disabled id="inputTesterStopBtn">&#9632; Stop</button>
+      </div>
+      <div id="inputTesterStatus" style="font-size:0.82rem;color:var(--muted);margin-bottom:0.75rem;"></div>
+      <div id="inputTesterDisplay" style="font-family:monospace;font-size:0.82rem;min-height:60px;"></div>
+    </div>
+  </div>
+
+  <!-- ====== DIAGNOSTICS ====== -->
+  <div id="panel-diagnostics" class="panel">
+
+    <!-- Serial Port Test -->
+    <div class="card">
+      <h2>Serial Port Test</h2>
+      <p style="font-size:0.83rem;color:var(--muted);margin-bottom:1rem;">
+        Try to open the JVS serial port at 115200 8N1 and report the result. Useful when the device is
+        not responding and you want to confirm the path is correct and accessible.
+      </p>
+      <div id="diagSerialAlert" class="alert"></div>
+      <div style="display:flex;gap:0.6rem;align-items:center;flex-wrap:wrap;margin-bottom:0.75rem;">
+        <select id="diagSerialPort" style="background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--text);padding:0.35rem 0.6rem;min-width:180px;">
+          <option value="">— loading ports… —</option>
+        </select>
+        <input type="text" id="diagSerialCustom" placeholder="or type a path, e.g. /dev/ttyUSB0"
+               style="flex:1;min-width:200px;background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--text);padding:0.35rem 0.6rem;">
+        <button class="btn btn-start" onclick="runSerialTest()">&#9654; Test Port</button>
+      </div>
+      <div id="diagSerialResult" style="font-family:monospace;font-size:0.84rem;min-height:2rem;"></div>
+    </div>
+
+    <!-- JVS Bus -->
+    <div class="card" style="margin-top:1rem;">
+      <h2>JVS Bus</h2>
+      <p style="font-size:0.83rem;color:var(--muted);margin-bottom:1rem;">
+        Two tools for inspecting the JVS bus.
+        <strong>Probe Bus</strong> sends a
+        <code style="color:var(--accent2);font-family:monospace">RESET</code> +
+        <code style="color:var(--accent2);font-family:monospace">ASSIGN_ADDR</code>
+        broadcast and listens for 2&nbsp;s — any response bytes confirm a connected,
+        powered-on board.
+        <strong>Monitor Bus</strong> listens passively for 5&nbsp;seconds without sending
+        anything, showing whatever packets the arcade board is already transmitting.
+        Both tools auto-detect a running service and report bus status without touching
+        the port. When the service is stopped, the sense line is floated before listening.
+      </p>
+      <div id="diagJvsAlert" class="alert"></div>
+      <div style="display:flex;gap:0.6rem;align-items:center;flex-wrap:wrap;margin-bottom:0.75rem;">
+        <select id="diagJvsPort" style="background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--text);padding:0.35rem 0.6rem;min-width:180px;">
+          <option value="">— loading ports… —</option>
+        </select>
+        <input type="text" id="diagJvsCustom" placeholder="or type a path, e.g. /dev/ttyUSB0"
+               style="flex:1;min-width:200px;background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--text);padding:0.35rem 0.6rem;">
+        <button class="btn btn-restart" onclick="runJvsBusProbe()">&#9654; Probe Bus</button>
+        <button class="btn btn-restart" onclick="runJvsBusMonitor()">&#128065; Monitor Bus</button>
+        <button class="btn btn-stop"  onclick="jvsServiceAction('stop')">&#9632; Stop Service</button>
+        <button class="btn btn-start" onclick="jvsServiceAction('start')">&#9654; Start Service</button>
+      </div>
+      <div id="diagJvsResult" style="font-family:monospace;font-size:0.84rem;min-height:2rem;"></div>
+    </div>
+
+    <!-- GPIO Sense Line Test -->
+    <div class="card" style="margin-top:1rem;">
+      <h2>GPIO Sense Line Test</h2>
+      <p style="font-size:0.83rem;color:var(--muted);margin-bottom:1rem;">
+        Read the current logic level of the configured sense-line GPIO pin via the Linux GPIO character device.
+        Useful when first wiring the sense line — confirms the pin is reachable and reports HIGH or LOW.
+        <strong>Note:</strong> if the ModernJVS service is currently <strong>running</strong> it holds the GPIO
+        line exclusively; the read will return <em>IN USE</em> rather than a logic level.
+        Stop the service first to read or manually drive the pin.
+        <br><br>
+        Use <strong>Set HIGH</strong> / <strong>Set LOW</strong> to manually drive the pin to a known state
+        for the chosen duration (e.g. to verify wiring with a multimeter), then the line is released automatically.
+      </p>
+      <div id="diagGpioAlert" class="alert"></div>
+      <div style="display:flex;gap:0.6rem;align-items:center;flex-wrap:wrap;margin-bottom:0.75rem;">
+        <label style="font-size:0.85rem;color:var(--muted);">Pin (header #):</label>
+        <input type="number" id="diagGpioPin" min="1" max="40" placeholder="26"
+               style="width:80px;background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--text);padding:0.35rem 0.6rem;">
+        <label style="font-size:0.85rem;color:var(--muted);">Duration (s):</label>
+        <input type="number" id="diagGpioDuration" min="1" max="60" value="3"
+               style="width:70px;background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--text);padding:0.35rem 0.6rem;">
+        <button class="btn btn-start"   onclick="runGpioTest()">&#9654; Read Pin</button>
+        <button class="btn btn-restart" onclick="setGpioPin('high')">&#9650; Set HIGH</button>
+        <button class="btn btn-stop"    onclick="setGpioPin('low')">&#9660; Set LOW</button>
+      </div>
+      <div id="diagGpioResult" style="font-family:monospace;font-size:0.84rem;min-height:2rem;"></div>
+    </div>
+
+    <!-- Available Serial Devices -->
+    <div class="card" style="margin-top:1rem;">
+      <h2>Available Serial Devices</h2>
+      <p style="font-size:0.83rem;color:var(--muted);margin-bottom:1rem;">
+        All <code style="color:var(--accent2);font-family:monospace">/dev/ttyUSB*</code>,
+        <code style="color:var(--accent2);font-family:monospace">/dev/ttyAMA*</code>, and
+        <code style="color:var(--accent2);font-family:monospace">/dev/ttyS*</code> nodes currently
+        present on the system.
+      </p>
+      <div id="diagPortListWrap" style="font-family:monospace;font-size:0.84rem;"></div>
+    </div>
+
+    <!-- USB Device Inspector -->
+    <div class="card" style="margin-top:1rem;">
+      <h2>USB Device Inspector <button class="btn btn-refresh btn-xs" onclick="loadUsbDevices()" style="margin-left:0.5rem;vertical-align:middle;">⟳</button></h2>
+      <p style="font-size:0.83rem;color:var(--muted);margin-bottom:1rem;">
+        All connected USB devices read from
+        <code style="color:var(--accent2);font-family:monospace">/sys/bus/usb/devices/</code>.
+        Known RS-485/serial adapters are highlighted. Shows the currently bound kernel driver —
+        useful when a <code style="color:var(--accent2);font-family:monospace">/dev/ttyUSB*</code>
+        node is not appearing.
+      </p>
+      <div id="diagUsbWrap" style="font-size:0.84rem;"></div>
+    </div>
+
+  </div>
+
+  <!-- ====== APPEARANCE ====== -->
+  <div id="panel-webui-settings" class="panel">
+    <div class="card">
+      <h2>Theme</h2>
+      <div class="settings-grid">
+        <div class="settings-field">
+          <label>Colour Theme</label>
+          <select id="stTheme">
+            <option value="black">Pure Dark (default)</option>
+            <option value="dark">Dark</option>
+            <option value="light">Light</option>
+            <option value="midnight">Midnight Blue</option>
+            <option value="dracula">Dracula</option>
+            <option value="terminal">Green Terminal</option>
+            <option value="ocean">Ocean Deep</option>
+            <option value="sunset">Sunset</option>
+            <option value="forest">Forest</option>
+            <option value="purple">Purple Night</option>
+            <option value="neon">Neon Cyan</option>
+            <option value="rose">Rose</option>
+            <option value="amber">Amber</option>
+            <option value="solarized">Solarized Dark</option>
+          </select>
+          <div class="settings-preview">Base colour theme</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Layout &amp; Behaviour</h2>
+      <div class="settings-grid">
+        <div class="settings-field">
+          <label>Display Density</label>
+          <div class="settings-toggle">
+            <input type="checkbox" id="stCompact">
+            <span>Compact mode (reduce card padding and spacing)</span>
+          </div>
+        </div>
+        <div class="settings-field">
+          <label>Animations</label>
+          <div class="settings-toggle">
+            <input type="checkbox" id="stNoAnim">
+            <span>Disable all CSS transitions and animations</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>&#128274; Password Protection</h2>
+      <p id="pwStatus" style="margin-bottom:1rem;font-size:0.88rem;"></p>
+      <div class="settings-grid">
+        <div class="settings-field">
+          <label>New Password</label>
+          <input type="password" id="pwNew" autocomplete="new-password" maxlength="128"
+                 placeholder="Enter new password">
+        </div>
+        <div class="settings-field">
+          <label>Confirm Password</label>
+          <input type="password" id="pwConfirm" autocomplete="new-password" maxlength="128"
+                 placeholder="Re-enter new password">
+        </div>
+      </div>
+      <div id="pwMsg" style="font-size:0.85rem;min-height:1.2em;margin-bottom:0.75rem;"></div>
+      <div class="control-row">
+        <button class="btn btn-save" onclick="setPassword()">&#128190; Set Password</button>
+        <button class="btn btn-stop" id="pwClearBtn" onclick="clearPassword()" style="display:none">&#128275; Clear Password</button>
+      </div>
+      <div class="settings-preview" style="margin-top:0.75rem;">
+        If you forget the password, remove <code style="color:var(--muted)">/etc/modernjvs/webui-password</code> via SSH to reset it.
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>WebUI Process</h2>
+      <div class="control-row">
+        <button class="btn btn-restart" onclick="restartWebUI()">↺ Restart WebUI</button>
+      </div>
+      <div id="webuiRestartMsg" style="display:none;margin-top:0.75rem;font-size:0.88rem;color:var(--muted)"></div>
+    </div>
+
+    <div class="card">
+      <h2>&#x23FB; System Power</h2>
+      <p style="font-size:0.82rem;color:var(--muted);margin-bottom:0.75rem;">Restart or shut down the Raspberry Pi. The WebUI will become unreachable until the Pi boots again.</p>
+      <div class="control-row">
+        <button class="btn btn-restart" onclick="systemReboot()">&#x21BA; Restart Pi</button>
+        <button class="btn btn-stop" onclick="systemShutdown()">&#x23FB; Shutdown Pi</button>
+      </div>
+      <div id="systemPowerMsg" style="font-size:0.85rem;min-height:1.2em;margin-top:0.5rem;"></div>
+    </div>
+
+    <div class="card">
+      <h2>&#128274; Active Sessions</h2>
+      <p style="font-size:0.82rem;color:var(--muted);margin-bottom:0.75rem;">Each entry is a logged-in browser. Token shown as first 8 characters only.</p>
+      <div id="sessionsList" style="margin-bottom:0.75rem;"></div>
+      <div class="control-row">
+        <button class="btn btn-refresh btn-xs" onclick="loadSessions()">⟳ Refresh</button>
+        <button class="btn btn-stop" onclick="invalidateOtherSessions()">&#128274; Log Out All Other Devices</button>
+      </div>
+      <div id="sessionsMsg" style="font-size:0.85rem;min-height:1.2em;margin-top:0.5rem;"></div>
+    </div>
+
+    <div class="control-row">
+      <button class="btn btn-save" onclick="saveAppearanceSettings()">&#128190; Save &amp; Apply</button>
+      <button class="btn btn-refresh" onclick="resetAppearanceSettings()">&#8635; Reset to Defaults</button>
+    </div>
+  </div>
+</div>
+
+<footer><span>ModernJVS <span id="footerVer" class="footer-ver"></span>WebUI &mdash; <a href="https://github.com/dazzaXx/ModernJVS" target="_blank">github.com/dazzaXx/ModernJVS</a></span>
+<div id="footerSysInfo" style="display:none;font-size:0.75rem;color:var(--muted);"></div>
+<div id="footerPiModel" style="display:none;font-size:0.75rem;color:var(--muted);"></div>
+<img id="sticks" src="__STICKS__" alt="" class="sticks-corner">
+</footer>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

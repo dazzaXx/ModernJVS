@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="black">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ModernJVS WebUI \u2014 Login</title>
+<link rel="icon" type="image/png" href="{sticks}">
+<link rel="stylesheet" href="/static/login.css">
+</head>
+<body>
+<div class="ver-badge" id="lVer" style="display:none"></div>
+<div class="box">
+  <div class="hdr">
+    <img id="logo" src="{logo}" alt="ModernJVS">
+    <h1>WebUI</h1>
+  </div>
+  <label for="lPw">Password</label>
+  <input type="password" id="lPw" autocomplete="current-password" autofocus
+         onkeydown="if(event.key==='Enter')doLogin()">
+  <button onclick="doLogin()">&#128275; Unlock</button>
+  <div class="err" id="lErr"></div>
+</div>
+<footer>
+  {footer_info}
+  <img id="sticks" src="{sticks}" alt="" class="sticks-corner">
+</footer>
+<script src="/static/login.js"></script>
+</body></html>

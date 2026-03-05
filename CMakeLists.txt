@@ -110,6 +110,22 @@ if(ENABLE_WEBUI)
         COMPONENT ${PROJECT_NAME}
         DESTINATION "/usr/share/modernjvs/"
     )
+
+    install(FILES
+        ${CMAKE_SOURCE_DIR}/src/webui/static/style.css
+        ${CMAKE_SOURCE_DIR}/src/webui/static/app.js
+        ${CMAKE_SOURCE_DIR}/src/webui/static/login.css
+        ${CMAKE_SOURCE_DIR}/src/webui/static/login.js
+        COMPONENT ${PROJECT_NAME}
+        DESTINATION "/usr/share/modernjvs/webui/static/"
+    )
+
+    install(FILES
+        ${CMAKE_SOURCE_DIR}/src/webui/templates/index.html
+        ${CMAKE_SOURCE_DIR}/src/webui/templates/login.html
+        COMPONENT ${PROJECT_NAME}
+        DESTINATION "/usr/share/modernjvs/webui/templates/"
+    )
 else()
     message(STATUS "WebUI: disabled")
 endif()
