@@ -46,12 +46,19 @@ ModernJVS supports a wide range of arcade hardware platforms:
 
 ## Popular Games Supported
 
-Some examples of games that work with ModernJVS:
-- **Racing**: Initial D, Wangan Midnight Maximum Tune, Mario Kart Arcade GP, Daytona USA, OutRun
-- **Shooting**: Time Crisis series, House of the Dead series, Virtua Cop 3, Ghost Squad
-- **Fighting**: Tekken series, Virtua Fighter
+Games with dedicated controller mapping profiles included out of the box:
+
+- **Racing**: Initial D, Wangan Midnight Maximum Tune, Mario Kart Arcade GP, OutRun (+ Chihiro/Lindbergh variants), F355 Challenge, R-Tuned, Sega Race TV, Wild Riders, Harley Davidson King of the Road, Hummer, 18 Wheeler, Final Furlong 2
+- **Shooting**: Time Crisis 2/3, House of the Dead 2/3/4, Virtua Cop 3, Ghost Squad, Rambo, Crisis Zone, Dream Raiders, Let's Go Island, Let's Go Jungle (+ Special), Transformers, Ninja Assault, Operation Ghost, Airline Pilots
+- **Fighting**: Tekken, Virtua Fighter
 - **Rhythm**: Taiko no Tatsujin (Taiko Drum Master) on Namco System 256
-- **Other**: Crazy Taxi, F-Zero AX, and many more
+- **Other**: Crazy Taxi (+ High Roller), F-Zero AX, After Burner Climax, Alien Front, Jambo Safari, King of Route 66, Monkey Ball, Virtua Golf, and more
+
+There are also four **generic profiles** that work for many unlisted games:
+- `generic` – Basic arcade buttons (2 players, up to 6 buttons each)
+- `generic-driving` – Steering wheel + pedals
+- `generic-shooting` – Light gun (X/Y analogue axes)
+- `generic-analogue` – Analogue joystick
 
 Check the `/etc/modernjvs/games` folder after installation for game-specific controller mappings.
 
@@ -134,6 +141,24 @@ ModernJVS automatically detects and supports a wide range of USB controllers:
 - **Keyboards & Mice**: For configuration and some game types
 
 Check the `/etc/modernjvs/devices` folder after installation to see device-specific mappings.
+
+Controllers support **hot-plugging** — they can be connected or disconnected at any time while ModernJVS is running and will be automatically detected without interrupting the JVS connection to the arcade board.
+
+### Wii Remote Setup
+
+Wii Remotes (Wiimotes) require Bluetooth support and the `hid-wiimote` kernel module (installed automatically by ModernJVS). On **Raspberry Pi 1–4** the internal Bluetooth adapter can conflict with USB Bluetooth dongles; run the included helper script once to disable the internal adapter:
+
+```
+sudo ./SetupUSBBluetooth.sh
+```
+
+> **Note:** This step is **not** needed on Raspberry Pi 5, which uses a different Bluetooth architecture.
+
+Once Bluetooth is set up, pair Wii Remotes using the **Devices → Bluetooth Controllers** section of the WebUI: click **Scan for Devices**, then press the red **SYNC** button inside the battery compartment (or hold **1+2**) so the Wiimote is discoverable during the 8-second scan.
+
+**Wiimote as a light gun:** The Wiimote uses its IR camera to report absolute X/Y screen coordinates, which are mapped to the game's analogue gun axes automatically using the `nintendo-wii-remote` device profile.
+
+**Wii Remote + Nunchuk (combined):** When a Nunchuk is attached, ModernJVS automatically detects both devices and merges them into a single player slot using the `nintendo-wii-remote-plus-nunchuk` profile. No extra configuration is needed — the merge happens transparently at startup and on every hot-plug event.
 
 ### USB to RS485 Converter Requirements
 
@@ -233,11 +258,19 @@ sudo nano /etc/modernjvs/config
 **Emulate a specific I/O board:**
 Check the `/etc/modernjvs/ios` folder to see which I/O boards can be emulated and input the name on the `EMULATE` line. By default it will emulate the Namco FCA1.
 
+**Chain a second I/O board:**
+Some arcade systems use two I/O boards. Set `EMULATE_SECOND` to the name of the second I/O board to chain it:
+```
+EMULATE namco-FCA1
+EMULATE_SECOND sega-type-1
+```
+
 **Select a game profile:**
 Set the `DEFAULT_GAME` line to match your game. Available profiles are in `/etc/modernjvs/games`. Examples:
 - `generic` - Basic arcade controls
 - `generic-driving` - Racing games with steering wheel support
 - `generic-shooting` - Light gun games
+- `generic-analogue` - Analogue joystick games
 - Game-specific profiles like `initial-d`, `time-crisis-2`, `outrun`, etc.
 
 **Debug Mode:**
@@ -298,7 +331,34 @@ Valid range: 0.0 to 0.5 (0.0 = no deadzone, 0.1 = 10% deadzone, etc.)
    sudo journalctl -u modernjvs -f
    ```
 
+## Command Line Reference
+
+The `modernjvs` binary can be used as a daemon (via systemd) or directly from the command line.
+
+```
+modernjvs [options] [game]
+```
+
+| Option | Description |
+|---|---|
+| `modernjvs [game]` | Run with a specific game profile instead of the configured default |
+| `modernjvs --list` | List all detected controllers (enabled, disabled, and unmapped) |
+| `modernjvs --enable [device]` | Enable a specific controller mapping (or all if no name is given) |
+| `modernjvs --disable [device]` | Disable a specific controller mapping (or all if no name is given) |
+| `modernjvs --edit [file]` | Open a game or device mapping file in the system editor |
+| `modernjvs --debug` | Start in debug mode (equivalent to `DEBUG_MODE 1`) |
+| `modernjvs --version` | Print the installed version number |
+| `modernjvs --help` | Print usage information |
+
+**Disabling a controller:** Renaming a device file to `filename.disabled` tells ModernJVS to skip that controller even if it is plugged in. `--enable` and `--disable` automate this rename. This is useful when you have multiple controllers connected but only want some of them to be used.
+
 ## Troubleshooting
+
+### Wii Remote not connecting
+- Run `sudo ./SetupUSBBluetooth.sh` on Pi 1–4 to disable the **internal** Bluetooth adapter (which can conflict with USB dongles) and install the required packages — only needed once; Bluetooth functionality is not removed, only the built-in adapter
+- Make sure the `hid-wiimote` and `hidp` kernel modules are loaded (`lsmod | grep wiimote`)
+- Use the WebUI **Devices → Bluetooth Controllers → Scan** to pair; press the SYNC button (inside battery cover) or hold **1+2** during the scan
+- Ensure `AUTO_CONTROLLER_DETECTION` is `1` so ModernJVS picks up the Wiimote once it's paired
 
 ### ModernJVS not detecting controllers
 - Ensure `AUTO_CONTROLLER_DETECTION` is set to `1` in config
@@ -335,7 +395,7 @@ Valid range: 0.0 to 0.5 (0.0 = no deadzone, 0.1 = 10% deadzone, etc.)
 A: Start with the default (namco-FCA1) or check online documentation for your specific arcade game. Most games work with multiple I/O board types.
 
 **Q: Can I use wireless controllers?**
-A: Yes! Bluetooth controllers work as long as they appear as standard USB HID devices to Linux.
+A: Yes! Standard Bluetooth gamepads (PlayStation, Xbox, 8BitDo, etc.) work once paired via the OS or the WebUI's Bluetooth section and appear as standard HID input devices. Wii Remotes require additional steps — see the **Wii Remote Setup** section above.
 
 **Q: Does this work with MAME?**
 A: No, ModernJVS is for real arcade hardware that uses JVS protocol. For MAME, map controllers directly in MAME's settings.
@@ -344,7 +404,10 @@ A: No, ModernJVS is for real arcade hardware that uses JVS protocol. For MAME, m
 A: Try similar I/O boards (e.g., sega-type-1, sega-type-2, namco-FCA1) or open an issue on GitHub with your game details.
 
 **Q: How do I add custom button mappings?**
-A: Copy an existing profile from `/etc/modernjvs/games/` and modify it. See existing files for syntax examples.
+A: Copy an existing profile from `/etc/modernjvs/games/` and modify it. Game profiles support:
+- `INCLUDE other-profile` – inherit all mappings from another profile (e.g. `INCLUDE generic-driving`)
+- `REVERSE` modifier on analogue axis lines – inverts the axis direction (e.g. `CONTROLLER_ANALOGUE_Y CONTROLLER_1 ANALOGUE_2 REVERSE`)
+- Multiple output buttons on one line – press one input button and trigger two JVS buttons simultaneously (see `wangan-midnight-maximum-tune` for an example)
 
 ## Taiko no Tatsujin (Taiko Drum Master) Support
 
