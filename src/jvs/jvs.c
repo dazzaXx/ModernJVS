@@ -425,6 +425,11 @@ JVSStatus processPacket(JVSIO *jvsIO)
 			debug(1, "CMD_READ_COINS - Reading %d coin slot(s)\n", numberCoinSlots);
 			outputPacket.data[outputPacket.length++] = REPORT_SUCCESS;
 
+			if (numberCoinSlots > JVS_MAX_STATE_SIZE)
+			{
+				debug(0, "Error: Coin slot count %d exceeds maximum %d in CMD_READ_COINS\n", numberCoinSlots, JVS_MAX_STATE_SIZE);
+				return JVS_STATUS_ERROR;
+			}
 			for (int i = 0; i < numberCoinSlots; i++)
 			{
 				// Bounds check to prevent buffer overflow
@@ -449,6 +454,11 @@ JVSStatus processPacket(JVSIO *jvsIO)
 
 			outputPacket.data[outputPacket.length++] = REPORT_SUCCESS;
 
+			if (numberChannels > JVS_MAX_STATE_SIZE)
+			{
+				debug(0, "Error: Analogue channel count %d exceeds maximum %d in CMD_READ_ANALOGS\n", numberChannels, JVS_MAX_STATE_SIZE);
+				return JVS_STATUS_ERROR;
+			}
 			for (int i = 0; i < numberChannels; i++)
 			{
 				// Bounds check to prevent buffer overflow
@@ -474,6 +484,11 @@ JVSStatus processPacket(JVSIO *jvsIO)
 
 			outputPacket.data[outputPacket.length++] = REPORT_SUCCESS;
 
+			if (numberChannels > JVS_MAX_STATE_SIZE)
+			{
+				debug(0, "Error: Rotary channel count %d exceeds maximum %d in CMD_READ_ROTARY\n", numberChannels, JVS_MAX_STATE_SIZE);
+				return JVS_STATUS_ERROR;
+			}
 			for (int i = 0; i < numberChannels; i++)
 			{
 				// Bounds check to prevent buffer overflow
