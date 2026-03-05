@@ -595,6 +595,7 @@ static int processMappings(InputMappings *inputMappings, OutputMappings *outputM
                             tempMapping.outputSecondary = outputMappings->mappings[p].output;
                             tempMapping.type = HAT;
                             found = 1;
+                            foundSecondaryMapping = 1;
                             break;
                         }
                     }

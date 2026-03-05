@@ -6742,6 +6742,9 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
             content_length = int(self.headers.get("Content-Length", 0))
         except (ValueError, TypeError):
             content_length = 0
+        if content_length < 0:
+            self._json({"error": "Invalid Content-Length."}, HTTPStatus.BAD_REQUEST)
+            return
         if content_length > MAX_PROFILE_UPLOAD_BYTES:
             self._json(
                 {"error": f"File too large. Maximum size is {MAX_PROFILE_UPLOAD_BYTES // 1024} KB."},
