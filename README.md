@@ -170,10 +170,24 @@ ModernJVS ships with a built-in web interface that you can access from any devic
 
 ### Features
 
-- **Dashboard** – live service status with animated indicator (running/stopped), PID, uptime, current I/O board / game / device path, Start / Stop / Restart buttons. Includes a **Pi System Usage** panel showing real-time CPU %, memory, CPU temperature, disk usage (with colour-coded progress bars) and load average. Local IP addresses are shown so you always know the URL to use from another device. The installed ModernJVS version is displayed in the header.
-- **Configuration** – all key settings in a clean form: I/O board and game dropdowns (auto-populated from installed files), device path, sense line type and GPIO pin, debug mode, auto controller detection, and per-player analog deadzone. Saved directly to `/etc/modernjvs/config` with comments preserved.
-- **Monitor & Logs** – live log tail (journalctl on Raspberry Pi OS / DietPi, with automatic fallback to syslog files if journald is not available). Features a **category filter dropdown** (All / Errors & Critical / Warnings / JVS Activity / Controllers / Initialization), a **live text search box**, auto-refresh every 5 s, configurable line count, a **Download Logs** button, and a dedicated **JVS Activity** pane.
-- **Devices** – shows all connected `/dev/input/event*` nodes and their human-readable device names (read from sysfs). Useful for confirming controllers are detected before starting the service.
+- **Dashboard** – live service status with animated indicator (running/stopped), PID, uptime, current I/O board / game / device path, Start / Stop / Restart buttons. Includes a **JVS Overview** panel showing JVS connection status and a toggleable Test Mode button. A **Player Assignments** panel shows which controller is assigned to each player slot (up to 4 players). A **Pi System Usage** panel shows real-time CPU %, memory, CPU temperature, disk usage (with colour-coded progress bars) and load average. Local IP addresses are shown so you always know the URL to use from another device. The installed ModernJVS version is displayed in the header.
+- **Configuration** – all key settings in a clean form: primary and secondary I/O board dropdowns (`EMULATE` / `EMULATE_SECOND`), game dropdown (all auto-populated from installed files), device path, sense line type and GPIO pin, debug mode, auto controller detection, and per-player analog deadzone (players 1–4). Saved directly to `/etc/modernjvs/config` with comments preserved. Includes **Save & Restart Service** and **Reset to Defaults** buttons.
+- **Monitor & Logs** – live log tail (journalctl on Raspberry Pi OS / DietPi, with automatic fallback to syslog files if journald is not available). Features a **category filter dropdown** (All Messages / Errors & Critical / Warnings / JVS Activity / Controllers), a **live text search box**, auto-refresh every 5 s, configurable line count (50/100/200/500), a **Download Logs** button, and a dedicated **JVS Activity** pane. An **Audit Log** section records WebUI actions such as config changes, service restarts, logins, Bluetooth pairings, and profile edits.
+- **Profiles** – a full in-browser editor for all profile file categories: **Games**, **Devices**, and **I/O Boards**. Browse, view, edit, create (+ New File), upload, rename, and delete files in `/etc/modernjvs/games`, `/etc/modernjvs/devices`, and `/etc/modernjvs/ios` without needing SSH access.
+- **Devices** – shows all connected `/dev/input/event*` nodes and their human-readable device names (read from sysfs). Includes a **Bluetooth Controllers** section for pairing and removing Bluetooth controllers (including Wii Remotes) with an 8-second scan. Also includes a **Live Input Tester** that streams button presses and axis values from any connected controller in real time.
+- **⚠ Diagnostics** – a suite of hardware troubleshooting tools:
+  - *Serial Port Test* – open the JVS serial port at 115200 8N1 and confirm it is accessible.
+  - *JVS Bus* – **Probe Bus** sends a `RESET` + `ASSIGN_ADDR` broadcast and listens for 2 s to confirm a live board; **Monitor Bus** passively listens for 5 s to show existing traffic. Both tools work whether or not the service is currently running.
+  - *GPIO Sense Line Test* – read the current logic level of the configured GPIO pin, or manually drive it HIGH/LOW for a set duration to verify wiring with a multimeter.
+  - *Available Serial Devices* – lists all `/dev/ttyUSB*`, `/dev/ttyAMA*`, and `/dev/ttyS*` nodes currently present.
+  - *USB Device Inspector* – lists all connected USB devices from `/sys/bus/usb/devices/`, highlights known RS-485/serial adapters, and shows the bound kernel driver.
+- **⚙ WebUI Settings** – personalise and secure the interface:
+  - *Theme* – 14 colour themes: Pure Dark (default), Dark, Light, Midnight Blue, Dracula, Green Terminal, Ocean Deep, Sunset, Forest, Purple Night, Neon Cyan, Rose, Amber, Solarized Dark.
+  - *Layout & Behaviour* – compact mode (reduced padding) and option to disable all CSS animations.
+  - *Password Protection* – set a password to restrict access to the WebUI. Reset by removing `/etc/modernjvs/webui-password` via SSH.
+  - *WebUI Process* – restart the WebUI service from the browser.
+  - *System Power* – restart or shut down the Raspberry Pi directly from the browser.
+  - *Active Sessions* – view all logged-in browsers (token shown as first 8 characters) and log out all other devices.
 
 ### Accessing the WebUI
 
