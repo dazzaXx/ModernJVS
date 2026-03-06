@@ -830,29 +830,11 @@ async function loadBluetoothSection() {
     html = 'A Bluetooth adapter is present but the Bluetooth service is not running. '
       + 'Start it with: <code>sudo systemctl enable --now bluetooth</code>';
   } else if (!s.hci_present) {
-    if (s.is_pi5_or_later) {
-      const cfgTool5 = s.is_dietpi
-        ? '<code>sudo dietpi-config</code> (Advanced Options → Bluetooth)'
-        : '<code>sudo raspi-config</code>';
-      html = 'No Bluetooth adapter detected on your Raspberry Pi 5. '
-        + 'Enable Bluetooth via ' + cfgTool5 + ' or confirm the '
-        + '<code>bluetooth</code> service is running.';
-    } else if (s.has_internal_bt && s.internal_bt_disabled) {
-      html = 'Internal Bluetooth is disabled. Plug in a USB Bluetooth dongle to continue.';
-      isErr = false;
-    } else if (s.has_internal_bt) {
-      // Pi 3/4 — internal BT present but not yet disabled; recommend USB dongle
-      const model = s.pi_model ? ' (' + _escHtml(s.pi_model) + ')' : '';
-      html = 'Your Raspberry Pi' + model + '\'s internal Bluetooth shares a UART with '
-        + 'the JVS serial port, which can cause conflicts. For best results, disable the '
-        + 'internal adapter and use a USB Bluetooth dongle instead. ' + setupBtn;
-    } else if (s.pi_model) {
-      // Pi 1/2/Zero — no internal BT
-      html = 'This Raspberry Pi model has no built-in Bluetooth. '
-        + 'Connect a USB Bluetooth dongle. ' + setupBtn;
-    } else {
-      html = 'No Bluetooth adapter detected. Connect a Bluetooth adapter.';
+    html = 'No Bluetooth adapter detected. Connect a USB Bluetooth dongle.';
+    if (!s.bluez_available) {
+      html += ' ' + setupBtn;
     }
+    isErr = false;
   } else {
     html = 'Bluetooth is not available. Check that an adapter is connected and the '
       + '<code>bluetooth</code> service is running.';
@@ -884,14 +866,9 @@ async function btSetupUsb() {
   }
 
   const lines = (d.output || []).join('\n');
-  if (d.reboot_needed) {
-    btAlert.innerText = '✓ Setup complete. A reboot is required for the changes to take effect.\n'
-      + 'Run: sudo reboot\n\n' + lines;
-  } else {
-    btAlert.innerText = '✓ Setup complete.\n\n' + lines;
-    // Re-check status now that packages are installed
-    setTimeout(() => loadBluetoothSection(), 1500);
-  }
+  btAlert.innerText = '✓ Setup complete.\n\n' + lines;
+  // Re-check status now that packages are installed
+  setTimeout(() => loadBluetoothSection(), 1500);
   btAlert.style.whiteSpace = 'pre-wrap';
 }
 

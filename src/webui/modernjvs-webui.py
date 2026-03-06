@@ -2774,15 +2774,11 @@ def get_bluetooth_status():
 
     Fields:
       pi_model        — raw model string from /proc/device-tree/model (may be "")
-      pi_gen          — integer Pi generation (0 = unknown/non-Pi or Pi Zero/1)
-      has_internal_bt — True if this Pi model ships with an internal BT chip
-      is_pi5_or_later — True for Pi 5+; these don't need the USB-dongle workaround
       is_dietpi       — True when running on DietPi (uses dietpi-config, not raspi-config)
       hci_present     — True if at least one HCI Bluetooth adapter is visible
       bluez_available — True if bluetoothctl is on PATH
       bt_service_running — True if systemd bluetooth.service is active
       rfkill_soft_blocked — True if BT is soft-blocked by rfkill
-      internal_bt_disabled — True if dtoverlay=disable-bt is in the boot config
     """
     # ---- Raspberry Pi model detection ----
     pi_model = ""
@@ -2791,20 +2787,6 @@ def get_bluetooth_status():
             pi_model = f.read().strip().rstrip("\x00")
     except OSError:
         pass
-
-    pi_gen = 0
-    has_internal_bt = False
-    is_pi5_or_later = False
-
-    if pi_model:
-        m_gen = re.search(r"raspberry pi (\d+)", pi_model, re.IGNORECASE)
-        if m_gen:
-            pi_gen = int(m_gen.group(1))
-            has_internal_bt = pi_gen >= 3
-            is_pi5_or_later = pi_gen >= 5
-        elif re.search(r"raspberry pi zero.*w", pi_model, re.IGNORECASE):
-            # Zero W and Zero 2 W have internal BT
-            has_internal_bt = True
 
     # ---- HCI adapter presence ----
     hci_present = False
@@ -2839,77 +2821,27 @@ def get_bluetooth_status():
     except Exception:
         pass
 
-    # ---- dtoverlay=disable-bt in boot config (uncommented lines only) ----
-    internal_bt_disabled = False
-    _disable_bt_re = re.compile(r'^\s*dtoverlay\s*=\s*disable-bt')
-    for boot_cfg in ("/boot/firmware/config.txt", "/boot/config.txt"):
-        try:
-            with open(boot_cfg) as f:
-                for line in f:
-                    if _disable_bt_re.match(line):
-                        internal_bt_disabled = True
-                        break
-            if internal_bt_disabled:
-                break
-        except OSError:
-            continue
-
     # ---- DietPi detection ----
     is_dietpi = os.path.isfile("/etc/dietpi/.version")
 
     return {
         "pi_model":             pi_model,
-        "pi_gen":               pi_gen,
-        "has_internal_bt":      has_internal_bt,
-        "is_pi5_or_later":      is_pi5_or_later,
         "is_dietpi":            is_dietpi,
         "hci_present":          hci_present,
         "bluez_available":      bluez_available,
         "bt_service_running":   bt_service_running,
         "rfkill_soft_blocked":  rfkill_soft_blocked,
-        "internal_bt_disabled": internal_bt_disabled,
     }
 
 
 def setup_usb_bluetooth():
-    """Install BlueZ packages and disable internal Bluetooth for USB-dongle use.
+    """Install BlueZ packages and enable the bluetooth service.
 
     - Installs bluetooth, bluez, and bluez-tools via apt-get.
-    - On Pi 3/4 (models with internal BT that conflicts with JVS serial),
-      appends dtoverlay=disable-bt to the boot config so the internal adapter
-      is suppressed and only the USB dongle is used.
     - Enables the bluetooth systemd service.
-    - Returns {"ok": True, "reboot_needed": bool, "output": [lines]}.
+    - Returns {"ok": True, "output": [lines]}.
     """
     output_lines = []
-    reboot_needed = False
-
-    s = get_bluetooth_status()
-
-    # ---- Disable internal Bluetooth in boot config if applicable ----
-    if s["has_internal_bt"] and not s["is_pi5_or_later"] and not s["internal_bt_disabled"]:
-        boot_cfg = None
-        for path in ("/boot/firmware/config.txt", "/boot/config.txt"):
-            if os.path.isfile(path):
-                boot_cfg = path
-                break
-        if boot_cfg:
-            try:
-                with open(boot_cfg, "a") as f:
-                    f.write(
-                        "\n# Disable internal Bluetooth to use USB Bluetooth adapter\n"
-                        "dtoverlay=disable-bt\n"
-                    )
-                output_lines.append(
-                    f"✓ Internal Bluetooth disabled in {boot_cfg} (reboot required)."
-                )
-                reboot_needed = True
-            except OSError as e:
-                return {"error": f"Could not modify boot config: {e}"}
-        else:
-            output_lines.append("⚠ Boot config file not found; skipped disabling internal Bluetooth.")
-    elif s["internal_bt_disabled"]:
-        output_lines.append("✓ Internal Bluetooth already disabled in boot config.")
 
     # ---- Install BlueZ packages ----
     packages = ["bluetooth", "bluez", "bluez-tools"]
@@ -2958,7 +2890,7 @@ def setup_usb_bluetooth():
     except Exception:
         pass
 
-    return {"ok": True, "reboot_needed": reboot_needed, "output": output_lines}
+    return {"ok": True, "output": output_lines}
 
 
 def set_bluetooth_supervision_timeout():
