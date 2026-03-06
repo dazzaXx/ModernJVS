@@ -47,11 +47,11 @@ ModernJVS supports a wide range of arcade hardware platforms:
 ## Popular Games Supported
 
 Some examples of games that work with ModernJVS:
-- **Racing**: Initial D, Wangan Midnight Maximum Tune, Mario Kart Arcade GP, Daytona USA, OutRun
-- **Shooting**: Time Crisis series, House of the Dead series, Virtua Cop 3, Ghost Squad
-- **Fighting**: Tekken series, Virtua Fighter
+- **Racing**: Initial D, Wangan Midnight Maximum Tune, Mario Kart Arcade GP, Daytona USA, OutRun, R-Tuned, F-355 Challenge, F-Zero AX, Sega Race TV, 18 Wheeler
+- **Shooting**: Time Crisis 2/3, Crisis Zone, House of the Dead 2/3/4, Virtua Cop 3, Ghost Squad, Operation Ghost, Rambo, Ninja Assault, Let's Go Jungle, Alien Front, Transformers Human Alliance
+- **Fighting**: Tekken series
 - **Rhythm**: Taiko no Tatsujin (Taiko Drum Master) on Namco System 256
-- **Other**: Crazy Taxi, F-Zero AX, and many more
+- **Other**: Crazy Taxi, After Burner Climax, Virtua Golf, Monkey Ball, Dream Raiders, Jambo Safari, and many more
 
 Check the `/etc/modernjvs/games` folder after installation for game-specific controller mappings.
 
@@ -126,14 +126,19 @@ ModernJVS supports all Raspberry Pi models including:
 The software automatically detects the correct GPIO chip for your Raspberry Pi model.
 
 ### Controllers & Input Devices
-ModernJVS automatically detects and supports a wide range of USB controllers:
-- **Game Controllers**: Xbox 360/One, PlayStation 3/4/5, generic USB gamepads
-- **Racing Wheels**: Logitech G25/G29, Thrustmaster wheels, generic racing wheels
-- **Light Guns**: Aimtrak, Gun4IR, Wiimote-based setups
-- **Arcade Sticks**: Generic USB arcade sticks, Brook converters
+ModernJVS automatically detects and supports a wide range of USB and Bluetooth controllers:
+- **Game Controllers**: Xbox 360/One/Series, PlayStation 3/4/5, generic USB gamepads
+- **Racing Wheels**: Logitech G25/G29/Momo, Thrustmaster wheels, Sidewinder wheels
+- **Light Guns**: Aimtrak, Gun4IR, Wii Remote IR-based setups
+- **Arcade Sticks**: Generic USB arcade sticks, Brook converters, Daija arcade stick
+- **Wii Remote & Nunchuk**: Bluetooth Wii Remotes with optional Nunchuk (standalone or combined)
 - **Keyboards & Mice**: For configuration and some game types
 
 Check the `/etc/modernjvs/devices` folder after installation to see device-specific mappings.
+
+### Hot-plug Controller Support
+
+ModernJVS supports hot-plugging controllers while the service is running. A background watchdog thread monitors for changes to `/dev/input/` and automatically reinitializes the controller threads when devices are connected or disconnected — without resetting the JVS connection to the arcade board. This means you can plug in or unplug controllers without interrupting the arcade machine.
 
 ### USB to RS485 Converter Requirements
 
@@ -173,7 +178,11 @@ ModernJVS ships with a built-in web interface that you can access from any devic
 - **Dashboard** – live service status with animated indicator (running/stopped), PID, uptime, current I/O board / game / device path, Start / Stop / Restart buttons. Includes a **Pi System Usage** panel showing real-time CPU %, memory, CPU temperature, disk usage (with colour-coded progress bars) and load average. Local IP addresses are shown so you always know the URL to use from another device. The installed ModernJVS version is displayed in the header.
 - **Configuration** – all key settings in a clean form: I/O board and game dropdowns (auto-populated from installed files), device path, sense line type and GPIO pin, debug mode, auto controller detection, and per-player analog deadzone. Saved directly to `/etc/modernjvs/config` with comments preserved.
 - **Monitor & Logs** – live log tail (journalctl on Raspberry Pi OS / DietPi, with automatic fallback to syslog files if journald is not available). Features a **category filter dropdown** (All / Errors & Critical / Warnings / JVS Activity / Controllers / Initialization), a **live text search box**, auto-refresh every 5 s, configurable line count, a **Download Logs** button, and a dedicated **JVS Activity** pane.
-- **Devices** – shows all connected `/dev/input/event*` nodes and their human-readable device names (read from sysfs). Useful for confirming controllers are detected before starting the service.
+- **Devices** – shows all connected `/dev/input/event*` nodes and their human-readable device names (read from sysfs). Includes a live **Input Tester** that streams raw button/axis events from any input device in real time — useful for confirming controller mappings before starting the service.
+- **Bluetooth** – scan for nearby Bluetooth devices, pair/unpair controllers (including Wii Remotes, Xbox wireless controllers, and other HID devices), and view currently paired devices with connection status. Wii Remotes are automatically identified and handled with appropriate pairing logic.
+- **Profiles** – view, edit, upload, download, delete, and rename game profiles, device mappings, and I/O board definitions. Supports uploading custom profile files directly from the browser.
+- **Diagnostics** – serial port tester (lists available `/dev/ttyUSB*` and `/dev/ttyAMA*` ports and runs a connection test), JVS probe and packet monitor, GPIO pin control tester, and a USB device viewer.
+- **System** – reboot, shutdown, and WebUI service restart buttons accessible from the dashboard.
 
 ### Accessing the WebUI
 
@@ -201,6 +210,8 @@ The WebUI **actively blocks connections from public (non-private) IP addresses**
 
 > **Common home/office routers** typically use `192.168.0.x`, `192.168.1.x`, or `192.168.50.x` — all of these are inside `192.168.0.0/16` and will be able to connect without any extra configuration.
 
+**Optional password protection:** The WebUI supports an optional password to restrict access on your local network. When set, all pages (except the login form itself) require authentication before they can be accessed. Session tokens are stored as cookies and expire after inactivity. An audit log records login attempts and key actions. Password management and session control are available from the WebUI settings page.
+
 The WebUI runs as root (required to control the `modernjvs` service and write `/etc/modernjvs/config`). It binds to all interfaces on port **8080** — only LAN devices can connect.
 
 ---
@@ -218,6 +229,36 @@ sudo nano /etc/modernjvs/config
 
 **Emulate a specific I/O board:**
 Check the `/etc/modernjvs/ios` folder to see which I/O boards can be emulated and input the name on the `EMULATE` line. By default it will emulate the Namco FCA1.
+
+**Supported I/O boards:**
+
+| Name | Display Name |
+|---|---|
+| `namco-FCA1` | Namco FCA-1 *(default)* |
+| `namco-na-jv` | Namco NA-JV |
+| `namco-na-jv2` | Namco NA-JV2 |
+| `namco-v185` | Namco V185 IO (Time Crisis 2) |
+| `namco-v221` | Namco V221 MIU (Crisis Zone) |
+| `namco-v222` | Namco V222 JYU (Ninja Assault) |
+| `namco-jyu` | Namco JYU IO |
+| `namco-rays-v100` | Namco RAYS Gun IO |
+| `namco-rays-v106` | Namco RAYS PCB |
+| `namco-taiko` | Namco Taiko (System 256) |
+| `sega-type-1` | Sega Type 1 IO |
+| `sega-type-2` | Sega Type 2 IO |
+| `sega-type-3` | Sega Type 3 IO |
+| `sega-838-13683B` | Sega 838-13683B IO |
+| `sega-trackball` | Sega Trackball IO |
+| `capcom-naomi` | Capcom NAOMI IO |
+| `taito-type-x` | Taito Type X IO |
+| `nrc-lion` | NRC LION-Board |
+
+**Chaining two I/O boards:**
+Some arcade systems enumerate two I/O boards on a single JVS bus. Use `EMULATE_SECOND` to specify a second I/O board to chain after the first:
+```
+EMULATE namco-FCA1
+EMULATE_SECOND sega-type-1
+```
 
 **Select a game profile:**
 Set the `DEFAULT_GAME` line to match your game. Available profiles are in `/etc/modernjvs/games`. Examples:
@@ -321,7 +362,10 @@ Valid range: 0.0 to 0.5 (0.0 = no deadzone, 0.1 = 10% deadzone, etc.)
 A: Start with the default (namco-FCA1) or check online documentation for your specific arcade game. Most games work with multiple I/O board types.
 
 **Q: Can I use wireless controllers?**
-A: Yes! Bluetooth controllers work as long as they appear as standard USB HID devices to Linux.
+A: Yes! Bluetooth controllers work as long as they appear as standard USB HID devices to Linux. Wii Remotes have dedicated support — see the [Wii Remote & Nunchuk Support](#wii-remote--nunchuk-support) section.
+
+**Q: Can I use a Wii Remote as a light gun?**
+A: Yes. Pair the Wii Remote via the WebUI Bluetooth tab (or manually with `bluetoothctl`), then use the `generic-shooting` game profile or a game-specific shooting profile. The IR camera's screen coordinates are automatically mapped to analogue axes.
 
 **Q: Does this work with MAME?**
 A: No, ModernJVS is for real arcade hardware that uses JVS protocol. For MAME, map controllers directly in MAME's settings.
@@ -330,7 +374,50 @@ A: No, ModernJVS is for real arcade hardware that uses JVS protocol. For MAME, m
 A: Try similar I/O boards (e.g., sega-type-1, sega-type-2, namco-FCA1) or open an issue on GitHub with your game details.
 
 **Q: How do I add custom button mappings?**
-A: Copy an existing profile from `/etc/modernjvs/games/` and modify it. See existing files for syntax examples.
+A: Copy an existing profile from `/etc/modernjvs/games/` and modify it. See existing files for syntax examples. You can also use the WebUI **Profiles** tab to view, edit, and upload profiles directly from your browser.
+
+**Q: Can I chain two I/O boards?**
+A: Yes. Add `EMULATE_SECOND <io-name>` to `/etc/modernjvs/config` to chain a second I/O board after the primary one. See the [Key Configuration Options](#key-configuration-options) section.
+
+## Wii Remote & Nunchuk Support
+
+ModernJVS has built-in support for Nintendo Wii Remotes (with or without a Nunchuk attachment) over Bluetooth. Wii Remotes can be used as light guns (via IR pointing) or as general game controllers.
+
+### Kernel Module
+
+The `hid-wiimote` kernel module is required and is automatically configured during installation — a module loader file is written to `/etc/modules-load.d/wiimote.conf` so the module loads on every boot. No manual setup is needed.
+
+### Bluetooth Pairing
+
+The easiest way to pair a Wii Remote is through the **WebUI** (Bluetooth tab):
+
+1. Open `http://<raspberry-pi-ip>:8080` in a browser
+2. Go to the **Bluetooth** tab and click **Scan**
+3. While the scan is running, press the `1` and `2` buttons simultaneously on the Wii Remote (or open the battery cover and press the red SYNC button for a permanent pairing)
+4. Select the Wii Remote from the device list and click **Pair**
+
+Alternatively, pair manually using `bluetoothctl`:
+
+```
+sudo bluetoothctl
+[bluetoothctl] scan on
+# Press 1+2 (or SYNC) on the Wii Remote
+[bluetoothctl] pair AA:BB:CC:DD:EE:FF
+[bluetoothctl] connect AA:BB:CC:DD:EE:FF
+```
+
+### Standalone Wii Remote vs. Wii Remote + Nunchuk
+
+ModernJVS automatically detects whether a Nunchuk is attached:
+
+- **Standalone Wii Remote** – uses the `nintendo-wii-remote` device profile. IR pointing maps to the analogue X/Y axes for light gun games.
+- **Wii Remote + Nunchuk** – when both devices are detected together they are automatically merged into a single player using the `nintendo-wii-remote-plus-nunchuk` combined profile. The Nunchuk's Z button provides an alternate trigger (mapped to Start/pedal).
+
+No extra configuration is required — device detection and merging happen automatically at startup and on hot-plug events.
+
+### IR Light Gun Usage
+
+The Wii Remote's IR camera reports screen coordinates which ModernJVS maps to `CONTROLLER_ANALOGUE_X` / `CONTROLLER_ANALOGUE_Y`. This provides accurate light-gun style aiming for games like House of the Dead, Time Crisis, and Ghost Squad when using the appropriate game profile (e.g. `generic-shooting`).
 
 ## Taiko no Tatsujin (Taiko Drum Master) Support
 
