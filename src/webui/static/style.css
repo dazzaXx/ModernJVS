@@ -1,3 +1,11 @@
+  @font-face {
+    font-family: 'ModernJVS';
+    src: url('/static/fonts/font.ttf') format('truetype');
+    font-weight: normal;
+    font-style: normal;
+    font-display: swap;
+  }
+
   :root {
     --bg:      #0d0d14;
     --surface: #16161f;
@@ -11,7 +19,7 @@
     --yellow:  #f1fa8c;
     --red:     #ff5555;
     --radius:  8px;
-    --font:    'Segoe UI', system-ui, sans-serif;
+    --font:    'ModernJVS', 'Segoe UI', system-ui, sans-serif;
   }
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   body { background: var(--bg); color: var(--text); font-family: var(--font); min-height: 100vh; }

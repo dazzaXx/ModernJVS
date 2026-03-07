@@ -120,6 +120,12 @@ if(ENABLE_WEBUI)
         DESTINATION "/usr/share/modernjvs/webui/static/"
     )
 
+    install(DIRECTORY
+        ${CMAKE_SOURCE_DIR}/src/webui/static/fonts/
+        COMPONENT ${PROJECT_NAME}
+        DESTINATION "/usr/share/modernjvs/webui/static/fonts/"
+    )
+
     install(FILES
         ${CMAKE_SOURCE_DIR}/src/webui/templates/index.html
         ${CMAKE_SOURCE_DIR}/src/webui/templates/login.html

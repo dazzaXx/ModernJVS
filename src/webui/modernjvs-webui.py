@@ -2308,22 +2308,42 @@ def get_sticks_bytes():
     return None
 
 
-def _read_webui_file(subdir, filename):
-    """Read a WebUI file (template or static asset) from disk.
+def _webui_file_candidates(subdir, filename):
+    """Return candidate file paths for a WebUI asset, installed path first.
 
-    Tries the installed system path first, then falls back to the source tree
-    so the script works when run directly from the repository during development.
+    The installed system path is tried first so that the production layout
+    takes precedence over the source tree during development fallback.
     Expected layout: src/webui/<subdir>/<filename>
     Installed layout: /usr/share/modernjvs/webui/<subdir>/<filename>
     """
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    candidates = [
-        os.path.join(WEBUI_STATIC_PATH if subdir == "static" else WEBUI_TEMPLATES_PATH, filename),
+    base = WEBUI_STATIC_PATH if subdir == "static" else WEBUI_TEMPLATES_PATH
+    return [
+        os.path.join(base, filename),
         os.path.join(script_dir, subdir, filename),
     ]
-    for p in candidates:
+
+
+def _read_webui_file(subdir, filename):
+    """Read a WebUI text file (template or static asset) from disk."""
+    for p in _webui_file_candidates(subdir, filename):
         try:
             with open(os.path.normpath(p), "r", encoding="utf-8") as f:
+                return f.read()
+        except OSError:
+            pass
+    return None
+
+
+def _read_webui_file_bytes(subdir, filename):
+    """Read a WebUI binary asset (e.g. a font file) from disk.
+
+    Mirrors :func:`_read_webui_file` but opens the file in binary mode so that
+    non-text assets such as TrueType fonts are not corrupted during reading.
+    """
+    for p in _webui_file_candidates(subdir, filename):
+        try:
+            with open(os.path.normpath(p), "rb") as f:
                 return f.read()
         except OSError:
             pass
@@ -3085,10 +3105,11 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
             self._json(read_webui_settings())
             return
 
-        # Static assets (CSS/JS) are served without auth – they contain no
+        # Static assets (CSS/JS/fonts) are served without auth – they contain no
         # sensitive data and are required by both the login page and the main UI.
         if path in ("/static/style.css", "/static/app.js",
-                    "/static/login.css", "/static/login.js"):
+                    "/static/login.css", "/static/login.js",
+                    "/static/fonts/font.ttf"):
             self._serve_static(path)
             return
 
@@ -3767,22 +3788,39 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
         self.wfile.write(sticks)
 
     def _serve_static(self, path):
-        """Serve a static CSS or JS file from the webui static directory."""
-        _CONTENT_TYPES = {
+        """Serve a static CSS, JS, or font file from the webui static directory."""
+        _TEXT_CONTENT_TYPES = {
             ".css": "text/css; charset=utf-8",
             ".js":  "application/javascript; charset=utf-8",
         }
+        _BINARY_CONTENT_TYPES = {
+            ".ttf":   "font/ttf",
+            ".otf":   "font/otf",
+            ".woff":  "font/woff",
+            ".woff2": "font/woff2",
+        }
         filename = os.path.basename(path)
+        # For fonts served from a subdirectory, preserve the relative subpath
+        # within static/ so the file is found at static/fonts/font.ttf.
+        static_prefix = "/static/"
+        rel_path = path[len(static_prefix):] if path.startswith(static_prefix) else filename
         ext = os.path.splitext(filename)[1]
-        content_type = _CONTENT_TYPES.get(ext)
-        if not content_type:
+        if ext in _TEXT_CONTENT_TYPES:
+            content = _read_webui_file("static", rel_path)
+            if content is None:
+                self._not_found()
+                return
+            data = content.encode("utf-8")
+            content_type = _TEXT_CONTENT_TYPES[ext]
+        elif ext in _BINARY_CONTENT_TYPES:
+            data = _read_webui_file_bytes("static", rel_path)
+            if data is None:
+                self._not_found()
+                return
+            content_type = _BINARY_CONTENT_TYPES[ext]
+        else:
             self._not_found()
             return
-        content = _read_webui_file("static", filename)
-        if content is None:
-            self._not_found()
-            return
-        data = content.encode("utf-8")
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", len(data))
