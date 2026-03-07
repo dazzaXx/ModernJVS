@@ -3109,7 +3109,10 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
         # sensitive data and are required by both the login page and the main UI.
         if path in ("/static/style.css", "/static/app.js",
                     "/static/login.css", "/static/login.js",
-                    "/static/fonts/font.ttf"):
+                    "/static/fonts/font.ttf",
+                    "/static/fonts/font.otf",
+                    "/static/fonts/font.woff",
+                    "/static/fonts/font.woff2"):
             self._serve_static(path)
             return
 

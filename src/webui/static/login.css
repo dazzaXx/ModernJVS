@@ -1,4 +1,4 @@
-  @font-face{font-family:'ModernJVS';src:url('/static/fonts/font.ttf') format('truetype');font-weight:normal;font-style:normal;font-display:swap;}
+  @font-face{font-family:'ModernJVS';src:url('/static/fonts/font.woff2') format('woff2'),url('/static/fonts/font.woff') format('woff'),url('/static/fonts/font.otf') format('opentype'),url('/static/fonts/font.ttf') format('truetype');font-weight:normal;font-style:normal;font-display:swap;}
   :root{--bg:#000000;--surface:#0a0a0a;--card:#111111;--border:#1f1f1f;
         --accent:#970011;--text:#e2e2f0;--muted:#888888;--red:#ff5555;
         --radius:8px;--font:'ModernJVS','Segoe UI',system-ui,sans-serif;}
