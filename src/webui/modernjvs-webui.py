@@ -614,6 +614,20 @@ def get_player_slots(logs=None):
     service start (identified by the last 'ModernJVS Version' banner) is used
     so that stale entries from a previous run are not shown.
 
+    Hot-plug cycle boundary detection
+    ----------------------------------
+    After each call to initInputs() the service always prints (at debug level 0):
+
+        ``  Output:          <game-path>``
+
+    This line is the reliable boundary between reinit cycles.  Player
+    assignments are accumulated into a *pending* dict as they are seen; when
+    ``  Output:`` is encountered the pending dict is committed as the result
+    of that cycle, replacing whatever the previous cycle had recorded.  This
+    ensures that stale slots from a previous cycle (e.g. the P2 slot for a
+    controller that has since disconnected and whose replacement now occupies
+    P1) are cleared rather than left behind.
+
     If controllers are subsequently disconnected (indicated by a
     ``Controllers:     None`` or ``No controllers detected`` log line appearing
     after the last player assignment), an empty list is returned so the UI
@@ -638,17 +652,36 @@ def get_player_slots(logs=None):
     #   Player 1:                  nintendo-wii-remote (Wiimote+Nunchuk)
     #   Player 1 (Fixed via config):  sony-dualshock4
     _player_re = re.compile(r'Player\s+(\d+)(?:\s+\([^)]*\))?\s*:\s+(\S[^\n]*)')
-    players = {}
+
+    # ``committed_players`` holds the last fully-completed reinit cycle's
+    # assignments.  ``pending_players`` accumulates assignments for the cycle
+    # that is currently being parsed.  When ``  Output:`` is seen the pending
+    # dict is committed (replacing the previous cycle entirely) so that stale
+    # slots from earlier cycles cannot leak through.
+    committed_players = {}
+    pending_players = {}
     last_player_idx = -1
     last_no_controllers_idx = -1
     for idx, line in enumerate(logs[start_idx:], start=start_idx):
         m = _player_re.search(line)
         if m:
             num = int(m.group(1))
-            players[num] = m.group(2).strip()
+            pending_players[num] = m.group(2).strip()
             last_player_idx = idx
+        elif "  Output:" in line and pending_players:
+            # End of a reinit cycle: commit pending assignments and reset.
+            # Only commit when pending is non-empty to avoid clobbering a
+            # previous good cycle when a reinit finds no controllers and
+            # emits no Player lines before its own Output: line.
+            committed_players = pending_players
+            pending_players = {}
         if "Controllers:     None" in line or "No controllers detected" in line:
             last_no_controllers_idx = idx
+
+    # Use the most recent complete cycle's assignments.  If pending_players is
+    # non-empty the Output: line has not yet appeared (e.g. a mid-reinit log
+    # read race); those assignments are more current so prefer them.
+    players = pending_players if pending_players else committed_players
 
     # If the most recent reinit cycle reported no controllers (after the last
     # player assignment), return an empty list to reflect the disconnected state.
