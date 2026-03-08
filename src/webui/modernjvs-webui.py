@@ -3107,16 +3107,11 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
 
         # Static assets (CSS/JS/fonts) are served without auth – they contain no
         # sensitive data and are required by both the login page and the main UI.
+        # Font files: any *.woff2/woff/otf/ttf directly under /static/fonts/ is
+        # allowed; [^/]+ prevents directory-traversal attacks.
         if path in ("/static/style.css", "/static/app.js",
-                    "/static/login.css", "/static/login.js",
-                    "/static/fonts/font.ttf",
-                    "/static/fonts/font.otf",
-                    "/static/fonts/font.woff",
-                    "/static/fonts/font.woff2",
-                    "/static/fonts/mono.ttf",
-                    "/static/fonts/mono.otf",
-                    "/static/fonts/mono.woff",
-                    "/static/fonts/mono.woff2"):
+                    "/static/login.css", "/static/login.js") or \
+                re.fullmatch(r'/static/fonts/[^/]+\.(woff2|woff|otf|ttf)', path):
             self._serve_static(path)
             return
 
