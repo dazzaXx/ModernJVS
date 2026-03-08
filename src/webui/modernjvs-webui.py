@@ -2475,12 +2475,19 @@ BT_INFO_TIMEOUT    = 10  # info / trust / remove commands
 BT_CONNECT_RETRY_DELAY = 2  # seconds to wait before retrying a failed connection attempt
 BT_CONNECT_MAX_RETRIES = 5  # number of automatic retries after an initial failed connect
 
-# Link supervision timeout constants applied to all active Bluetooth connections.
+# Link supervision timeout constants applied to BR/EDR Bluetooth connections.
+# Only BR/EDR connections receive an explicit supervision timeout; LE connections
+# use the parameters they negotiate during connection setup, because sending an
+# LL_CONNECTION_UPDATE_REQ (hcitool lecup) with aggressive intervals immediately
+# after connecting can cause some controllers to drop the link.
 BT_SUPERVISION_TIMEOUT_BREDR = 4800  # 3 s in 0.625 ms BR/EDR slots
-BT_SUPERVISION_TIMEOUT_LE    = 300   # 3 s in 10 ms LE units
-BT_SUPERVISION_LE_INTERVAL_MIN = 6
-BT_SUPERVISION_LE_INTERVAL_MAX = 12
-BT_SUPERVISION_LE_LATENCY      = 0
+
+# Seconds a device must be continuously connected before the supervision timeout
+# is applied.  This gives the controller time to finish its HID initialisation
+# (report-mode setup, driver handshake, etc.) before the 3-second link-loss
+# window is activated.  Applying the timeout too early was the cause of
+# controllers appearing to turn off immediately after a successful WebUI pair.
+BT_SUPERVISION_STABLE_PERIOD = 5
 
 # Known RS-485 / serial adapter VID:PID → human-readable chip name.
 # Used by diag_usb_devices() to highlight adapters in the USB inspector.
@@ -2914,12 +2921,15 @@ def setup_usb_bluetooth():
 
 
 def set_bluetooth_supervision_timeout():
-    """Apply a 3-second link supervision timeout to all active Bluetooth connections.
+    """Apply a 3-second BR/EDR link supervision timeout to active ACL connections.
 
-    BR/EDR (ACL) connections use ``hcitool lst <address> 4800``
+    Only BR/EDR (ACL) connections are updated via ``hcitool lst <address> 4800``
     (4800 × 0.625 ms = 3 s).
-    LE connections use ``hcitool lecup <handle> 6 12 0 300``
-    (300 × 10 ms = 3 s, with low-latency 7.5–15 ms connection intervals).
+
+    LE connections are intentionally skipped.  Setting LE parameters via
+    ``hcitool lecup`` requires specifying a new connection interval alongside
+    the supervision timeout; sending an aggressive interval update to a freshly
+    connected LE controller can cause its firmware to drop the link.
 
     Returns {"ok": True, "output": [...lines], "count": N} on success, or
     {"ok": True, "partial": True, "output": [...lines]} if some connections
@@ -2978,22 +2988,9 @@ def set_bluetooth_supervision_timeout():
                     )
                     failed = True
             elif conn_type == "LE":
-                sub = subprocess.run(
-                    ["hcitool", "lecup", handle,
-                     str(BT_SUPERVISION_LE_INTERVAL_MIN), str(BT_SUPERVISION_LE_INTERVAL_MAX),
-                     str(BT_SUPERVISION_LE_LATENCY), str(BT_SUPERVISION_TIMEOUT_LE)],
-                    capture_output=True, text=True, timeout=5,
+                output_lines.append(
+                    f"⚠ Skipping LE connection for {address} — LE supervision timeout is negotiated by the device"
                 )
-                if sub.returncode == 0:
-                    output_lines.append(
-                        f"✓ Set supervision timeout to 3 s for {address} (handle {handle}) [LE]"
-                    )
-                    count += 1
-                else:
-                    output_lines.append(
-                        f"✗ Failed for {address} [LE]: {(sub.stdout + sub.stderr).strip()}"
-                    )
-                    failed = True
             else:
                 output_lines.append(
                     f"⚠ Skipping unknown connection type '{conn_type}' for {address}"
@@ -3839,41 +3836,34 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
 # ---------------------------------------------------------------------------
 
 def _apply_supervision_timeout_for_connection(conn_type, address, handle):
-    """Apply a 3-second link supervision timeout to a single Bluetooth connection.
+    """Apply the BR/EDR link supervision timeout to a single ACL connection.
 
-    For LE connections where a valid HCI handle is available, ``hcitool lecup``
-    is used.  For all other connections (BR/EDR ACL or LE without a handle),
-    ``hcitool lst <address>`` is used — it takes the device address and does not
-    require the HCI handle.
+    Only BR/EDR (ACL) connections are updated.  LE connections are intentionally
+    skipped: setting LE parameters requires ``hcitool lecup`` which also changes
+    the connection interval.  Sending an aggressive connection-interval update
+    (e.g. 7.5–15 ms) immediately after a controller connects can cause some LE
+    devices to drop the link, which is the root cause of controllers appearing to
+    turn off right after a successful WebUI pairing.
 
-    Returns True on success, False on failure.
+    Returns True on success, False on failure or when the connection is LE.
     """
+    if conn_type == "LE":
+        # Let LE devices keep the connection parameters they negotiated at
+        # connection time.  The supervision timeout is embedded in those
+        # parameters and must not be changed separately.
+        return False
     try:
-        if conn_type == "LE" and handle and handle != "?":
-            sub = subprocess.run(
-                ["hcitool", "lecup", handle,
-                 str(BT_SUPERVISION_LE_INTERVAL_MIN), str(BT_SUPERVISION_LE_INTERVAL_MAX),
-                 str(BT_SUPERVISION_LE_LATENCY), str(BT_SUPERVISION_TIMEOUT_LE)],
-                capture_output=True, text=True, timeout=5,
-            )
-            if sub.returncode == 0:
-                print(f"[webui] BT supervision: set 3 s timeout for {address} (handle {handle}) [LE]", flush=True)
-                return True
-            else:
-                print(f"[webui] BT supervision: failed for {address} [LE]: {(sub.stdout + sub.stderr).strip()}", flush=True)
+        # ACL (BR/EDR): hcitool lst takes the device address directly.
+        sub = subprocess.run(
+            ["hcitool", "lst", address, str(BT_SUPERVISION_TIMEOUT_BREDR)],
+            capture_output=True, text=True, timeout=5,
+        )
+        if sub.returncode == 0:
+            handle_info = f" (handle {handle})" if handle and handle != "?" else ""
+            print(f"[webui] BT supervision: set 3 s timeout for {address}{handle_info} [BR/EDR]", flush=True)
+            return True
         else:
-            # ACL (BR/EDR) or LE without a known handle: hcitool lst takes the
-            # device address directly and does not require the connection handle.
-            sub = subprocess.run(
-                ["hcitool", "lst", address, str(BT_SUPERVISION_TIMEOUT_BREDR)],
-                capture_output=True, text=True, timeout=5,
-            )
-            if sub.returncode == 0:
-                handle_info = f" (handle {handle})" if handle and handle != "?" else ""
-                print(f"[webui] BT supervision: set 3 s timeout for {address}{handle_info} [BR/EDR]", flush=True)
-                return True
-            else:
-                print(f"[webui] BT supervision: failed for {address} [BR/EDR]: {(sub.stdout + sub.stderr).strip()}", flush=True)
+            print(f"[webui] BT supervision: failed for {address} [BR/EDR]: {(sub.stdout + sub.stderr).strip()}", flush=True)
     except Exception as e:
         print(f"[webui] BT supervision: error processing {address}: {e}", flush=True)
     return False
@@ -3917,26 +3907,36 @@ def _hcitool_connection_info():
 
 def _supervision_timeout_loop():
     """Background thread: watch for new Bluetooth connections and apply the
-    3-second link supervision timeout immediately when each device connects.
+    3-second BR/EDR link supervision timeout once each device has been
+    continuously connected for BT_SUPERVISION_STABLE_PERIOD seconds.
 
-    ``bluetoothctl devices Connected`` is the primary detection method — it is
-    the modern BlueZ API and works reliably on all systems including those
-    where ``bluetoothd`` holds the HCI device exclusively.  ``hcitool con`` is
-    called as a secondary, best-effort source to obtain the connection type
-    (ACL/LE) and HCI handle for LE devices.
+    The stable-period delay is critical: applying the timeout too soon (e.g.
+    within 1 second of the initial connection) was found to cause controllers
+    to drop the link before their HID driver and reporting-mode handshake
+    finished, making them appear to turn off immediately after a successful
+    WebUI pairing.
 
-    The seen-set tracks MAC addresses.  When a device disconnects its address
-    is removed so that a reconnect is handled correctly.
+    ``bluetoothctl devices Connected`` is the primary detection method.
+    ``hcitool con`` is called as a secondary, best-effort source to obtain the
+    HCI handle for addressing hcitool lst correctly.
 
-    ``hcitool`` was removed from BlueZ >= 5.65.  The loop runs regardless;
-    if ``hcitool`` is absent, BR/EDR connections are assumed and only the
-    ``bluetoothctl`` supervision timeout approach is used.
+    The seen-set tracks MAC addresses whose timeout has been applied.  The
+    first_seen dict tracks when each address was first observed as connected.
+    When a device disconnects, both structures are pruned so that a subsequent
+    reconnect is handled from scratch.
+
+    ``hcitool`` was removed from BlueZ >= 5.65.  The loop runs regardless; if
+    ``hcitool`` is absent, the BR/EDR supervision timeout step is silently
+    skipped and the default BlueZ timeout remains in effect.
     """
     if not shutil.which("bluetoothctl"):
         return
 
-    # Set of MAC addresses whose supervision timeout has been applied.
+    # Addresses whose supervision timeout has already been applied.
     seen = set()
+    # Addresses that are connected but not yet past the stable period.
+    # Maps address -> monotonic timestamp of first observation.
+    first_seen = {}
 
     while True:
         try:
@@ -3953,21 +3953,33 @@ def _supervision_timeout_loop():
                 if _validate_bt_mac(address):
                     current.add(address)
 
-            new_addresses = current - seen
-            if new_addresses:
-                # Fetch HCI details only when there are new devices to handle.
+            now = time.monotonic()
+
+            # Record the first-seen time for devices that just appeared.
+            for address in current - seen - set(first_seen):
+                first_seen[address] = now
+
+            # Apply the supervision timeout to devices that have been
+            # continuously connected for at least BT_SUPERVISION_STABLE_PERIOD
+            # seconds and have not yet had the timeout set.
+            ready = {
+                a for a in current
+                if a in first_seen and a not in seen
+                and now - first_seen[a] >= BT_SUPERVISION_STABLE_PERIOD
+            }
+            if ready:
                 hci_info = _hcitool_connection_info() if shutil.which("hcitool") else {}
-                for address in new_addresses:
+                for address in ready:
                     conn_type, handle = hci_info.get(address, ("ACL", "?"))
                     if hci_info and address not in hci_info:
                         print(f"[webui] BT supervision: no HCI info for {address}, assuming BR/EDR", flush=True)
                     _apply_supervision_timeout_for_connection(conn_type, address, handle)
-                    # Always mark as seen to avoid hammering the system with
-                    # repeated attempts every second.
+                    # Mark as seen regardless of success to avoid repeating.
                     seen.add(address)
 
-            # Forget disconnected devices so reconnects are processed.
+            # Forget disconnected devices so reconnects are processed correctly.
             seen &= current
+            first_seen = {a: t for a, t in first_seen.items() if a in current}
         except Exception as e:
             print(f"[webui] WARNING: BT supervision watch error: {e}", flush=True)
         time.sleep(1)
