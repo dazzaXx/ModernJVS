@@ -3112,7 +3112,11 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
                     "/static/fonts/font.ttf",
                     "/static/fonts/font.otf",
                     "/static/fonts/font.woff",
-                    "/static/fonts/font.woff2"):
+                    "/static/fonts/font.woff2",
+                    "/static/fonts/mono.ttf",
+                    "/static/fonts/mono.otf",
+                    "/static/fonts/mono.woff",
+                    "/static/fonts/mono.woff2"):
             self._serve_static(path)
             return
 
