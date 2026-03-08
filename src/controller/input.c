@@ -677,6 +677,18 @@ static int compare_devices(const void *a, const void *b)
 {
     const Device *dev_a = (const Device *)a;
     const Device *dev_b = (const Device *)b;
+
+    /* Bluetooth devices (e.g. Wiimotes, PS3/PS4 controllers) do not report a
+     * physical location through the kernel input subsystem, leaving the field
+     * empty.  Sort those after devices that do have a location so that
+     * wired/USB controllers always keep their lower-numbered player slots and
+     * are not displaced by any Bluetooth device connecting later. */
+    int a_empty = (dev_a->physicalLocation[0] == '\0');
+    int b_empty = (dev_b->physicalLocation[0] == '\0');
+
+    if (a_empty != b_empty)
+        return a_empty - b_empty;
+
     return strcmp(dev_a->physicalLocation, dev_b->physicalLocation);
 }
 
