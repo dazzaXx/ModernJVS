@@ -302,7 +302,7 @@
 
     <div class="card" style="margin-top:1rem;">
       <h2>Bluetooth Controllers</h2>
-      <p style="font-size:0.83rem;color:var(--muted);margin-bottom:1rem;">Add and remove Bluetooth controllers such as Wii Remotes.</p>
+      <p style="font-size:0.83rem;color:var(--muted);margin-bottom:1rem;">Add and remove Bluetooth controller devices.</p>
       <div id="btAlert" class="alert"></div>
       <div id="btStatusBanner" class="alert" style="display:none;"></div>
 
@@ -316,11 +316,7 @@
         </div>
       </div>
 
-      <div id="btScanSection" style="margin-top:1.25rem;padding-top:1rem;border-top:1px solid var(--border);">
-        <h3 style="font-size:0.85rem;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:0.5rem;">Add Bluetooth Controller</h3>
-        <p style="font-size:0.82rem;color:var(--muted);margin-bottom:0.75rem;">
-          For Wii Remotes: press the red <strong>SYNC</strong> button inside the battery compartment, or hold <strong>1+2</strong> until the lights flash, then click Scan.
-        </p>
+      <div id="btScanSection" style="padding-top:1rem;border-top:1px solid var(--border);">
         <div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;margin-bottom:0.75rem;">
           <button class="btn btn-refresh" id="btScanBtn" onclick="btScan()">&#x1F50D; Scan for Devices (8s)</button>
           <span id="btScanStatus" style="font-size:0.82rem;color:var(--muted);"></span>

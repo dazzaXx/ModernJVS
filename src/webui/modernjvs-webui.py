@@ -614,6 +614,20 @@ def get_player_slots(logs=None):
     service start (identified by the last 'ModernJVS Version' banner) is used
     so that stale entries from a previous run are not shown.
 
+    Hot-plug cycle boundary detection
+    ----------------------------------
+    After each call to initInputs() the service always prints (at debug level 0):
+
+        ``  Output:          <game-path>``
+
+    This line is the reliable boundary between reinit cycles.  Player
+    assignments are accumulated into a *pending* dict as they are seen; when
+    ``  Output:`` is encountered the pending dict is committed as the result
+    of that cycle, replacing whatever the previous cycle had recorded.  This
+    ensures that stale slots from a previous cycle (e.g. the P2 slot for a
+    controller that has since disconnected and whose replacement now occupies
+    P1) are cleared rather than left behind.
+
     If controllers are subsequently disconnected (indicated by a
     ``Controllers:     None`` or ``No controllers detected`` log line appearing
     after the last player assignment), an empty list is returned so the UI
@@ -638,17 +652,36 @@ def get_player_slots(logs=None):
     #   Player 1:                  nintendo-wii-remote (Wiimote+Nunchuk)
     #   Player 1 (Fixed via config):  sony-dualshock4
     _player_re = re.compile(r'Player\s+(\d+)(?:\s+\([^)]*\))?\s*:\s+(\S[^\n]*)')
-    players = {}
+
+    # ``committed_players`` holds the last fully-completed reinit cycle's
+    # assignments.  ``pending_players`` accumulates assignments for the cycle
+    # that is currently being parsed.  When ``  Output:`` is seen the pending
+    # dict is committed (replacing the previous cycle entirely) so that stale
+    # slots from earlier cycles cannot leak through.
+    committed_players = {}
+    pending_players = {}
     last_player_idx = -1
     last_no_controllers_idx = -1
     for idx, line in enumerate(logs[start_idx:], start=start_idx):
         m = _player_re.search(line)
         if m:
             num = int(m.group(1))
-            players[num] = m.group(2).strip()
+            pending_players[num] = m.group(2).strip()
             last_player_idx = idx
+        elif "  Output:" in line and pending_players:
+            # End of a reinit cycle: commit pending assignments and reset.
+            # Only commit when pending is non-empty to avoid clobbering a
+            # previous good cycle when a reinit finds no controllers and
+            # emits no Player lines before its own Output: line.
+            committed_players = pending_players
+            pending_players = {}
         if "Controllers:     None" in line or "No controllers detected" in line:
             last_no_controllers_idx = idx
+
+    # Use the most recent complete cycle's assignments.  If pending_players is
+    # non-empty the Output: line has not yet appeared (e.g. a mid-reinit log
+    # read race); those assignments are more current so prefer them.
+    players = pending_players if pending_players else committed_players
 
     # If the most recent reinit cycle reported no controllers (after the last
     # player assignment), return an empty list to reflect the disconnected state.
@@ -2475,12 +2508,29 @@ BT_INFO_TIMEOUT    = 10  # info / trust / remove commands
 BT_CONNECT_RETRY_DELAY = 2  # seconds to wait before retrying a failed connection attempt
 BT_CONNECT_MAX_RETRIES = 5  # number of automatic retries after an initial failed connect
 
-# Link supervision timeout constants applied to all active Bluetooth connections.
-BT_SUPERVISION_TIMEOUT_BREDR = 4800  # 3 s in 0.625 ms BR/EDR slots
-BT_SUPERVISION_TIMEOUT_LE    = 300   # 3 s in 10 ms LE units
-BT_SUPERVISION_LE_INTERVAL_MIN = 6
-BT_SUPERVISION_LE_INTERVAL_MAX = 12
-BT_SUPERVISION_LE_LATENCY      = 0
+# Link supervision timeout constants applied to active Bluetooth connections.
+BT_SUPERVISION_TIMEOUT_BREDR   = 4800  # 3 s in 0.625 ms BR/EDR slots
+BT_SUPERVISION_TIMEOUT_LE      = 300   # 3 s in 10 ms LE units
+
+# LE connection-update (lecup) interval bounds.  The maximum is deliberately
+# set to 800 (= 1000 ms) so that the LL_CONNECTION_UPDATE_REQ only changes
+# the supervision timeout without forcing controllers to switch to a shorter
+# connection interval.  A controller currently using, say, a 15 ms interval
+# will keep that interval because 15 ms is already within [7.5 ms, 1000 ms].
+# The original code used max = 12 (15 ms), which forced devices with longer
+# negotiated intervals to change, causing some LE controllers to drop the link.
+BT_SUPERVISION_LE_INTERVAL_MIN = 6     # 7.5 ms  – BLE-spec minimum
+BT_SUPERVISION_LE_INTERVAL_MAX = 800   # 1000 ms – permissive; keeps current interval
+BT_SUPERVISION_LE_LATENCY      = 0     # no slave latency
+
+# Seconds a Bluetooth device must be continuously connected before the
+# supervision timeout is applied.  Applying hcitool commands too soon
+# interferes with the HID reporting-mode handshake on BR/EDR controllers
+# (e.g. Wii Remotes) and with GATT service discovery on LE controllers
+# (e.g. Xbox Wireless Controller).  Sending LL_CONNECTION_UPDATE_REQ during
+# active GATT setup can cause LE controllers to reject the parameter update
+# and disconnect, even though bluetoothctl connect already returned success.
+BT_SUPERVISION_STABLE_PERIOD  = 5
 
 # Known RS-485 / serial adapter VID:PID → human-readable chip name.
 # Used by diag_usb_devices() to highlight adapters in the USB inspector.
@@ -2540,6 +2590,8 @@ def _run_bt_piped(commands, timeout=BT_PAIR_TIMEOUT):
         input="\n".join(commands) + "\n",
         capture_output=True, text=True, timeout=timeout,
     )
+
+
 
 
 def get_bluetooth_paired():
@@ -2914,12 +2966,15 @@ def setup_usb_bluetooth():
 
 
 def set_bluetooth_supervision_timeout():
-    """Apply a 3-second link supervision timeout to all active Bluetooth connections.
+    """Apply a 3-second BR/EDR link supervision timeout to active ACL connections.
 
-    BR/EDR (ACL) connections use ``hcitool lst <address> 4800``
+    Only BR/EDR (ACL) connections are updated via ``hcitool lst <address> 4800``
     (4800 × 0.625 ms = 3 s).
-    LE connections use ``hcitool lecup <handle> 6 12 0 300``
-    (300 × 10 ms = 3 s, with low-latency 7.5–15 ms connection intervals).
+
+    LE connections use ``hcitool lecup <handle> … 300`` with a permissive
+    max connection interval of BT_SUPERVISION_LE_INTERVAL_MAX (1000 ms).
+    The wide interval range ensures the controller keeps its current interval;
+    only the supervision timeout is effectively changed.
 
     Returns {"ok": True, "output": [...lines], "count": N} on success, or
     {"ok": True, "partial": True, "output": [...lines]} if some connections
@@ -2980,8 +3035,10 @@ def set_bluetooth_supervision_timeout():
             elif conn_type == "LE":
                 sub = subprocess.run(
                     ["hcitool", "lecup", handle,
-                     str(BT_SUPERVISION_LE_INTERVAL_MIN), str(BT_SUPERVISION_LE_INTERVAL_MAX),
-                     str(BT_SUPERVISION_LE_LATENCY), str(BT_SUPERVISION_TIMEOUT_LE)],
+                     str(BT_SUPERVISION_LE_INTERVAL_MIN),
+                     str(BT_SUPERVISION_LE_INTERVAL_MAX),
+                     str(BT_SUPERVISION_LE_LATENCY),
+                     str(BT_SUPERVISION_TIMEOUT_LE)],
                     capture_output=True, text=True, timeout=5,
                 )
                 if sub.returncode == 0:
@@ -3839,21 +3896,29 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
 # ---------------------------------------------------------------------------
 
 def _apply_supervision_timeout_for_connection(conn_type, address, handle):
-    """Apply a 3-second link supervision timeout to a single Bluetooth connection.
+    """Apply the link supervision timeout to a single Bluetooth connection.
 
-    For LE connections where a valid HCI handle is available, ``hcitool lecup``
-    is used.  For all other connections (BR/EDR ACL or LE without a handle),
-    ``hcitool lst <address>`` is used — it takes the device address and does not
-    require the HCI handle.
+    For LE connections a valid HCI handle is required; ``hcitool lecup`` is
+    called with a deliberately permissive max connection interval
+    (BT_SUPERVISION_LE_INTERVAL_MAX = 1000 ms) so that the controller keeps
+    its current interval and only the supervision timeout is effectively
+    extended.  This avoids the controller-level disconnection that occurred
+    with the original aggressive 15 ms max interval.
 
-    Returns True on success, False on failure.
+    For BR/EDR (ACL) connections ``hcitool lst <address>`` is used.
+
+    Returns True on success, False on failure or when parameters are unusable.
     """
     try:
-        if conn_type == "LE" and handle and handle != "?":
+        if conn_type == "LE":
+            if not handle or handle == "?":
+                return False  # Cannot update without a valid HCI handle.
             sub = subprocess.run(
                 ["hcitool", "lecup", handle,
-                 str(BT_SUPERVISION_LE_INTERVAL_MIN), str(BT_SUPERVISION_LE_INTERVAL_MAX),
-                 str(BT_SUPERVISION_LE_LATENCY), str(BT_SUPERVISION_TIMEOUT_LE)],
+                 str(BT_SUPERVISION_LE_INTERVAL_MIN),
+                 str(BT_SUPERVISION_LE_INTERVAL_MAX),
+                 str(BT_SUPERVISION_LE_LATENCY),
+                 str(BT_SUPERVISION_TIMEOUT_LE)],
                 capture_output=True, text=True, timeout=5,
             )
             if sub.returncode == 0:
@@ -3862,8 +3927,7 @@ def _apply_supervision_timeout_for_connection(conn_type, address, handle):
             else:
                 print(f"[webui] BT supervision: failed for {address} [LE]: {(sub.stdout + sub.stderr).strip()}", flush=True)
         else:
-            # ACL (BR/EDR) or LE without a known handle: hcitool lst takes the
-            # device address directly and does not require the connection handle.
+            # ACL (BR/EDR): hcitool lst takes the device address directly.
             sub = subprocess.run(
                 ["hcitool", "lst", address, str(BT_SUPERVISION_TIMEOUT_BREDR)],
                 capture_output=True, text=True, timeout=5,
@@ -3917,26 +3981,35 @@ def _hcitool_connection_info():
 
 def _supervision_timeout_loop():
     """Background thread: watch for new Bluetooth connections and apply the
-    3-second link supervision timeout immediately when each device connects.
+    3-second link supervision timeout.
 
-    ``bluetoothctl devices Connected`` is the primary detection method — it is
-    the modern BlueZ API and works reliably on all systems including those
-    where ``bluetoothd`` holds the HCI device exclusively.  ``hcitool con`` is
-    called as a secondary, best-effort source to obtain the connection type
-    (ACL/LE) and HCI handle for LE devices.
+    Both **LE connections** (e.g. Xbox Wireless Controller) and **BR/EDR
+    connections** (e.g. Wii Remote) are processed only after
+    BT_SUPERVISION_STABLE_PERIOD seconds of continuous connection.
 
-    The seen-set tracks MAC addresses.  When a device disconnects its address
-    is removed so that a reconnect is handled correctly.
+    Applying supervision commands too soon interferes with the HID
+    reporting-mode handshake on BR/EDR controllers and with GATT service
+    discovery on LE controllers.  In particular, sending
+    ``LL_CONNECTION_UPDATE_REQ`` (via ``hcitool lecup``) during active GATT
+    setup causes some LE controllers (e.g. Xbox Wireless Controller) to reject
+    the parameter update and disconnect, even though ``bluetoothctl connect``
+    already returned success.  Waiting for BT_SUPERVISION_STABLE_PERIOD ensures
+    GATT is complete before the supervision timeout is adjusted.
 
-    ``hcitool`` was removed from BlueZ >= 5.65.  The loop runs regardless;
-    if ``hcitool`` is absent, BR/EDR connections are assumed and only the
-    ``bluetoothctl`` supervision timeout approach is used.
+    The ``first_seen`` dict tracks when each address was first observed as
+    connected.  Disconnected devices are pruned from both ``first_seen`` and
+    ``seen`` so that a subsequent reconnect restarts the timing from scratch.
+
+    ``hcitool`` was removed from BlueZ >= 5.65.  The loop runs regardless; if
+    ``hcitool`` is absent, supervision commands silently no-op.
     """
     if not shutil.which("bluetoothctl"):
         return
 
-    # Set of MAC addresses whose supervision timeout has been applied.
+    # Addresses whose supervision timeout has already been applied.
     seen = set()
+    # Addresses first observed as connected; maps address -> monotonic timestamp.
+    first_seen = {}
 
     while True:
         try:
@@ -3953,21 +4026,30 @@ def _supervision_timeout_loop():
                 if _validate_bt_mac(address):
                     current.add(address)
 
-            new_addresses = current - seen
-            if new_addresses:
-                # Fetch HCI details only when there are new devices to handle.
-                hci_info = _hcitool_connection_info() if shutil.which("hcitool") else {}
-                for address in new_addresses:
-                    conn_type, handle = hci_info.get(address, ("ACL", "?"))
-                    if hci_info and address not in hci_info:
-                        print(f"[webui] BT supervision: no HCI info for {address}, assuming BR/EDR", flush=True)
-                    _apply_supervision_timeout_for_connection(conn_type, address, handle)
-                    # Always mark as seen to avoid hammering the system with
-                    # repeated attempts every second.
-                    seen.add(address)
+            now = time.monotonic()
 
-            # Forget disconnected devices so reconnects are processed.
+            # Record first-seen time for devices that just appeared.
+            for address in current - seen - set(first_seen):
+                first_seen[address] = now
+
+            # Process all connections that have not yet been handled.
+            pending = {a for a in current if a in first_seen and a not in seen}
+            if pending:
+                hci_info = _hcitool_connection_info() if shutil.which("hcitool") else {}
+                for address in pending:
+                    conn_type, handle = hci_info.get(address, ("ACL", "?"))
+                    age = now - first_seen[address]
+
+                    if age >= BT_SUPERVISION_STABLE_PERIOD:
+                        if hci_info and address not in hci_info:
+                            print(f"[webui] BT supervision: no HCI info for {address}, assuming BR/EDR", flush=True)
+                        _apply_supervision_timeout_for_connection(conn_type, address, handle)
+                        seen.add(address)
+                    # else: not yet at stable period; check next tick.
+
+            # Forget disconnected devices so reconnects are processed from scratch.
             seen &= current
+            first_seen = {a: t for a, t in first_seen.items() if a in current}
         except Exception as e:
             print(f"[webui] WARNING: BT supervision watch error: {e}", flush=True)
         time.sleep(1)
