@@ -7,6 +7,10 @@
     font-weight: normal;
     font-style: normal;
     font-display: swap;
+    /* Scale the custom font up to match the visual size of the system-ui
+       fallback. Without this, the IBM VGA-style font renders ~10% smaller
+       than system-ui, making certain glyphs (e.g. V, A) look undersized. */
+    size-adjust: 110%;
   }
 
   :root {
