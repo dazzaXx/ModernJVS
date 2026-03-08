@@ -689,7 +689,17 @@ static int compare_devices(const void *a, const void *b)
     if (a_empty != b_empty)
         return a_empty - b_empty;
 
-    return strcmp(dev_a->physicalLocation, dev_b->physicalLocation);
+    int loc_cmp = strcmp(dev_a->physicalLocation, dev_b->physicalLocation);
+    if (loc_cmp != 0)
+        return loc_cmp;
+
+    /* Within the same physical-location group (including the Bluetooth group
+     * where all locations are empty) use the kernel event device path as a
+     * stable tie-breaker.  The path (/dev/input/eventN) is assigned by the
+     * kernel in registration order, so lower numbers consistently represent
+     * devices that connected earlier.  This prevents non-deterministic player
+     * slot assignment when multiple Bluetooth controllers are present. */
+    return strcmp(dev_a->path, dev_b->path);
 }
 
 int getNumberOfDevices(void)
