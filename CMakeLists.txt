@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.10)
 
 project(modernjvs
-        VERSION "5.14.13"
+        VERSION "5.15.13"
         LANGUAGES "C"
         DESCRIPTION "JVS I/O Emulator"
         HOMEPAGE_URL "https://github.com/dazzaXx/ModernJVS"
@@ -118,6 +118,12 @@ if(ENABLE_WEBUI)
         ${CMAKE_SOURCE_DIR}/src/webui/static/login.js
         COMPONENT ${PROJECT_NAME}
         DESTINATION "/usr/share/modernjvs/webui/static/"
+    )
+
+    install(DIRECTORY
+        ${CMAKE_SOURCE_DIR}/src/webui/static/fonts/
+        COMPONENT ${PROJECT_NAME}
+        DESTINATION "/usr/share/modernjvs/webui/static/fonts/"
     )
 
     install(FILES

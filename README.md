@@ -484,6 +484,15 @@ Use one of these I/O board configurations:
 
 Issues and pull requests welcome! If you have a game-specific configuration that works well, please consider contributing it back to the project.
 
+## Third-Party Fonts
+
+The ModernJVS WebUI uses the following fonts, both licensed under the [SIL Open Font License 1.1](https://openfontlicense.org):
+
+| Font | Usage | Source | License file |
+|------|-------|--------|--------------|
+| [Chakra Petch](https://fonts.google.com/specimen/Chakra+Petch) | UI display font | Google Fonts | `src/webui/static/fonts/OFL-ChakraPetch.txt` |
+| [Roboto Mono](https://fonts.google.com/specimen/Roboto+Mono) | Monospace / code font | Google Fonts | `src/webui/static/fonts/OFL-RobotoMono.txt` |
+
 ## License
 
 See LICENSE.md for license information.

@@ -1,6 +1,7 @@
+  @font-face{font-family:'ModernJVS';src:url('/static/fonts/main.woff2') format('woff2'),url('/static/fonts/main.woff') format('woff'),url('/static/fonts/main.otf') format('opentype'),url('/static/fonts/main.ttf') format('truetype');font-weight:normal;font-style:normal;font-display:swap;}
   :root{--bg:#000000;--surface:#0a0a0a;--card:#111111;--border:#1f1f1f;
         --accent:#970011;--text:#e2e2f0;--muted:#888888;--red:#ff5555;
-        --radius:8px;--font:'Segoe UI',system-ui,sans-serif;}
+        --radius:8px;--font:'ModernJVS','Segoe UI',system-ui,sans-serif;}
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
   body{background:var(--bg);color:var(--text);font-family:var(--font);
        min-height:100vh;display:flex;flex-direction:column;

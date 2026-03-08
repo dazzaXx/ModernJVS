@@ -325,7 +325,7 @@ function renderProfilesTable(data) {
   }
   tbody.innerHTML = files.map(name => `
     <tr>
-      <td><code style="color:var(--accent2);font-family:monospace;">${_escHtml(name)}</code></td>
+      <td><code style="color:var(--accent2);font-family:var(--font-mono);">${_escHtml(name)}</code></td>
       <td style="white-space:nowrap;">
         <button class="btn btn-xs btn-refresh" data-name="${_escHtml(name)}" onclick="editProfile(this.dataset.name)" style="margin-right:0.25rem;">Edit</button>
         <a href="/api/profiles/download?type=${encodeURIComponent(_profilesCurrentTab)}&name=${encodeURIComponent(name)}" class="btn btn-xs" style="margin-right:0.25rem;text-decoration:none;">Download</a>
@@ -1223,7 +1223,7 @@ async function loadSessions() {
     + '</tr>';
   d.sessions.forEach(s => {
     html += `<tr style="border-bottom:1px solid var(--border);">`
-      + `<td style="padding:0.3rem 0.5rem;font-family:monospace;">${_escHtml(s.token_hint)}</td>`
+      + `<td style="padding:0.3rem 0.5rem;font-family:var(--font-mono);">${_escHtml(s.token_hint)}</td>`
       + `<td style="padding:0.3rem 0.5rem;">${_escHtml(s.ip || '—')}</td>`
       + `<td style="padding:0.3rem 0.5rem;">${_escHtml(s.created)}</td>`
       + `<td style="padding:0.3rem 0.5rem;">${_escHtml(s.expires)}</td>`
@@ -1624,7 +1624,7 @@ async function loadUsbDevices() {
       ? `<span style="font-size:0.75rem;padding:0.1rem 0.4rem;background:var(--yellow,#e5c07b);color:#1a1a1a;border-radius:3px;">RS-485/Serial: ${_escHtml(dev.rs485_chip)}</span>`
       : '';
     return `<div style="padding:0.35rem 0;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:0.4rem;flex-wrap:wrap;">`
-      + `<code style="color:var(--accent2);font-family:monospace;">${_escHtml(vidpid)}</code>`
+      + `<code style="color:var(--accent2);font-family:var(--font-mono);">${_escHtml(vidpid)}</code>`
       + mfgStr
       + `<strong>${_escHtml(label)}</strong>`
       + (rs485Badge ? ' ' + rs485Badge : '')

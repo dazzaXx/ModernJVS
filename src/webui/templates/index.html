@@ -267,10 +267,10 @@
       <div id="profileEditorWrap" style="display:none;margin-top:1.25rem;padding-top:1rem;border-top:1px solid var(--border);">
         <div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:0.5rem;flex-wrap:wrap;">
           <span style="font-size:0.82rem;color:var(--muted);">Editing:</span>
-          <code id="profileEditName" style="color:var(--accent2);font-family:monospace;font-size:0.9rem;"></code>
-          <input type="text" id="profileNewName" placeholder="new-filename" style="display:none;background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--text);padding:0.25rem 0.5rem;font-family:monospace;font-size:0.85rem;">
+          <code id="profileEditName" style="color:var(--accent2);font-family:var(--font-mono);font-size:0.9rem;"></code>
+          <input type="text" id="profileNewName" placeholder="new-filename" style="display:none;background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--text);padding:0.25rem 0.5rem;font-family:var(--font-mono);font-size:0.85rem;">
         </div>
-        <textarea id="profileEditContent" style="width:100%;box-sizing:border-box;min-height:300px;background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--text);font-family:monospace;font-size:0.85rem;padding:0.5rem;resize:vertical;"></textarea>
+        <textarea id="profileEditContent" style="width:100%;box-sizing:border-box;min-height:300px;background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--text);font-family:var(--font-mono);font-size:0.85rem;padding:0.5rem;resize:vertical;"></textarea>
         <div style="display:flex;gap:0.5rem;margin-top:0.75rem;flex-wrap:wrap;">
           <button class="btn btn-save" onclick="saveProfile()">💾 Save</button>
           <button class="btn btn-refresh" onclick="newProfileFile()">+ New File</button>
@@ -291,7 +291,7 @@
     </div>
     <div class="card">
       <h2>Connected Input Devices</h2>
-      <p style="font-size:0.83rem;color:var(--muted);margin-bottom:1rem;">Shows all <code style="color:var(--accent2);font-family:monospace">/dev/input/event*</code> nodes currently present on the system.</p>
+      <p style="font-size:0.83rem;color:var(--muted);margin-bottom:1rem;">Shows all <code style="color:var(--accent2);font-family:var(--font-mono)">/dev/input/event*</code> nodes currently present on the system.</p>
       <div class="table-wrap">
       <table class="device-table">
         <thead><tr><th>Event Node</th><th>Device Name</th><th>Status</th></tr></thead>
@@ -345,7 +345,7 @@
         <button class="btn btn-stop"  onclick="stopInputTest()" disabled id="inputTesterStopBtn">&#9632; Stop</button>
       </div>
       <div id="inputTesterStatus" style="font-size:0.82rem;color:var(--muted);margin-bottom:0.75rem;"></div>
-      <div id="inputTesterDisplay" style="font-family:monospace;font-size:0.82rem;min-height:60px;"></div>
+      <div id="inputTesterDisplay" style="font-family:var(--font-mono);font-size:0.82rem;min-height:60px;"></div>
     </div>
   </div>
 
@@ -368,7 +368,7 @@
                style="flex:1;min-width:200px;background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--text);padding:0.35rem 0.6rem;">
         <button class="btn btn-start" onclick="runSerialTest()">&#9654; Test Port</button>
       </div>
-      <div id="diagSerialResult" style="font-family:monospace;font-size:0.84rem;min-height:2rem;"></div>
+      <div id="diagSerialResult" style="font-family:var(--font-mono);font-size:0.84rem;min-height:2rem;"></div>
     </div>
 
     <!-- JVS Bus -->
@@ -377,8 +377,8 @@
       <p style="font-size:0.83rem;color:var(--muted);margin-bottom:1rem;">
         Two tools for inspecting the JVS bus.
         <strong>Probe Bus</strong> sends a
-        <code style="color:var(--accent2);font-family:monospace">RESET</code> +
-        <code style="color:var(--accent2);font-family:monospace">ASSIGN_ADDR</code>
+        <code style="color:var(--accent2);font-family:var(--font-mono)">RESET</code> +
+        <code style="color:var(--accent2);font-family:var(--font-mono)">ASSIGN_ADDR</code>
         broadcast and listens for 2&nbsp;s — any response bytes confirm a connected,
         powered-on board.
         <strong>Monitor Bus</strong> listens passively for 5&nbsp;seconds without sending
@@ -398,7 +398,7 @@
         <button class="btn btn-stop"  onclick="jvsServiceAction('stop')">&#9632; Stop Service</button>
         <button class="btn btn-start" onclick="jvsServiceAction('start')">&#9654; Start Service</button>
       </div>
-      <div id="diagJvsResult" style="font-family:monospace;font-size:0.84rem;min-height:2rem;"></div>
+      <div id="diagJvsResult" style="font-family:var(--font-mono);font-size:0.84rem;min-height:2rem;"></div>
     </div>
 
     <!-- GPIO Sense Line Test -->
@@ -426,19 +426,19 @@
         <button class="btn btn-restart" onclick="setGpioPin('high')">&#9650; Set HIGH</button>
         <button class="btn btn-stop"    onclick="setGpioPin('low')">&#9660; Set LOW</button>
       </div>
-      <div id="diagGpioResult" style="font-family:monospace;font-size:0.84rem;min-height:2rem;"></div>
+      <div id="diagGpioResult" style="font-family:var(--font-mono);font-size:0.84rem;min-height:2rem;"></div>
     </div>
 
     <!-- Available Serial Devices -->
     <div class="card" style="margin-top:1rem;">
       <h2>Available Serial Devices</h2>
       <p style="font-size:0.83rem;color:var(--muted);margin-bottom:1rem;">
-        All <code style="color:var(--accent2);font-family:monospace">/dev/ttyUSB*</code>,
-        <code style="color:var(--accent2);font-family:monospace">/dev/ttyAMA*</code>, and
-        <code style="color:var(--accent2);font-family:monospace">/dev/ttyS*</code> nodes currently
+        All <code style="color:var(--accent2);font-family:var(--font-mono)">/dev/ttyUSB*</code>,
+        <code style="color:var(--accent2);font-family:var(--font-mono)">/dev/ttyAMA*</code>, and
+        <code style="color:var(--accent2);font-family:var(--font-mono)">/dev/ttyS*</code> nodes currently
         present on the system.
       </p>
-      <div id="diagPortListWrap" style="font-family:monospace;font-size:0.84rem;"></div>
+      <div id="diagPortListWrap" style="font-family:var(--font-mono);font-size:0.84rem;"></div>
     </div>
 
     <!-- USB Device Inspector -->
@@ -446,9 +446,9 @@
       <h2>USB Device Inspector <button class="btn btn-refresh btn-xs" onclick="loadUsbDevices()" style="margin-left:0.5rem;vertical-align:middle;">⟳</button></h2>
       <p style="font-size:0.83rem;color:var(--muted);margin-bottom:1rem;">
         All connected USB devices read from
-        <code style="color:var(--accent2);font-family:monospace">/sys/bus/usb/devices/</code>.
+        <code style="color:var(--accent2);font-family:var(--font-mono)">/sys/bus/usb/devices/</code>.
         Known RS-485/serial adapters are highlighted. Shows the currently bound kernel driver —
-        useful when a <code style="color:var(--accent2);font-family:monospace">/dev/ttyUSB*</code>
+        useful when a <code style="color:var(--accent2);font-family:var(--font-mono)">/dev/ttyUSB*</code>
         node is not appearing.
       </p>
       <div id="diagUsbWrap" style="font-size:0.84rem;"></div>
