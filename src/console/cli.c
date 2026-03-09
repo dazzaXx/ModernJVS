@@ -97,7 +97,7 @@ static JVSCLIStatus editFile(char *filePath)
     // Validate filename to prevent command injection
     if (!validateFilename(filePath))
     {
-        printf("Error: Invalid filename. Only alphanumeric characters, dash, underscore, dot, and slash are allowed.\n");
+        debug(0, "Error: Invalid filename. Only alphanumeric characters, dash, underscore, dot, and slash are allowed.\n");
         return JVS_CLI_STATUS_ERROR;
     }
 
@@ -105,7 +105,7 @@ static JVSCLIStatus editFile(char *filePath)
     int ret = snprintf(mainName, sizeof(mainName), "%s%s", DEFAULT_DEVICE_MAPPING_PATH, filePath);
     if (ret < 0 || ret >= (int)sizeof(mainName))
     {
-        printf("Error: File path too long\n");
+        debug(0, "Error: File path too long\n");
         return JVS_CLI_STATUS_ERROR;
     }
     if (access(mainName, F_OK) != 0)
@@ -113,12 +113,12 @@ static JVSCLIStatus editFile(char *filePath)
         ret = snprintf(mainName, sizeof(mainName), "%s%s", DEFAULT_GAME_MAPPING_PATH, filePath);
         if (ret < 0 || ret >= (int)sizeof(mainName))
         {
-            printf("Error: File path too long\n");
+            debug(0, "Error: File path too long\n");
             return JVS_CLI_STATUS_ERROR;
         }
         if (access(mainName, F_OK) != 0)
         {
-            printf("Error: Could not find a game or device file with that name\n");
+            debug(0, "Error: Could not find a game or device file with that name\n");
             return JVS_CLI_STATUS_ERROR;
         }
     }
@@ -150,12 +150,12 @@ static JVSCLIStatus editFile(char *filePath)
             int exit_status = WEXITSTATUS(status);
             if (exit_status != 0)
             {
-                printf("Warning: Editor exited with status %d\n", exit_status);
+                debug(0, "Warning: Editor exited with status %d\n", exit_status);
             }
         }
         else if (WIFSIGNALED(status))
         {
-            printf("Warning: Editor terminated by signal %d\n", WTERMSIG(status));
+            debug(0, "Warning: Editor terminated by signal %d\n", WTERMSIG(status));
         }
     }
     
@@ -304,7 +304,7 @@ static JVSCLIStatus disableDevice(char *deviceName)
 
 static JVSCLIStatus printDeviceListing(Device *device)
 {
-    printf("  - %s (%s)\n", device->name, device->physicalLocation);
+    debug(0, "  - %s (%s)\n", device->name, device->physicalLocation);
 
     return JVS_CLI_STATUS_SUCCESS_CONTINUE;
 }

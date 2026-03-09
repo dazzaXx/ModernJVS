@@ -79,6 +79,7 @@ WatchdogStatus initWatchdog(volatile int *running)
     if (THREAD_STATUS_SUCCESS != createThread(watchdogThread, args))
     {
         free(args);
+        args = NULL;
         return WATCHDOG_STATUS_ERROR;
     }
 
