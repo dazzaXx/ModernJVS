@@ -1005,101 +1005,17 @@ JVSInputStatus initInputs(char *outputMappingPath, char *configPath, char *secon
     for (int i = 0; i < slotRegistryLength; i++)
         slotRegistry[i].slot = i + 1;
 
-    /* Step 4: pre-compute per-device slot numbers.
-     *
-     *   Slot-owning devices (regular controllers, main Wiimote, etc.):
-     *     Look up the registry.  If found, reuse the recorded slot so the
-     *     device keeps its player assignment.  If absent (new device), claim
-     *     the next available slot.
-     *
-     *   Non-slot-owning devices:
-     *     IR Wiimote      → inherit the paired Wiimote's slot (resolved below).
-     *     Aimtrak-skip    → inherit the paired main Aimtrak's slot (resolved below).
-     *     Nunchuk (merged)→ resolved in the main loop via mergedNunchukDevices. */
+    /* Step 4: initialise per-device slot array.
+     *   Slots are assigned lazily in the main loop so that only devices
+     *   which successfully start a thread consume a slot number.  This
+     *   prevents gaps when unmapped or unrecognised devices are present. */
     int deviceSlots[MAX_DEVICES];
-    for (int i = 0; i < MAX_DEVICES; i++)
-        deviceSlots[i] = 1; /* safe default; overridden for every real device */
+    memset(deviceSlots, 0, sizeof(deviceSlots));
 
-    int nextNewSlot = slotRegistryLength + 1;
-
-    for (int pi = 0; pi < deviceList->length; pi++)
-    {
-        const char *name = deviceList->devices[pi].name;
-
-        /* Skip non-slot-owners; they are resolved in the secondary passes below. */
-        if (strcmp(name, WIIMOTE_DEVICE_NAME_IR) == 0          ||
-            strcmp(name, WIIMOTE_DEVICE_NAME_NUNCHUK) == 0      ||
-            strcmp(name, AIMTRAK_DEVICE_NAME_REMAP_OUT_SCREEN) == 0 ||
-            strcmp(name, AIMTRAK_DEVICE_NAME_REMAP_JOYSTICK) == 0)
-            continue;
-
-        char key[MAX_PATH_LENGTH + SLOT_REGISTRY_KEY_SUFFIX_LEN];
-        int keyLen = snprintf(key, sizeof(key), "%s[%d]", name, nameOccurrence[pi]);
-        if (keyLen < 0 || keyLen >= (int)sizeof(key))
-        {
-            debug(0, "Warning: Registry key truncated for device %s; assigning new slot\n", name);
-            deviceSlots[pi] = nextNewSlot++;
-            continue;
-        }
-
-        int slot = -1;
-        for (int r = 0; r < slotRegistryLength; r++)
-        {
-            if (strcmp(slotRegistry[r].key, key) == 0)
-            {
-                slot = slotRegistry[r].slot;
-                break;
-            }
-        }
-        deviceSlots[pi] = (slot >= 0) ? slot : nextNewSlot++;
-    }
-
-    /* Resolve IR Wiimote nodes: find the paired main Wiimote within the
-     * lookahead window and inherit its slot so both nodes feed the same
-     * JVS player. */
-    for (int pi = 0; pi < deviceList->length; pi++)
-    {
-        if (strcmp(deviceList->devices[pi].name, WIIMOTE_DEVICE_NAME_IR) != 0)
-            continue;
-
-        int irSlot = -1;
-        int lo = pi - DEVICE_LOOKAHEAD_DISTANCE;
-        int hi = pi + DEVICE_LOOKAHEAD_DISTANCE;
-        if (lo < 0) lo = 0;
-        if (hi >= deviceList->length) hi = deviceList->length - 1;
-
-        for (int j = lo; j <= hi && irSlot < 0; j++)
-        {
-            if (j == pi) continue;
-            if (strcmp(deviceList->devices[j].name, WIIMOTE_DEVICE_NAME) == 0)
-                irSlot = deviceSlots[j];
-        }
-        deviceSlots[pi] = (irSlot >= 0) ? irSlot : nextNewSlot;
-    }
-
-    /* Resolve Aimtrak-skip nodes: find the paired main Aimtrak device within
-     * the lookahead window and inherit its slot. */
-    for (int pi = 0; pi < deviceList->length; pi++)
-    {
-        const char *name = deviceList->devices[pi].name;
-        if (strcmp(name, AIMTRAK_DEVICE_NAME_REMAP_OUT_SCREEN) != 0 &&
-            strcmp(name, AIMTRAK_DEVICE_NAME_REMAP_JOYSTICK) != 0)
-            continue;
-
-        int aimSlot = -1;
-        int lo = pi - DEVICE_LOOKAHEAD_DISTANCE;
-        int hi = pi + DEVICE_LOOKAHEAD_DISTANCE;
-        if (lo < 0) lo = 0;
-        if (hi >= deviceList->length) hi = deviceList->length - 1;
-
-        for (int j = lo; j <= hi && aimSlot < 0; j++)
-        {
-            if (j == pi) continue;
-            if (strcmp(deviceList->devices[j].name, AIMTRAK_DEVICE_NAME) == 0)
-                aimSlot = deviceSlots[j];
-        }
-        deviceSlots[pi] = (aimSlot >= 0) ? aimSlot : nextNewSlot;
-    }
+    /* playerNumber: the next slot to hand to a brand-new (unregistered) device.
+     * After compaction the registry holds slots 1..slotRegistryLength without
+     * gaps, so the first new device always receives slotRegistryLength + 1. */
+    int playerNumber = slotRegistryLength + 1;
 
     /* --- end pre-pass --- */
 
@@ -1259,16 +1175,70 @@ JVSInputStatus initInputs(char *outputMappingPath, char *configPath, char *secon
 
         EVInputs evInputs = {0};
 
-        // Determine which player number to use for this device.
-        // Merged Nunchuk devices derive their slot from the paired Wiimote;
-        // all other devices use the slot pre-computed by the persistent registry
-        // pre-pass above, which ensures controllers keep their assigned player
-        // slot across hot-plug reinitializations.
+        // Determine which player slot to use for this device.
+        //
+        // Slots are assigned lazily: already-registered devices look up their
+        // stored slot so they keep the same player number across hot-plug
+        // reinitializations.  Brand-new devices receive playerNumber, which
+        // only increments when a thread actually starts — so unmapped or
+        // otherwise-skipped devices never consume a slot and create gaps.
+        //
+        // Non-slot-owning devices (IR Wiimote, Aimtrak-skip) inherit the slot
+        // of their paired primary device if it has already been started this
+        // cycle (slot recorded in deviceSlots[]).  If the primary hasn't
+        // started yet they share playerNumber — the primary will receive the
+        // same value since neither device increments it.
+        int slotFromRegistry = 0;
         int effectivePlayerNumber;
         if (strcmp(originalName, WIIMOTE_DEVICE_NAME_NUNCHUK) == 0 && mergedNunchukDevices[i] > 0)
+        {
+            // Merged Nunchuk: inherit slot from paired Wiimote
             effectivePlayerNumber = mergedNunchukDevices[i];
+        }
+        else if (strcmp(originalName, WIIMOTE_DEVICE_NAME_IR) == 0 ||
+                 strcmp(originalName, AIMTRAK_DEVICE_NAME_REMAP_OUT_SCREEN) == 0 ||
+                 strcmp(originalName, AIMTRAK_DEVICE_NAME_REMAP_JOYSTICK) == 0)
+        {
+            // Non-slot-owner: look for paired primary device in deviceSlots[]
+            const char *pairName = (strcmp(originalName, WIIMOTE_DEVICE_NAME_IR) == 0)
+                                   ? WIIMOTE_DEVICE_NAME : AIMTRAK_DEVICE_NAME;
+            effectivePlayerNumber = playerNumber;
+            int lo = i - DEVICE_LOOKAHEAD_DISTANCE;
+            int hi = i + DEVICE_LOOKAHEAD_DISTANCE;
+            if (lo < 0) lo = 0;
+            if (hi >= deviceList->length) hi = deviceList->length - 1;
+            for (int j = lo; j <= hi; j++)
+            {
+                if (j == i) continue;
+                if (strcmp(deviceList->devices[j].name, pairName) == 0 &&
+                    deviceSlots[j] > 0)
+                {
+                    effectivePlayerNumber = deviceSlots[j];
+                    break;
+                }
+            }
+        }
         else
-            effectivePlayerNumber = deviceSlots[i];
+        {
+            // Regular slot-owner: look up the registry so the device keeps its
+            // slot across reinitializations.  Fall back to playerNumber if new.
+            effectivePlayerNumber = playerNumber;
+            char regKey[MAX_PATH_LENGTH + SLOT_REGISTRY_KEY_SUFFIX_LEN];
+            int regKeyLen = snprintf(regKey, sizeof(regKey), "%s[%d]",
+                                     originalName, nameOccurrence[i]);
+            if (regKeyLen >= 0 && regKeyLen < (int)sizeof(regKey))
+            {
+                for (int r = 0; r < slotRegistryLength; r++)
+                {
+                    if (strcmp(slotRegistry[r].key, regKey) == 0)
+                    {
+                        effectivePlayerNumber = slotRegistry[r].slot;
+                        slotFromRegistry = 1;
+                        break;
+                    }
+                }
+            }
+        }
         
         // Parse the input mapping to check if a fixed player is set
         if (!processMappings(&inputMappings, &outputMappings, &evInputs, (ControllerPlayer)effectivePlayerNumber))
@@ -1286,6 +1256,9 @@ JVSInputStatus initInputs(char *outputMappingPath, char *configPath, char *secon
         double playerDeadzone = getPlayerDeadzone(effectivePlayerNumber, analogDeadzoneP1, analogDeadzoneP2, analogDeadzoneP3, analogDeadzoneP4);
         if (startThread(&evInputs, device->path, strcmp(originalName, WIIMOTE_DEVICE_NAME_IR) == 0, effectivePlayerNumber, jvsIO, playerDeadzone) == THREAD_STATUS_SUCCESS)
         {
+            // Record this device's slot so IR/Aimtrak-skip siblings can inherit it
+            deviceSlots[i] = effectivePlayerNumber;
+
             // Update merged Nunchuk player number to match this Wiimote's effective player number
             if (pendingNunchukMergeIndex >= 0)
                 mergedNunchukDevices[pendingNunchukMergeIndex] = effectivePlayerNumber;
@@ -1296,7 +1269,9 @@ JVSInputStatus initInputs(char *outputMappingPath, char *configPath, char *secon
             int isWiimoteIR = (strcmp(originalName, WIIMOTE_DEVICE_NAME_IR) == 0);
             int isFixedConfig = (inputMappings.player != -1);
             int isMergedNunchuk = (mergedNunchukDevices[i] != 0);
-            int shouldIncrementPlayer = !isAimtrakRemap && !isWiimoteIR && !isFixedConfig && !isMergedNunchuk;
+            // Only increment playerNumber for genuine new slot-owners: not special
+            // devices, not fixed-config, not already-registered devices.
+            int shouldIncrementPlayer = !isAimtrakRemap && !isWiimoteIR && !isFixedConfig && !isMergedNunchuk && !slotFromRegistry;
             
             // Don't print player message for merged Nunchuk or IR device to avoid duplicate output
             int shouldPrintPlayerMessage = !isMergedNunchuk && !isWiimoteIR;
@@ -1308,6 +1283,9 @@ JVSInputStatus initInputs(char *outputMappingPath, char *configPath, char *secon
             else if (shouldIncrementPlayer && shouldPrintPlayerMessage)
             {
                 debug(0, "  Player %d:                  %s%s\n", effectivePlayerNumber, deviceName, specialMap);
+
+                /* Advance the counter so the next new device gets the next slot. */
+                playerNumber++;
 
                 /* Register this device in the persistent slot registry if it
                  * is not already recorded.  On the next reinitialisation the
