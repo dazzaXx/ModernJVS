@@ -213,6 +213,7 @@ static void *wiiDeviceThread(void *_args)
 
     close(fd);
     free(args);
+    args = NULL;
 
     return 0;
 }
@@ -226,6 +227,7 @@ static void *deviceThread(void *_args)
     {
         debug(0, "Critical: Failed to open device file descriptor %d \n", fd);
         free(args);
+        args = NULL;
         return 0;
     }
 
@@ -502,6 +504,7 @@ static void *deviceThread(void *_args)
 
     close(fd);
     free(args);
+    args = NULL;
 
     return 0;
 }
@@ -528,6 +531,7 @@ static ThreadStatus startThread(EVInputs *inputs, char *devicePath, int wiiMode,
         if (status != THREAD_STATUS_SUCCESS)
         {
             free(args);
+            args = NULL;
         }
     }
     else
@@ -536,6 +540,7 @@ static ThreadStatus startThread(EVInputs *inputs, char *devicePath, int wiiMode,
         if (status != THREAD_STATUS_SUCCESS)
         {
             free(args);
+            args = NULL;
         }
     }
     
@@ -901,12 +906,14 @@ JVSInputStatus initInputs(char *outputMappingPath, char *configPath, char *secon
     if (getInputs(deviceList) != JVS_INPUT_STATUS_SUCCESS)
     {
         free(deviceList);
+        deviceList = NULL;
         return JVS_INPUT_STATUS_DEVICE_OPEN_ERROR;
     }
 
     if (parseOutputMapping(outputMappingPath, &outputMappings, configPath, secondConfigPath) != JVS_CONFIG_STATUS_SUCCESS)
     {
         free(deviceList);
+        deviceList = NULL;
         return JVS_INPUT_STATUS_OUTPUT_MAPPING_ERROR;
     }
 

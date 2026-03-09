@@ -29,7 +29,7 @@ int setSwitch(JVSIO *io, JVSPlayer player, JVSInput switchNumber, int value)
 {
 	if (player > io->capabilities.players)
 	{
-		printf("Error: That player %d does not exist.\n", player);
+		debug(0, "Error: That player %d does not exist.\n", player);
 		return 0;
 	}
 

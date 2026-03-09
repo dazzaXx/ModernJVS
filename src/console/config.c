@@ -179,7 +179,7 @@ JVSConfigStatus parseConfig(char *path, JVSConfig *config)
                 config->analogDeadzonePlayer4 = clampDeadzone(atof(token));
         }
         else
-            printf("Error: Unknown configuration command %s\n", command);
+            debug(0, "Error: Unknown configuration command %s\n", command);
     }
 
     fclose(file);
@@ -375,7 +375,7 @@ JVSConfigStatus parseInputMapping(char *path, InputMappings *inputMappings)
         }
         else
         {
-            printf("Error: Unknown mapping command %s\n", command);
+            debug(0, "Error: Unknown mapping command %s\n", command);
         }
     }
 
@@ -543,7 +543,7 @@ JVSConfigStatus parseOutputMapping(char *path, OutputMappings *outputMappings, c
         }
         else
         {
-            printf("Error: Unknown mapping command %s\n", command);
+            debug(0, "Error: Unknown mapping command %s\n", command);
         }
     }
 
@@ -736,7 +736,7 @@ JVSConfigStatus parseIO(char *path, JVSCapabilities *capabilities)
         }
 
         else
-            printf("Error: Unknown IO configuration command %s\n", command);
+            debug(0, "Error: Unknown IO configuration command %s\n", command);
     }
 
     fclose(file);

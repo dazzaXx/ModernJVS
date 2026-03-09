@@ -52,7 +52,7 @@ int main(int argc, char **argv)
     getDefaultConfig(&config);
     if (parseConfig(DEFAULT_CONFIG_PATH, &config) != JVS_CONFIG_STATUS_SUCCESS)
     {
-        printf("Warning: No valid config file found, defaults are being used\n");
+        debug(0, "Warning: No valid config file found, defaults are being used\n");
     }
 
     /* Initialise the debug output */
@@ -238,7 +238,7 @@ int main(int argc, char **argv)
             {
                 debug(0, "chained to a \033[0;31m%s\033[0m ", io.chainedIO->capabilities.displayName);
             }
-            printf("on %s.\n\n", config.devicePath);
+            debug(0, "on %s.\n\n", config.devicePath);
 
             jvsInitialized = 1;
         }
