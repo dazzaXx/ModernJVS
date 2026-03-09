@@ -74,6 +74,24 @@ static const char *FILTERED_DEVICE_PATTERNS[] = {
     NULL  // Sentinel value to mark end of array
 };
 
+/* Maximum byte-length of a "name:physicalLocation" identity key */
+#define MAX_IDENTITY_LEN (MAX_PATH * 2 + 2)
+
+/*
+ * Persistent slot registry – survives across initInputs() calls so that
+ * player slot assignments remain first-come-first-served and compact (no
+ * gaps) across hot-plug reinitialisation cycles.
+ */
+typedef struct
+{
+	char identity[MAX_IDENTITY_LEN]; /* "name:physicalLocation" */
+	int  slotOrder;                  /* monotonically increasing; lower == registered earlier */
+} SlotRegistryEntry;
+
+static SlotRegistryEntry slotRegistry[MAX_DEVICES];
+static int slotRegistryLength = 0;
+static int nextSlotOrder      = 0;
+
 typedef struct
 {
     ThreadSharedData *sharedData_p;
@@ -708,6 +726,12 @@ int getNumberOfDevices(void)
     return count;
 }
 
+static int compareSlotRegistryOrder(const void *a, const void *b)
+{
+    return ((const SlotRegistryEntry *)a)->slotOrder -
+           ((const SlotRegistryEntry *)b)->slotOrder;
+}
+
 JVSInputStatus getInputs(DeviceList *deviceList)
 {
     memset(deviceList, 0, sizeof(DeviceList));
@@ -886,9 +910,86 @@ JVSInputStatus initInputs(char *outputMappingPath, char *configPath, char *secon
         return JVS_INPUT_STATUS_OUTPUT_MAPPING_ERROR;
     }
 
-    int playerNumber = 1;
-    int controllersStarted = 0;
-    
+    /* ---- Slot registry maintenance (first-come-first-served compaction) ----
+     *
+     * Prune registry entries for devices that are no longer connected.  For
+     * duplicate identities (multiple identical devices) remove the most-recently-
+     * added entries first so the longest-standing devices keep their slots.
+     * Then sort survivors by slotOrder so index+1 == player number.  New devices
+     * discovered this cycle are appended to the end of the registry.
+     */
+    int deleteEntry[MAX_DEVICES];
+    memset(deleteEntry, 0, sizeof(deleteEntry));
+
+    for (int i = 0; i < slotRegistryLength; i++)
+    {
+        if (deleteEntry[i])
+            continue;
+
+        const char *identity = slotRegistry[i].identity;
+
+        /* Count how many devices in the current list share this identity */
+        int currentCount = 0;
+        for (int j = 0; j < deviceList->length; j++)
+        {
+            char key[MAX_IDENTITY_LEN];
+            snprintf(key, sizeof(key), "%s:%s",
+                     deviceList->devices[j].name, deviceList->devices[j].physicalLocation);
+            if (strcmp(key, identity) == 0)
+                currentCount++;
+        }
+
+        /* Collect all registry indices with this identity */
+        int regIndices[MAX_DEVICES];
+        int numRegIndices = 0;
+        for (int j = i; j < slotRegistryLength; j++)
+        {
+            if (!deleteEntry[j] && strcmp(slotRegistry[j].identity, identity) == 0)
+                regIndices[numRegIndices++] = j;
+        }
+
+        int toDelete = numRegIndices - currentCount;
+        if (toDelete <= 0)
+            continue;
+
+        /* Remove highest-slotOrder entries first (most recently registered) */
+        for (int a = 0; a < numRegIndices - 1; a++)
+        {
+            for (int b = a + 1; b < numRegIndices; b++)
+            {
+                if (slotRegistry[regIndices[a]].slotOrder < slotRegistry[regIndices[b]].slotOrder)
+                {
+                    int tmp       = regIndices[a];
+                    regIndices[a] = regIndices[b];
+                    regIndices[b] = tmp;
+                }
+            }
+        }
+        for (int j = 0; j < toDelete && j < numRegIndices; j++)
+            deleteEntry[regIndices[j]] = 1;
+    }
+
+    /* Compact the registry array */
+    int newLength = 0;
+    for (int i = 0; i < slotRegistryLength; i++)
+    {
+        if (!deleteEntry[i])
+        {
+            if (newLength < i)
+                slotRegistry[newLength] = slotRegistry[i];
+            newLength++;
+        }
+    }
+    slotRegistryLength = newLength;
+
+    /* Sort survivors by slotOrder so slot index+1 == player number */
+    qsort(slotRegistry, slotRegistryLength, sizeof(SlotRegistryEntry), compareSlotRegistryOrder);
+
+    /* Next slot for new devices; last auto-assigned player for IR/Aimtrak sub-devices */
+    int nextNewPlayerNumber    = slotRegistryLength + 1;
+    int lastAutoAssignedPlayer = 1;
+    int controllersStarted     = 0;
+
     // Track which Nunchuk device indices have been merged with a Wiimote
     // Multiple Wiimote+Nunchuk pairs are supported (one per player slot)
     // Non-zero values indicate the Nunchuk at that index is merged
@@ -1050,56 +1151,101 @@ JVSInputStatus initInputs(char *outputMappingPath, char *configPath, char *secon
         }
 
         EVInputs evInputs = {0};
-        
-        // Determine which player number to use for this device
-        // Fixed config value overrides auto-assignment
-        int effectivePlayerNumber = playerNumber;
-        
-        // For merged Nunchuk devices, use the same player number as the paired Wiimote
-        if (strcmp(originalName, WIIMOTE_DEVICE_NAME_NUNCHUK) == 0 && mergedNunchukDevices[i] > 0)
+
+        /* Categorise the device before assigning a player slot */
+        int isWiimoteIR    = (strcmp(originalName, WIIMOTE_DEVICE_NAME_IR) == 0);
+        int isAimtrakRemap = (strcmp(originalName, AIMTRAK_DEVICE_NAME_REMAP_OUT_SCREEN) == 0 ||
+                              strcmp(originalName, AIMTRAK_DEVICE_NAME_REMAP_JOYSTICK) == 0);
+        int isMergedNunchuk = (strcmp(originalName, WIIMOTE_DEVICE_NAME_NUNCHUK) == 0 && mergedNunchukDevices[i] > 0);
+        int isFixedConfig   = (inputMappings.player != -1);
+        /* Slot holders are auto-assigned devices that own their own player slot */
+        int isSlotHolder    = !isWiimoteIR && !isAimtrakRemap && !isMergedNunchuk && !isFixedConfig;
+
+        /* Determine effective player number using the persistent slot registry */
+        int effectivePlayerNumber;
+        if (isMergedNunchuk)
+        {
+            /* Merged Nunchuk shares the paired Wiimote's player slot */
             effectivePlayerNumber = mergedNunchukDevices[i];
-        
-        // Parse the input mapping to check if a fixed player is set
+        }
+        else if (isFixedConfig)
+        {
+            /* Fixed player number from the device config file */
+            effectivePlayerNumber = inputMappings.player;
+        }
+        else if (isSlotHolder)
+        {
+            /* Auto-assigned: look up the persistent registry for this device.
+             * If the device registered in a previous cycle it keeps its slot;
+             * if it is new it is assigned the next available slot at the end. */
+            char identity[MAX_IDENTITY_LEN];
+            snprintf(identity, sizeof(identity), "%s:%s", originalName, device->physicalLocation);
+            effectivePlayerNumber = nextNewPlayerNumber; /* default: new slot at end */
+            for (int j = 0; j < slotRegistryLength; j++)
+            {
+                if (strcmp(slotRegistry[j].identity, identity) == 0)
+                {
+                    effectivePlayerNumber = j + 1; /* 1-indexed position in sorted registry */
+                    break;
+                }
+            }
+        }
+        else
+        {
+            /* IR / Aimtrak sub-device – shares the primary device's slot */
+            effectivePlayerNumber = lastAutoAssignedPlayer;
+        }
+
         if (!processMappings(&inputMappings, &outputMappings, &evInputs, (ControllerPlayer)effectivePlayerNumber))
         {
             debug(0, "Error: Failed to process the mapping for %s\n", originalName);
             continue;
         }
-        
-        // Fixed config value overrides auto-assignment
-        if (inputMappings.player != -1)
-        {
-            effectivePlayerNumber = inputMappings.player;
-        }
 
         double playerDeadzone = getPlayerDeadzone(effectivePlayerNumber, analogDeadzoneP1, analogDeadzoneP2, analogDeadzoneP3, analogDeadzoneP4);
-        if (startThread(&evInputs, device->path, strcmp(originalName, WIIMOTE_DEVICE_NAME_IR) == 0, effectivePlayerNumber, jvsIO, playerDeadzone) == THREAD_STATUS_SUCCESS)
+        if (startThread(&evInputs, device->path, isWiimoteIR, effectivePlayerNumber, jvsIO, playerDeadzone) == THREAD_STATUS_SUCCESS)
         {
-            // Update merged Nunchuk player number to match this Wiimote's effective player number
+            /* Update merged Nunchuk player number to match this Wiimote's effective player number */
             if (pendingNunchukMergeIndex >= 0)
                 mergedNunchukDevices[pendingNunchukMergeIndex] = effectivePlayerNumber;
-            
-            // Check if this is a special device that shouldn't increment player number
-            int isAimtrakRemap = (strcmp(originalName, AIMTRAK_DEVICE_NAME_REMAP_OUT_SCREEN) == 0 || 
-                                 strcmp(originalName, AIMTRAK_DEVICE_NAME_REMAP_JOYSTICK) == 0);
-            int isWiimoteIR = (strcmp(originalName, WIIMOTE_DEVICE_NAME_IR) == 0);
-            int isFixedConfig = (inputMappings.player != -1);
-            int isMergedNunchuk = (mergedNunchukDevices[i] != 0);
-            int shouldIncrementPlayer = !isAimtrakRemap && !isWiimoteIR && !isFixedConfig && !isMergedNunchuk;
-            
-            // Don't print player message for merged Nunchuk or IR device to avoid duplicate output
+
+            if (isSlotHolder)
+            {
+                /* Register new devices; devices already in the registry keep their slot */
+                char identity[MAX_IDENTITY_LEN];
+                snprintf(identity, sizeof(identity), "%s:%s", originalName, device->physicalLocation);
+                int alreadyRegistered = 0;
+                for (int j = 0; j < slotRegistryLength; j++)
+                {
+                    if (strcmp(slotRegistry[j].identity, identity) == 0)
+                    {
+                        alreadyRegistered = 1;
+                        break;
+                    }
+                }
+                if (!alreadyRegistered && slotRegistryLength < MAX_DEVICES)
+                {
+                    strncpy(slotRegistry[slotRegistryLength].identity, identity, MAX_IDENTITY_LEN - 1);
+                    slotRegistry[slotRegistryLength].identity[MAX_IDENTITY_LEN - 1] = '\0';
+                    slotRegistry[slotRegistryLength].slotOrder = nextSlotOrder++;
+                    slotRegistryLength++;
+                    nextNewPlayerNumber++;
+                }
+                lastAutoAssignedPlayer = effectivePlayerNumber;
+            }
+
+            /* Don't print player message for merged Nunchuk or IR device */
             int shouldPrintPlayerMessage = !isMergedNunchuk && !isWiimoteIR;
-            
+
             if (isFixedConfig && shouldPrintPlayerMessage)
             {
                 debug(0, "  Player %d (Fixed via config):  %s%s\n", effectivePlayerNumber, originalName, specialMap);
             }
-            else if (shouldIncrementPlayer && shouldPrintPlayerMessage)
+            else if (isSlotHolder)
             {
                 debug(0, "  Player %d:                  %s%s\n", effectivePlayerNumber, deviceName, specialMap);
-                playerNumber++;
             }
-            
+
             controllersStarted++;
         }
     }
