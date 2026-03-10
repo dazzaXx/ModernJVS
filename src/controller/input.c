@@ -1,6 +1,6 @@
 /**
  * ModernJVS Input Controller
- * Authors: Bobby Dilley, Redone, Fred 
+ * Authors: Bobby Dilley, Redone, Fred, ModernJVS Contributors
  */
 
 #include <stdio.h>
