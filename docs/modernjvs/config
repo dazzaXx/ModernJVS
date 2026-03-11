@@ -2,7 +2,6 @@
 # Author: Bobby Dilley, ModernJVS Contributors
 
 # Setup the default game to emulate
-# Use ROTARY for the rotary controller on the HAT
 DEFAULT_GAME generic-driving
 
 # Setup which IO to emulate by default
