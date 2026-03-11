@@ -24,7 +24,6 @@ set(SOURCES
     src/console/watchdog.c
     src/controller/input.c
     src/controller/threading.c
-    src/ffb/ffb.c
     src/hardware/device.c
     src/jvs/io.c
     src/jvs/jvs.c

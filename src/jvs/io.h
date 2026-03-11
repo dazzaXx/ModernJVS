@@ -184,9 +184,6 @@ typedef struct JVSIO
     struct JVSIO *chainedIO;
 } JVSIO;
 
-JVSCapabilities *getCapabilities(void);
-JVSState *getState(void);
-
 int initIO(JVSIO *io);
 int setSwitch(JVSIO *io, JVSPlayer player, JVSInput switchNumber, int value);
 int incrementCoin(JVSIO *io, JVSPlayer player, int amount);

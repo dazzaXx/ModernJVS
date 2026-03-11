@@ -124,7 +124,7 @@ int initDevice(char *devicePath, int senseLineType, int senseLinePin)
   localSenseLinePin = senseLinePin;
 
   /* Setup the GPIO pins */
-  if (localSenseLineType && !setupGPIO(localSenseLinePin))
+  if (localSenseLineType && setupGPIO(localSenseLinePin) != 1)
     debug(0, "Sense line pin %d not available\n", localSenseLinePin);
 
   /* Setup the GPIO pins initial state */

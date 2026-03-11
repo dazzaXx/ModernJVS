@@ -18,8 +18,6 @@
 #define JVS_RETRY_COUNT 3
 #define JVS_MAX_PACKET_SIZE 255
 
-#define DEVICE_ID 0x01
-
 #define SYNC 0xE0
 #define ESCAPE 0xD0
 #define BROADCAST 0xFF
@@ -28,15 +26,11 @@
 
 /* Status for the entire packet */
 #define STATUS_SUCCESS 0x01
-#define STATUS_UNSUPPORTED 0x02      // an unsupported command was sent
 #define STATUS_CHECKSUM_FAILURE 0x03 // the checksum on the command packet did not match a computed checksum
-#define STATUS_OVERFLOW 0x04         // an overflow occurred while processing the command
 
 /* Reporting for each individual command */
 #define REPORT_SUCCESS 0x01          // all went well
 #define REPORT_PARAMETER_ERROR1 0x02 // parameter value is out of valid range (e.g., requesting invalid player number)
-#define REPORT_PARAMETER_ERROR2 0x03 // parameter format/structure error (e.g., wrong length, incorrect structure)
-#define REPORT_BUSY 0x04 // some attached hardware was busy, causing the request to fail
 
 /* All of the commands */
 #define CMD_RESET 0xF0            // reset bus
@@ -89,8 +83,6 @@
 #define CAP_DISPLAY 0x14    // character display info
 #define CAP_BACKUP 0x15     // backup memory
 
-#define ENCODINGS [ "unknown", "ascii numeric", "ascii alphanumeric", "alphanumeric/katakana", "alphanumeric/SHIFT-JIS" ]
-
 typedef struct
 {
     unsigned char destination;
@@ -106,7 +98,6 @@ typedef enum
     JVS_STATUS_ERROR_TIMEOUT,
     JVS_STATUS_ERROR_CHECKSUM,
     JVS_STATUS_ERROR_WRITE_FAIL,
-    JVS_STATUS_ERROR_UNSUPPORTED_COMMAND,
 } JVSStatus;
 
 int initJVS(JVSIO *jvsIO);

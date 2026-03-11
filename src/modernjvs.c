@@ -14,7 +14,6 @@
 #include "hardware/device.h"
 #include "jvs/io.h"
 #include "jvs/jvs.h"
-#include "ffb/ffb.h"
 #include "version.h"
 
 /* Time between reinit in ms */

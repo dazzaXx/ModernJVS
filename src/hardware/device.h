@@ -24,7 +24,5 @@ int closeDevice(void);
 int readBytes(unsigned char *buffer, int amount);
 int writeBytes(unsigned char *buffer, int amount);
 int setSenseLine(int state);
-int setupGPIO(int pin);
-int setGPIODirection(int pin, int dir);
 
 #endif // DEVICE_H_
