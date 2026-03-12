@@ -217,6 +217,7 @@ async function loadConfig() {
   document.getElementById('cfgDz3').value = cfgData.deadzone_p3 ?? '0.2';
   document.getElementById('cfgDz4').value = cfgData.deadzone_p4 ?? '0.2';
   document.getElementById('cfgWiiIRBorder').value = cfgData.wii_ir_border ?? '0.0';
+  document.getElementById('cfgWiiIRScale').value  = cfgData.wii_ir_scale  ?? '1.0';
 
   const io2Sel = document.getElementById('cfgEmulate2');
   io2Sel.innerHTML = '<option value="">— None —</option>';
@@ -243,6 +244,9 @@ function validateConfigInputs() {
   const irBorder = parseFloat(document.getElementById('cfgWiiIRBorder').value);
   if (!isNaN(irBorder) && irBorder > 0.5)
     warnings.push('WII_IR_BORDER (' + irBorder + ') exceeds the maximum (0.5).');
+  const irScale = parseFloat(document.getElementById('cfgWiiIRScale').value);
+  if (!isNaN(irScale) && (irScale < 0.1 || irScale > 5.0))
+    warnings.push('WII_IR_SCALE (' + irScale + ') is outside the valid range (0.1–5.0).');
   return warnings;
 }
 
@@ -265,6 +269,7 @@ async function saveConfig(silent = false) {
     deadzone_p3:                document.getElementById('cfgDz3').value,
     deadzone_p4:                document.getElementById('cfgDz4').value,
     wii_ir_border:              document.getElementById('cfgWiiIRBorder').value,
+    wii_ir_scale:               document.getElementById('cfgWiiIRScale').value,
     emulate_second:             document.getElementById('cfgEmulate2').value,
   };
   const d = await api('/api/config', {
@@ -294,6 +299,7 @@ function resetConfig() {
   document.getElementById('cfgDz3').value = '0.2';
   document.getElementById('cfgDz4').value = '0.2';
   document.getElementById('cfgWiiIRBorder').value = '0.0';
+  document.getElementById('cfgWiiIRScale').value  = '1.0';
   document.getElementById('cfgEmulate').value = 'namco-FCA1';
   document.getElementById('cfgGame').value    = 'generic-driving';
   document.getElementById('cfgEmulate2').value   = '';

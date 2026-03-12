@@ -52,3 +52,12 @@ ANALOG_DEADZONE_PLAYER_4 0.2
 # causes the gun to go "out of bounds" too early.
 WII_IR_BORDER 0.0
 
+# Wii Remote IR Scale
+# Scales the IR coordinate space around the centre of the screen, allowing you
+# to aim the Wiimote to more extreme angles before the cursor goes off-screen.
+# Values > 1.0 expand the required physical aiming range (aim further before
+# going off-screen). Values < 1.0 make the aiming more sensitive.
+# Example: WII_IR_SCALE 1.3 means you need to aim ~30% further in any direction
+# before the cursor reaches the screen edge.
+# Value range: 0.1 to 5.0 (1.0 = no scaling, default)
+WII_IR_SCALE 1.0

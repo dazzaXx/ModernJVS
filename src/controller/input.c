@@ -101,6 +101,7 @@ typedef struct
     int player;
     double analogDeadzone;
     double wiiIRBorder;
+    double wiiIRScale;
 } MappingThreadArguments;
 
 static void *wiiDeviceThread(void *_args)
@@ -183,6 +184,17 @@ static void *wiiDeviceThread(void *_args)
 
                     double finalX = (((double)valuex / (double)1023) * 1.0);
                     double finalY = 1.0f - ((double)valuey / (double)1023);
+
+                    /* Apply IR scale: compress the coordinate space around the centre so
+                     * the user can aim to more extreme angles before going off-screen.
+                     * scale > 1.0 expands the required physical range (aim further);
+                     * scale = 1.0 (default) leaves coordinates unchanged. */
+                    double scale = args->wiiIRScale;
+                    if (scale != 1.0)
+                    {
+                        finalX = 0.5 + (finalX - 0.5) / scale;
+                        finalY = 0.5 + (finalY - 0.5) / scale;
+                    }
 
                     /* Check for out-of-bound after rotation, extended by the configurable
                      * IR border so that pointing slightly off-screen still registers as the
@@ -519,7 +531,7 @@ static void *deviceThread(void *_args)
 
     return 0;
 }
-static ThreadStatus startThread(EVInputs *inputs, char *devicePath, int wiiMode, int player, JVSIO *jvsIO, double analogDeadzone, double wiiIRBorder)
+static ThreadStatus startThread(EVInputs *inputs, char *devicePath, int wiiMode, int player, JVSIO *jvsIO, double analogDeadzone, double wiiIRBorder, double wiiIRScale)
 {
     MappingThreadArguments *args = malloc(sizeof(MappingThreadArguments));
     if (args == NULL)
@@ -535,6 +547,7 @@ static ThreadStatus startThread(EVInputs *inputs, char *devicePath, int wiiMode,
     args->jvsIO = jvsIO;
     args->analogDeadzone = analogDeadzone;
     args->wiiIRBorder = wiiIRBorder;
+    args->wiiIRScale  = wiiIRScale;
 
     ThreadStatus status;
     if (wiiMode)
@@ -913,9 +926,13 @@ static double getPlayerDeadzone(int player, double p1, double p2, double p3, dou
  * @param wiiIRBorder Border extension (0.0–0.5) added around the [0,1] valid IR range before
  *                   triggering the "screen out" state; coordinates within the border are clamped
  *                   to the screen edge rather than being discarded
+ * @param wiiIRScale  Scale factor (0.1–5.0) applied to IR coordinates around the screen centre.
+ *                   Values > 1.0 compress the output, requiring larger physical movements to
+ *                   reach the screen edge (aim further before going off-screen).
+ *                   1.0 (default) leaves coordinates unchanged.
  * @returns The status of the operation
  **/
-JVSInputStatus initInputs(char *outputMappingPath, char *configPath, char *secondConfigPath, JVSIO *jvsIO, int autoDetect, double analogDeadzoneP1, double analogDeadzoneP2, double analogDeadzoneP3, double analogDeadzoneP4, double wiiIRBorder)
+JVSInputStatus initInputs(char *outputMappingPath, char *configPath, char *secondConfigPath, JVSIO *jvsIO, int autoDetect, double analogDeadzoneP1, double analogDeadzoneP2, double analogDeadzoneP3, double analogDeadzoneP4, double wiiIRBorder, double wiiIRScale)
 {
     OutputMappings outputMappings = {0};
     DeviceList *deviceList = (DeviceList *)malloc(sizeof(DeviceList));
@@ -1230,7 +1247,7 @@ JVSInputStatus initInputs(char *outputMappingPath, char *configPath, char *secon
         }
 
         double playerDeadzone = getPlayerDeadzone(effectivePlayerNumber, analogDeadzoneP1, analogDeadzoneP2, analogDeadzoneP3, analogDeadzoneP4);
-        if (startThread(&evInputs, device->path, isWiimoteIR, effectivePlayerNumber, jvsIO, playerDeadzone, wiiIRBorder) == THREAD_STATUS_SUCCESS)
+        if (startThread(&evInputs, device->path, isWiimoteIR, effectivePlayerNumber, jvsIO, playerDeadzone, wiiIRBorder, wiiIRScale) == THREAD_STATUS_SUCCESS)
         {
             /* Update merged Nunchuk player number to match this Wiimote's effective player number */
             if (pendingNunchukMergeIndex >= 0)
