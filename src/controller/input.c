@@ -117,8 +117,9 @@ static void *wiiDeviceThread(void *_args)
     fd_set file_descriptor;
     struct timeval tv;
 
-    /* Wii Remote Variables */
-    int x0 = 0, x1 = 0, y0 = 0, y1 = 0;
+    /* Wii Remote Variables - initialised to 1023 (the kernel sentinel for "IR point not visible")
+     * so that the "out of bounds" state is correctly reported before any IR data arrives */
+    int x0 = 1023, x1 = 1023, y0 = 1023, y1 = 1023;
 
     while (getThreadsRunning())
     {
