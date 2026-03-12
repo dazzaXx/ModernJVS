@@ -688,25 +688,44 @@ JVSStatus processPacket(JVSIO *jvsIO)
 		}
 		break;
 
-		/* The touch screen and light gun input, simply using analogue channels */
+		/* The touch screen and light gun input, returns X/Y for each requested gun */
 		case CMD_READ_LIGHTGUN:
 		{
-			debug(1, "CMD_READ_LIGHTGUN - Reading light gun position\n");
 			size = 2;
+			/* inputPacket.data is unsigned char so numberGuns is always 0-255 */
+			int numberGuns = inputPacket.data[index + 1];
+			debug(1, "CMD_READ_LIGHTGUN - Reading %d gun(s)\n", numberGuns);
 
-			if (outputPacket.length + 5 > JVS_MAX_PACKET_SIZE)
+			outputPacket.data[outputPacket.length++] = REPORT_SUCCESS;
+
+			/* Each gun occupies two consecutive state slots (X then Y), so the
+			 * maximum safe gun count is half the state array size. */
+			if (numberGuns > JVS_MAX_STATE_SIZE / 2)
 			{
-				debug(0, "Error: Output packet size exceeded in CMD_READ_LIGHTGUN\n");
+				debug(0, "Error: Gun count %d exceeds maximum %d in CMD_READ_LIGHTGUN\n", numberGuns, JVS_MAX_STATE_SIZE / 2);
 				return JVS_STATUS_ERROR;
 			}
-			int analogueXData = jvsIO->state.gunChannel[0] << jvsIO->gunXRestBits;
-			int analogueYData = jvsIO->state.gunChannel[1] << jvsIO->gunYRestBits;
-			outputPacket.data[outputPacket.length] = REPORT_SUCCESS;
-			outputPacket.data[outputPacket.length + 1] = analogueXData >> 8;
-			outputPacket.data[outputPacket.length + 2] = analogueXData;
-			outputPacket.data[outputPacket.length + 3] = analogueYData >> 8;
-			outputPacket.data[outputPacket.length + 4] = analogueYData;
-			outputPacket.length += 5;
+			for (int i = 0; i < numberGuns; i++)
+			{
+				if (outputPacket.length + 4 > JVS_MAX_PACKET_SIZE)
+				{
+					debug(0, "Error: Output packet size exceeded in CMD_READ_LIGHTGUN\n");
+					return JVS_STATUS_ERROR;
+				}
+				/* Guard against a request for more guns than this IO board declares.
+				 * Channels beyond the configured count are reported as zero. */
+				int xData = 0, yData = 0;
+				if (i < jvsIO->capabilities.gunChannels)
+				{
+					xData = jvsIO->state.gunChannel[i * 2] << jvsIO->gunXRestBits;
+					yData = jvsIO->state.gunChannel[i * 2 + 1] << jvsIO->gunYRestBits;
+				}
+				outputPacket.data[outputPacket.length] = xData >> 8;
+				outputPacket.data[outputPacket.length + 1] = xData;
+				outputPacket.data[outputPacket.length + 2] = yData >> 8;
+				outputPacket.data[outputPacket.length + 3] = yData;
+				outputPacket.length += 4;
+			}
 		}
 		break;
 

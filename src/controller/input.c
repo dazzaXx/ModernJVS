@@ -100,6 +100,7 @@ typedef struct
     EVInputs inputs;
     int player;
     double analogDeadzone;
+    double wiiIRScale;
 } MappingThreadArguments;
 
 static void *wiiDeviceThread(void *_args)
@@ -117,8 +118,10 @@ static void *wiiDeviceThread(void *_args)
     fd_set file_descriptor;
     struct timeval tv;
 
-    /* Wii Remote Variables */
-    int x0 = 0, x1 = 0, y0 = 0, y1 = 0;
+    /* Wii Remote Variables - initialised to 1023 (the hid-wiimote driver's sentinel
+     * for "IR point not visible") so that the "out of bounds" state is correctly
+     * reported before any IR data arrives */
+    int x0 = 1023, x1 = 1023, y0 = 1023, y1 = 1023;
 
     while (getThreadsRunning())
     {
@@ -181,13 +184,28 @@ static void *wiiDeviceThread(void *_args)
                     double finalX = (((double)valuex / (double)1023) * 1.0);
                     double finalY = 1.0f - ((double)valuey / (double)1023);
 
-                    // check for out-of-bound after rotation ..
-                    if (!(finalX > 1.0f || finalY > 1.0f || finalX < 0 || finalY < 0))
+                    /* Apply IR scale: multiply the displacement from screen centre so the
+                     * cursor covers more (or less) of the screen per physical movement.
+                     * scale > 1.0 extends how far the cursor reaches across the screen;
+                     * scale < 1.0 reduces cursor sensitivity;
+                     * scale = 1.0 (default) leaves coordinates unchanged. */
+                    double scale = args->wiiIRScale;
+                    if (scale != 1.0)
                     {
-                        setAnalogue(args->jvsIO, args->inputs.abs[ABS_X].output, args->inputs.abs[ABS_X].reverse ? 1 - finalX : finalX);
-                        setAnalogue(args->jvsIO, args->inputs.abs[ABS_Y].output, args->inputs.abs[ABS_Y].reverse ? 1 - finalY : finalY);
-                        setGun(args->jvsIO, args->inputs.abs[ABS_X].output, args->inputs.abs[ABS_X].reverse ? 1 - finalX : finalX);
-                        setGun(args->jvsIO, args->inputs.abs[ABS_Y].output, args->inputs.abs[ABS_Y].reverse ? 1 - finalY : finalY);
+                        finalX = 0.5 + (finalX - 0.5) * scale;
+                        finalY = 0.5 + (finalY - 0.5) * scale;
+                    }
+
+                    /* Check for out-of-bound after scaling. */
+                    if (!(finalX > 1.0 || finalY > 1.0 || finalX < 0.0 || finalY < 0.0))
+                    {
+                        double clampedX = finalX;
+                        double clampedY = finalY;
+
+                        setAnalogue(args->jvsIO, args->inputs.abs[ABS_X].output, args->inputs.abs[ABS_X].reverse ? 1 - clampedX : clampedX);
+                        setAnalogue(args->jvsIO, args->inputs.abs[ABS_Y].output, args->inputs.abs[ABS_Y].reverse ? 1 - clampedY : clampedY);
+                        setGun(args->jvsIO, args->inputs.abs[ABS_X].output, args->inputs.abs[ABS_X].reverse ? 1 - clampedX : clampedX);
+                        setGun(args->jvsIO, args->inputs.abs[ABS_Y].output, args->inputs.abs[ABS_Y].reverse ? 1 - clampedY : clampedY);
 
                         outOfBounds = false;
                     }
@@ -508,7 +526,7 @@ static void *deviceThread(void *_args)
 
     return 0;
 }
-static ThreadStatus startThread(EVInputs *inputs, char *devicePath, int wiiMode, int player, JVSIO *jvsIO, double analogDeadzone)
+static ThreadStatus startThread(EVInputs *inputs, char *devicePath, int wiiMode, int player, JVSIO *jvsIO, double analogDeadzone, double wiiIRScale)
 {
     MappingThreadArguments *args = malloc(sizeof(MappingThreadArguments));
     if (args == NULL)
@@ -523,6 +541,7 @@ static ThreadStatus startThread(EVInputs *inputs, char *devicePath, int wiiMode,
     args->player = player;
     args->jvsIO = jvsIO;
     args->analogDeadzone = analogDeadzone;
+    args->wiiIRScale  = wiiIRScale;
 
     ThreadStatus status;
     if (wiiMode)
@@ -891,11 +910,20 @@ static double getPlayerDeadzone(int player, double p1, double p2, double p3, dou
  * 
  * @param outputMappingPath The path of the game mapping file
  * @param configPath The path to the configuration file
+ * @param secondConfigPath The path to the secondary IO configuration file (may be empty)
  * @param jvsIO The JVS IO object that we will send inputs to
- * @param autoDetect If we should automatically map controllers without mappings
+ * @param autoDetect If we should automatically map controllers without device mappings
+ * @param analogDeadzoneP1 Analogue stick deadzone for player 1 (0.0–0.5)
+ * @param analogDeadzoneP2 Analogue stick deadzone for player 2 (0.0–0.5)
+ * @param analogDeadzoneP3 Analogue stick deadzone for player 3 (0.0–0.5)
+ * @param analogDeadzoneP4 Analogue stick deadzone for player 4 (0.0–0.5)
+ * @param wiiIRScale  Scale factor (0.1–5.0) applied to IR coordinates around the screen centre.
+ *                   Values > 1.0 extend how far the cursor reaches across the screen (more
+ *                   screen coverage per physical movement). Values < 1.0 reduce sensitivity.
+ *                   1.0 (default) leaves coordinates unchanged.
  * @returns The status of the operation
  **/
-JVSInputStatus initInputs(char *outputMappingPath, char *configPath, char *secondConfigPath, JVSIO *jvsIO, int autoDetect, double analogDeadzoneP1, double analogDeadzoneP2, double analogDeadzoneP3, double analogDeadzoneP4)
+JVSInputStatus initInputs(char *outputMappingPath, char *configPath, char *secondConfigPath, JVSIO *jvsIO, int autoDetect, double analogDeadzoneP1, double analogDeadzoneP2, double analogDeadzoneP3, double analogDeadzoneP4, double wiiIRScale)
 {
     OutputMappings outputMappings = {0};
     DeviceList *deviceList = (DeviceList *)malloc(sizeof(DeviceList));
@@ -1210,7 +1238,7 @@ JVSInputStatus initInputs(char *outputMappingPath, char *configPath, char *secon
         }
 
         double playerDeadzone = getPlayerDeadzone(effectivePlayerNumber, analogDeadzoneP1, analogDeadzoneP2, analogDeadzoneP3, analogDeadzoneP4);
-        if (startThread(&evInputs, device->path, isWiimoteIR, effectivePlayerNumber, jvsIO, playerDeadzone) == THREAD_STATUS_SUCCESS)
+        if (startThread(&evInputs, device->path, isWiimoteIR, effectivePlayerNumber, jvsIO, playerDeadzone, wiiIRScale) == THREAD_STATUS_SUCCESS)
         {
             /* Update merged Nunchuk player number to match this Wiimote's effective player number */
             if (pendingNunchukMergeIndex >= 0)

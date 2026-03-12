@@ -42,3 +42,13 @@ ANALOG_DEADZONE_PLAYER_2 0.2
 ANALOG_DEADZONE_PLAYER_3 0.2
 ANALOG_DEADZONE_PLAYER_4 0.2
 
+# Wii Remote IR Scale
+# Scales the IR cursor movement around the centre of the screen.
+# Values > 1.0 extend how far the cursor reaches across the screen — the cursor
+# covers more area per physical movement, allowing you to aim to corners and
+# edges that were previously unreachable.
+# Values < 1.0 reduce cursor sensitivity (slower cursor movement).
+# Example: WII_IR_SCALE 1.3 makes the cursor travel ~30% further per physical
+# movement, extending the reachable area of the screen.
+# Value range: 0.1 to 5.0 (1.0 = no scaling, default)
+WII_IR_SCALE 1.0
