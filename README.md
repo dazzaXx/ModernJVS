@@ -240,6 +240,7 @@ Check the `/etc/modernjvs/ios` folder to see which I/O boards can be emulated an
 | `namco-v185` | Namco V185 IO (Time Crisis 2) |
 | `namco-v221` | Namco V221 MIU (Crisis Zone) |
 | `namco-v222` | Namco V222 JYU (Ninja Assault) |
+| `namco-v329` | Namco V329 NA-JV (Time Crisis 4) |
 | `namco-jyu` | Namco JYU IO |
 | `namco-rays-v100` | Namco RAYS Gun IO |
 | `namco-rays-v106` | Namco RAYS PCB |
