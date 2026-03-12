@@ -216,6 +216,7 @@ async function loadConfig() {
   document.getElementById('cfgDz2').value = cfgData.deadzone_p2 ?? '0.2';
   document.getElementById('cfgDz3').value = cfgData.deadzone_p3 ?? '0.2';
   document.getElementById('cfgDz4').value = cfgData.deadzone_p4 ?? '0.2';
+  document.getElementById('cfgWiiIRBorder').value = cfgData.wii_ir_border ?? '0.0';
 
   const io2Sel = document.getElementById('cfgEmulate2');
   io2Sel.innerHTML = '<option value="">— None —</option>';
@@ -239,6 +240,9 @@ function validateConfigInputs() {
     if (parseFloat(document.getElementById(id).value) >= 0.5)
       warnings.push('ANALOG_DEADZONE for Player ' + n + ' is at or above the maximum (0.5), which will make the analog stick non-functional.');
   });
+  const irBorder = parseFloat(document.getElementById('cfgWiiIRBorder').value);
+  if (!isNaN(irBorder) && irBorder > 0.5)
+    warnings.push('WII_IR_BORDER (' + irBorder + ') exceeds the maximum (0.5).');
   return warnings;
 }
 
@@ -260,6 +264,7 @@ async function saveConfig(silent = false) {
     deadzone_p2:                document.getElementById('cfgDz2').value,
     deadzone_p3:                document.getElementById('cfgDz3').value,
     deadzone_p4:                document.getElementById('cfgDz4').value,
+    wii_ir_border:              document.getElementById('cfgWiiIRBorder').value,
     emulate_second:             document.getElementById('cfgEmulate2').value,
   };
   const d = await api('/api/config', {
@@ -288,6 +293,7 @@ function resetConfig() {
   document.getElementById('cfgDz2').value = '0.2';
   document.getElementById('cfgDz3').value = '0.2';
   document.getElementById('cfgDz4').value = '0.2';
+  document.getElementById('cfgWiiIRBorder').value = '0.0';
   document.getElementById('cfgEmulate').value = 'namco-FCA1';
   document.getElementById('cfgGame').value    = 'generic-driving';
   document.getElementById('cfgEmulate2').value   = '';

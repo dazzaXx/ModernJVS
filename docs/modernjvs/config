@@ -42,3 +42,13 @@ ANALOG_DEADZONE_PLAYER_2 0.2
 ANALOG_DEADZONE_PLAYER_3 0.2
 ANALOG_DEADZONE_PLAYER_4 0.2
 
+# Wii Remote IR Border
+# Extends the valid IR range beyond the nominal screen edges before triggering
+# the "screen out" state. When pointing near or slightly past the edge of the
+# screen, this prevents the cursor disappearing prematurely.
+# Coordinates within the border are clamped to the nearest screen edge [0, 1].
+# Value range: 0.0 to 0.5 (0.0 = strict screen boundary, 0.1 = 10% extension)
+# Default is 0.0 (no extension). Increase if shooting near the screen edge
+# causes the gun to go "out of bounds" too early.
+WII_IR_BORDER 0.0
+

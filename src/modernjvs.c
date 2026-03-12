@@ -119,7 +119,7 @@ int main(int argc, char **argv)
         initWatchdog(&running);
 
         debug(1, "Init inputs\n");
-        JVSInputStatus inputStatus = initInputs(config.defaultGamePath, config.capabilitiesPath, config.secondCapabilitiesPath, &io, config.autoControllerDetection, config.analogDeadzonePlayer1, config.analogDeadzonePlayer2, config.analogDeadzonePlayer3, config.analogDeadzonePlayer4);
+        JVSInputStatus inputStatus = initInputs(config.defaultGamePath, config.capabilitiesPath, config.secondCapabilitiesPath, &io, config.autoControllerDetection, config.analogDeadzonePlayer1, config.analogDeadzonePlayer2, config.analogDeadzonePlayer3, config.analogDeadzonePlayer4, config.wiiIRBorder);
 
         // Only report these errors if the status has changed
         // from the last run. Since we restart this thread every 200ms

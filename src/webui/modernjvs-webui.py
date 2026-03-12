@@ -510,6 +510,7 @@ def write_config(new_values):
         "deadzone_p2":                "ANALOG_DEADZONE_PLAYER_2",
         "deadzone_p3":                "ANALOG_DEADZONE_PLAYER_3",
         "deadzone_p4":                "ANALOG_DEADZONE_PLAYER_4",
+        "wii_ir_border":              "WII_IR_BORDER",
         "emulate_second":             "EMULATE_SECOND",
     }
 
@@ -586,6 +587,7 @@ def config_to_api(cfg):
         "deadzone_p2":                cfg.get("ANALOG_DEADZONE_PLAYER_2",   "0.2"),
         "deadzone_p3":                cfg.get("ANALOG_DEADZONE_PLAYER_3",   "0.2"),
         "deadzone_p4":                cfg.get("ANALOG_DEADZONE_PLAYER_4",   "0.2"),
+        "wii_ir_border":              cfg.get("WII_IR_BORDER",              "0.0"),
         "emulate_second":             cfg.get("EMULATE_SECOND",             ""),
     }
 
