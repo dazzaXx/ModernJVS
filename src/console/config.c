@@ -57,7 +57,6 @@ JVSConfigStatus getDefaultConfig(JVSConfig *config)
     config->analogDeadzonePlayer2 = DEFAULT_ANALOG_DEADZONE;
     config->analogDeadzonePlayer3 = DEFAULT_ANALOG_DEADZONE;
     config->analogDeadzonePlayer4 = DEFAULT_ANALOG_DEADZONE;
-    config->wiiIRBorder = DEFAULT_WII_IR_BORDER;
     config->wiiIRScale  = DEFAULT_WII_IR_SCALE;
     strncpy(config->defaultGamePath, DEFAULT_GAME, MAX_PATH_LENGTH - 1);
     config->defaultGamePath[MAX_PATH_LENGTH - 1] = '\0';
@@ -179,19 +178,6 @@ JVSConfigStatus parseConfig(char *path, JVSConfig *config)
             char *token = getNextToken(NULL, " ", &saveptr);
             if (token)
                 config->analogDeadzonePlayer4 = clampDeadzone(atof(token));
-        }
-        else if (strcmp(command, "WII_IR_BORDER") == 0)
-        {
-            char *token = getNextToken(NULL, " ", &saveptr);
-            if (token)
-            {
-                double val = atof(token);
-                if (val < 0.0)
-                    val = 0.0;
-                else if (val > MAX_WII_IR_BORDER)
-                    val = MAX_WII_IR_BORDER;
-                config->wiiIRBorder = val;
-            }
         }
         else if (strcmp(command, "WII_IR_SCALE") == 0)
         {

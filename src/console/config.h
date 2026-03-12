@@ -19,8 +19,6 @@
 #define DEFAULT_ANALOG_DEADZONE 0.2
 #define MAX_ANALOG_DEADZONE 0.5
 #define DEADZONE_CLAMP_OFFSET 0.01
-#define DEFAULT_WII_IR_BORDER 0.0
-#define MAX_WII_IR_BORDER 0.5
 #define DEFAULT_WII_IR_SCALE 1.0
 #define MIN_WII_IR_SCALE 0.1
 #define MAX_WII_IR_SCALE 5.0
@@ -42,7 +40,6 @@ typedef struct
     double analogDeadzonePlayer2;
     double analogDeadzonePlayer3;
     double analogDeadzonePlayer4;
-    double wiiIRBorder;
     double wiiIRScale;
 } JVSConfig;
 

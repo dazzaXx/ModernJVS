@@ -42,22 +42,13 @@ ANALOG_DEADZONE_PLAYER_2 0.2
 ANALOG_DEADZONE_PLAYER_3 0.2
 ANALOG_DEADZONE_PLAYER_4 0.2
 
-# Wii Remote IR Border
-# Extends the valid IR range beyond the nominal screen edges before triggering
-# the "screen out" state. When pointing near or slightly past the edge of the
-# screen, this prevents the cursor disappearing prematurely.
-# Coordinates within the border are clamped to the nearest screen edge [0, 1].
-# Value range: 0.0 to 0.5 (0.0 = strict screen boundary, 0.1 = 10% extension)
-# Default is 0.0 (no extension). Increase if shooting near the screen edge
-# causes the gun to go "out of bounds" too early.
-WII_IR_BORDER 0.0
-
 # Wii Remote IR Scale
-# Scales the IR coordinate space around the centre of the screen, allowing you
-# to aim the Wiimote to more extreme angles before the cursor goes off-screen.
-# Values > 1.0 expand the required physical aiming range (aim further before
-# going off-screen). Values < 1.0 make the aiming more sensitive.
-# Example: WII_IR_SCALE 1.3 means you need to aim ~30% further in any direction
-# before the cursor reaches the screen edge.
+# Scales the IR cursor movement around the centre of the screen.
+# Values > 1.0 extend how far the cursor reaches across the screen — the cursor
+# covers more area per physical movement, allowing you to aim to corners and
+# edges that were previously unreachable.
+# Values < 1.0 reduce cursor sensitivity (slower cursor movement).
+# Example: WII_IR_SCALE 1.3 makes the cursor travel ~30% further per physical
+# movement, extending the reachable area of the screen.
 # Value range: 0.1 to 5.0 (1.0 = no scaling, default)
 WII_IR_SCALE 1.0
