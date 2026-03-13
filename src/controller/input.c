@@ -182,18 +182,53 @@ static void *wiiDeviceThread(void *_args)
                     double valuey = 384 + sin(atan2(twoY - oneY, twoX - oneX) * -1) * (((oneX - twoX) / 2 + twoX) - 512) + cos(atan2(twoY - oneY, twoX - oneX) * -1) * (((oneY - twoY) / 2 + twoY) - 384);
 
                     double finalX = (((double)valuex / (double)1023) * 1.0);
-                    double finalY = 1.0f - ((double)valuey / (double)1023);
+                    double finalY = 1.0 - ((double)valuey / (double)1023);
 
-                    /* Apply IR scale: multiply the displacement from screen centre so the
-                     * cursor covers more (or less) of the screen per physical movement.
-                     * scale > 1.0 extends how far the cursor reaches across the screen;
-                     * scale < 1.0 reduces cursor sensitivity;
-                     * scale = 1.0 (default) leaves coordinates unchanged. */
+                    /* Apply IR scale using a smooth, position-dependent curve so that
+                     * the cursor always tracks at stock speed (1:1) regardless of the
+                     * configured scale value.
+                     *
+                     * A cubic smooth-step weight (smoothstep(0,1,t) = 3t²−2t³) is used
+                     * where t is the normalised distance from screen centre (0 = centre,
+                     * 1 = edge).  The weight is 0 at the centre and 1 at the edge, so:
+                     *   - The derivative at the centre is always 1.0 (stock speed).
+                     *   - scale > 1.0 progressively extends the cursor's reach only
+                     *     toward the screen edges, without making centre-screen aiming
+                     *     faster.
+                     *   - scale < 1.0 progressively contracts the reachable area only
+                     *     toward the edges, without slowing centre-screen aiming.
+                     *   - scale = 1.0 (default) leaves coordinates unchanged.
+                     *
+                     * The smooth curve is monotone for scale ≥ 0.5.  For extreme
+                     * compression (scale < 0.5) the original linear formula is used
+                     * instead to avoid non-monotone (backwards) cursor movement. */
                     double scale = args->wiiIRScale;
                     if (scale != 1.0)
                     {
-                        finalX = 0.5 + (finalX - 0.5) * scale;
-                        finalY = 0.5 + (finalY - 0.5) * scale;
+                        if (scale >= 0.5)
+                        {
+                            double dx = finalX - 0.5;
+                            double dy = finalY - 0.5;
+
+                            /* Normalised distance from centre: 0 = centre, 1 = screen edge */
+                            double tx = fabs(dx) * 2.0;
+                            double ty = fabs(dy) * 2.0;
+
+                            /* Cubic smooth-step weight: 0 at centre, 1 at edge */
+                            double wx = tx * tx * (3.0 - 2.0 * tx);
+                            double wy = ty * ty * (3.0 - 2.0 * ty);
+
+                            /* Effective scale: 1.0 at centre, `scale` at edge */
+                            finalX = 0.5 + dx * (1.0 + (scale - 1.0) * wx);
+                            finalY = 0.5 + dy * (1.0 + (scale - 1.0) * wy);
+                        }
+                        else
+                        {
+                            /* Linear formula for extreme compression (scale < 0.5) —
+                             * the smooth curve becomes non-monotone below this threshold. */
+                            finalX = 0.5 + (finalX - 0.5) * scale;
+                            finalY = 0.5 + (finalY - 0.5) * scale;
+                        }
                     }
 
                     /* Check for out-of-bound after scaling. */
@@ -917,9 +952,13 @@ static double getPlayerDeadzone(int player, double p1, double p2, double p3, dou
  * @param analogDeadzoneP2 Analogue stick deadzone for player 2 (0.0–0.5)
  * @param analogDeadzoneP3 Analogue stick deadzone for player 3 (0.0–0.5)
  * @param analogDeadzoneP4 Analogue stick deadzone for player 4 (0.0–0.5)
- * @param wiiIRScale  Scale factor (0.1–5.0) applied to IR coordinates around the screen centre.
- *                   Values > 1.0 extend how far the cursor reaches across the screen (more
- *                   screen coverage per physical movement). Values < 1.0 reduce sensitivity.
+ * @param wiiIRScale  Scale factor (0.1–5.0) for Wii Remote IR cursor coverage.
+ *                   A smooth position-dependent curve keeps the cursor at stock speed
+ *                   (1:1 tracking) at the screen centre regardless of this value.
+ *                   Values > 1.0 extend how far the cursor reaches across the screen
+ *                   without making centre-screen aiming faster.
+ *                   Values < 1.0 contract the reachable area without slowing down
+ *                   centre-screen aiming.
  *                   1.0 (default) leaves coordinates unchanged.
  * @returns The status of the operation
  **/
