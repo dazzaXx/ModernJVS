@@ -184,25 +184,24 @@ static void *wiiDeviceThread(void *_args)
                     double finalX = (((double)valuex / (double)1023) * 1.0);
                     double finalY = 1.0 - ((double)valuey / (double)1023);
 
-                    /* Apply IR scale using a smooth, position-dependent curve.
+                    /* Apply IR scale using a smooth, position-dependent curve so that
+                     * the cursor always tracks at stock speed (1:1) regardless of the
+                     * configured scale value.
                      *
-                     * A cubic smooth-step weight (0 at screen centre, 1 at the
-                     * physical screen edge) blends the effective scale between 1.0
-                     * at the centre and `scale` at the edge.  This means:
-                     *   - The derivative at the centre is always 1.0 (stock speed),
-                     *     so aiming precision in the middle of the screen is unchanged.
-                     *   - scale > 1.0 progressively speeds up the cursor only toward
-                     *     the edges, extending how far it reaches across the screen.
-                     *   - scale < 1.0 progressively slows it only at the edges,
-                     *     contracting the reachable area.
+                     * A cubic smooth-step weight (smoothstep(0,1,t) = 3t²−2t³) is used
+                     * where t is the normalised distance from screen centre (0 = centre,
+                     * 1 = edge).  The weight is 0 at the centre and 1 at the edge, so:
+                     *   - The derivative at the centre is always 1.0 (stock speed).
+                     *   - scale > 1.0 progressively extends the cursor's reach only
+                     *     toward the screen edges, without making centre-screen aiming
+                     *     faster.
+                     *   - scale < 1.0 progressively contracts the reachable area only
+                     *     toward the edges, without slowing centre-screen aiming.
                      *   - scale = 1.0 (default) leaves coordinates unchanged.
                      *
                      * The smooth curve is monotone for scale ≥ 0.5.  For extreme
                      * compression (scale < 0.5) the original linear formula is used
-                     * instead to avoid non-monotone (backwards) cursor movement.
-                     *
-                     * Compared to a plain linear scale, this avoids the cursor feeling
-                     * uniformly faster or slower when the scale is adjusted. */
+                     * instead to avoid non-monotone (backwards) cursor movement. */
                     double scale = args->wiiIRScale;
                     if (scale != 1.0)
                     {
@@ -215,21 +214,18 @@ static void *wiiDeviceThread(void *_args)
                             double tx = fabs(dx) * 2.0;
                             double ty = fabs(dy) * 2.0;
 
-                            /* Cubic smooth-step weight (smoothstep(0,1,t) = 3t²−2t³):
-                             * 0 at centre, 1 at edge, with zero first-derivative at
-                             * both endpoints for a smooth transition. */
+                            /* Cubic smooth-step weight: 0 at centre, 1 at edge */
                             double wx = tx * tx * (3.0 - 2.0 * tx);
                             double wy = ty * ty * (3.0 - 2.0 * ty);
 
-                            /* Effective scale: 1.0 at centre, `scale` at edge. */
+                            /* Effective scale: 1.0 at centre, `scale` at edge */
                             finalX = 0.5 + dx * (1.0 + (scale - 1.0) * wx);
                             finalY = 0.5 + dy * (1.0 + (scale - 1.0) * wy);
                         }
                         else
                         {
-                            /* Linear formula for extreme compression (scale < 0.5).
-                             * The smooth curve would become non-monotone below this
-                             * threshold, so fall back to the original approach. */
+                            /* Linear formula for extreme compression (scale < 0.5) —
+                             * the smooth curve becomes non-monotone below this threshold. */
                             finalX = 0.5 + (finalX - 0.5) * scale;
                             finalY = 0.5 + (finalY - 0.5) * scale;
                         }
@@ -957,10 +953,8 @@ static double getPlayerDeadzone(int player, double p1, double p2, double p3, dou
  * @param analogDeadzoneP3 Analogue stick deadzone for player 3 (0.0–0.5)
  * @param analogDeadzoneP4 Analogue stick deadzone for player 4 (0.0–0.5)
  * @param wiiIRScale  Scale factor (0.1–5.0) for Wii Remote IR cursor coverage.
- *                   A smooth position-dependent curve is used so that the cursor
- *                   tracks at stock speed (1:1) at the screen centre regardless of
- *                   the scale value; the speed increase (> 1.0) or decrease (< 1.0)
- *                   is applied only toward the physical screen edges.
+ *                   A smooth position-dependent curve keeps the cursor at stock speed
+ *                   (1:1 tracking) at the screen centre regardless of this value.
  *                   Values > 1.0 extend how far the cursor reaches across the screen
  *                   without making centre-screen aiming faster.
  *                   Values < 1.0 contract the reachable area without slowing down
