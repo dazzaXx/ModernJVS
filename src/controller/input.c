@@ -157,6 +157,11 @@ static void *wiiDeviceThread(void *_args)
                     break;
                 }
 
+                /* Default to screen centre so the off-screen position is neutral when
+                 * the IR points are not visible (all coords == 1023). */
+                double finalX = 0.5;
+                double finalY = 0.5;
+
                 if ((x0 != 1023) && (x1 != 1023) && (y0 != 1023) && (y1 != 1023))
                 {
                     /* Set screen in player 1 */
@@ -181,8 +186,8 @@ static void *wiiDeviceThread(void *_args)
                     double valuex = 512 + cos(atan2(twoY - oneY, twoX - oneX) * -1) * (((oneX - twoX) / 2 + twoX) - 512) - sin(atan2(twoY - oneY, twoX - oneX) * -1) * (((oneY - twoY) / 2 + twoY) - 384);
                     double valuey = 384 + sin(atan2(twoY - oneY, twoX - oneX) * -1) * (((oneX - twoX) / 2 + twoX) - 512) + cos(atan2(twoY - oneY, twoX - oneX) * -1) * (((oneY - twoY) / 2 + twoY) - 384);
 
-                    double finalX = (((double)valuex / (double)1023) * 1.0);
-                    double finalY = 1.0f - ((double)valuey / (double)1023);
+                    finalX = (((double)valuex / (double)1023) * 1.0);
+                    finalY = 1.0f - ((double)valuey / (double)1023);
 
                     /* Apply IR scale: multiply the displacement from screen centre so the
                      * cursor covers more (or less) of the screen per physical movement.
@@ -216,11 +221,20 @@ static void *wiiDeviceThread(void *_args)
                     /* Set screen out player 1 */
                     setSwitch(args->jvsIO, args->player, args->inputs.key[KEY_O].output, 1);
 
-                    setAnalogue(args->jvsIO, args->inputs.abs[ABS_X].output, 0);
-                    setAnalogue(args->jvsIO, args->inputs.abs[ABS_Y].output, 0);
+                    /* Clamp the last known IR position to the nearest screen edge so that
+                     * the off-screen direction is preserved.  This ensures that games like
+                     * Time Crisis 4 (which use the analogue X position to distinguish left
+                     * vs. right off-screen) receive the correct edge value rather than
+                     * always receiving 0 (which, when REVERSE is applied, always maps to
+                     * the right side regardless of the actual direction). */
+                    double offX = finalX < 0.0 ? 0.0 : (finalX > 1.0 ? 1.0 : finalX);
+                    double offY = finalY < 0.0 ? 0.0 : (finalY > 1.0 ? 1.0 : finalY);
 
-                    setGun(args->jvsIO, args->inputs.abs[ABS_X].output, 0);
-                    setGun(args->jvsIO, args->inputs.abs[ABS_Y].output, 0);
+                    setAnalogue(args->jvsIO, args->inputs.abs[ABS_X].output, args->inputs.abs[ABS_X].reverse ? 1 - offX : offX);
+                    setAnalogue(args->jvsIO, args->inputs.abs[ABS_Y].output, args->inputs.abs[ABS_Y].reverse ? 1 - offY : offY);
+
+                    setGun(args->jvsIO, args->inputs.abs[ABS_X].output, args->inputs.abs[ABS_X].reverse ? 1 - offX : offX);
+                    setGun(args->jvsIO, args->inputs.abs[ABS_Y].output, args->inputs.abs[ABS_Y].reverse ? 1 - offY : offY);
                 }
                 continue;
             }
