@@ -123,6 +123,11 @@ static void *wiiDeviceThread(void *_args)
      * reported before any IR data arrives */
     int x0 = 1023, x1 = 1023, y0 = 1023, y1 = 1023;
 
+    /* Last known valid IR position, initialised to screen centre (0.5).
+     * Held and re-sent when the IR bar goes off-screen so the game sees the
+     * gun frozen at its last position rather than snapping to (0, 0). */
+    double lastX = 0.5, lastY = 0.5;
+
     while (getThreadsRunning())
     {
         FD_ZERO(&file_descriptor);
@@ -202,6 +207,10 @@ static void *wiiDeviceThread(void *_args)
                         double clampedX = finalX;
                         double clampedY = finalY;
 
+                        /* Remember the last valid position so we can hold it when off-screen. */
+                        lastX = clampedX;
+                        lastY = clampedY;
+
                         setAnalogue(args->jvsIO, args->inputs.abs[ABS_X].output, args->inputs.abs[ABS_X].reverse ? 1 - clampedX : clampedX);
                         setAnalogue(args->jvsIO, args->inputs.abs[ABS_Y].output, args->inputs.abs[ABS_Y].reverse ? 1 - clampedY : clampedY);
                         setGun(args->jvsIO, args->inputs.abs[ABS_X].output, args->inputs.abs[ABS_X].reverse ? 1 - clampedX : clampedX);
@@ -213,14 +222,16 @@ static void *wiiDeviceThread(void *_args)
 
                 if (outOfBounds)
                 {
-                    /* Set screen out player 1 */
+                    /* Set screen out and hold the last known gun position so the game
+                     * sees the cursor frozen at the edge rather than snapping to (0, 0).
+                     * The KEY_O switch signals the game that the gun is off-screen. */
                     setSwitch(args->jvsIO, args->player, args->inputs.key[KEY_O].output, 1);
 
-                    setAnalogue(args->jvsIO, args->inputs.abs[ABS_X].output, 0);
-                    setAnalogue(args->jvsIO, args->inputs.abs[ABS_Y].output, 0);
+                    setAnalogue(args->jvsIO, args->inputs.abs[ABS_X].output, args->inputs.abs[ABS_X].reverse ? 1 - lastX : lastX);
+                    setAnalogue(args->jvsIO, args->inputs.abs[ABS_Y].output, args->inputs.abs[ABS_Y].reverse ? 1 - lastY : lastY);
 
-                    setGun(args->jvsIO, args->inputs.abs[ABS_X].output, 0);
-                    setGun(args->jvsIO, args->inputs.abs[ABS_Y].output, 0);
+                    setGun(args->jvsIO, args->inputs.abs[ABS_X].output, args->inputs.abs[ABS_X].reverse ? 1 - lastX : lastX);
+                    setGun(args->jvsIO, args->inputs.abs[ABS_Y].output, args->inputs.abs[ABS_Y].reverse ? 1 - lastY : lastY);
                 }
                 continue;
             }

@@ -1,8 +1,8 @@
-# Time Crisis 4 Mapping File for Namco System 256
+# Time Crisis 4 Mapping File for Namco System Super 256
 # Author: dazzaXx
 #
-# Time Crisis 4 is a two-player light gun game that runs on Namco System 256.
-# It uses the Namco RAYS Gun I/O PCB (2 gun channels) for gun position input.
+# Time Crisis 4 is a two-player light gun game that runs on Namco System Super 256.
+# It uses the Namco V329 IO board (2 gun channels) for gun position input.
 #
 # For use with Wii Remotes:
 # - Configure two Wii Remotes over Bluetooth
@@ -12,7 +12,7 @@
 
 INCLUDE generic-shooting
 
-# Emulate the Namco V329 NA-JV used in Time Crisis 4 on System 256
+# Emulate the Namco V329 IO board used in Time Crisis 4 on System 256
 EMULATE namco-v329
 
 # Pedal / cover buttons (hide mechanic) - one per player
@@ -22,10 +22,11 @@ CONTROLLER_BUTTON_START CONTROLLER_2 BUTTON_3 PLAYER_2
 # Actual Gun Trigger (Time Crisis 4's Gun Trigger for some reason is BUTTON_LEFT)
 CONTROLLER_BUTTON_A CONTROLLER_1 BUTTON_LEFT PLAYER_1
 
-# Trigger - mapped to BUTTON_10 (beyond the standard 8-button layout) so that
-# the screen-out signal does not accidentally fire the in-game trigger.
-CONTROLLER_BUTTON_B CONTROLLER_1 BUTTON_10 PLAYER_1
-CONTROLLER_BUTTON_B CONTROLLER_2 BUTTON_10 PLAYER_2
+# Screen-out signal - KEY_O fires CONTROLLER_BUTTON_B when the Wiimote IR goes
+# off-screen. BUTTON_RIGHT is the off-screen switch that Time Crisis 4 monitors
+# on the V329 IO board.
+CONTROLLER_BUTTON_B CONTROLLER_1 BUTTON_RIGHT PLAYER_1
+CONTROLLER_BUTTON_B CONTROLLER_2 BUTTON_RIGHT PLAYER_2
 
 # Menu navigation
 CONTROLLER_BUTTON_UP CONTROLLER_1 BUTTON_UP PLAYER_1
