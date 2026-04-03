@@ -40,6 +40,11 @@ extern volatile int testButtonActive;
 #define ANALOG_CENTER_VALUE 0.5
 #define MIN_DIVISION_THRESHOLD 0.0001
 
+/* hid-wiimote IR sensor resolution.  The X and Y axes both use 10-bit values
+ * in the range [0, 1023]; the driver reports 1023 for any point that is not
+ * currently being tracked. */
+#define WII_IR_MAX 1023.0
+
 /* Maximum number of devices to look ahead when searching for a Nunchuk.
  * Wiimotes are Bluetooth-only devices so proximity-based search is always used. */
 #define DEVICE_LOOKAHEAD_DISTANCE 6
@@ -148,46 +153,66 @@ static void *wiiDeviceThread(void *_args)
                 bool outOfBounds = true;
                 switch (event.code)
                 {
-                case 16:
+                case ABS_HAT0X:
                     x0 = event.value;
                     break;
-                case 17:
+                case ABS_HAT0Y:
                     y0 = event.value;
                     break;
-                case 18:
+                case ABS_HAT1X:
                     x1 = event.value;
                     break;
-                case 19:
+                case ABS_HAT1Y:
                     y1 = event.value;
                     break;
                 }
 
-                if ((x0 != 1023) && (x1 != 1023) && (y0 != 1023) && (y1 != 1023))
+                bool blob0Valid = (x0 != 1023 && y0 != 1023);
+                bool blob1Valid = (x1 != 1023 && y1 != 1023);
+
+                if (blob0Valid || blob1Valid)
                 {
-                    /* Set screen in player 1 */
-                    setSwitch(args->jvsIO, args->player, args->inputs.key[KEY_O].output, 0);
-                    int oneX, oneY, twoX, twoY;
-                    if (x0 > x1)
+                    double finalX, finalY;
+
+                    if (blob0Valid && blob1Valid)
                     {
-                        oneY = y0;
-                        oneX = x0;
-                        twoY = y1;
-                        twoX = x1;
+                        /* Dual-blob: use tilt-corrected centre calculation.
+                         * Order the blobs so that oneX > twoX (rightmost first). */
+                        int oneX, oneY, twoX, twoY;
+                        if (x0 > x1)
+                        {
+                            oneX = x0; oneY = y0;
+                            twoX = x1; twoY = y1;
+                        }
+                        else
+                        {
+                            oneX = x1; oneY = y1;
+                            twoX = x0; twoY = y0;
+                        }
+
+                        /* Compute the angle between the two blobs once and reuse it. */
+                        double angle = atan2(twoY - oneY, twoX - oneX) * -1.0;
+                        double midX  = (oneX + twoX) / 2.0;
+                        double midY  = (oneY + twoY) / 2.0;
+
+                        double valuex = 512.0 + cos(angle) * (midX - 512.0) - sin(angle) * (midY - 384.0);
+                        double valuey = 384.0 + sin(angle) * (midX - 512.0) + cos(angle) * (midY - 384.0);
+
+                        finalX = valuex / WII_IR_MAX;
+                        finalY = 1.0 - valuey / WII_IR_MAX;
                     }
                     else
                     {
-                        oneY = y1;
-                        oneX = x1;
-                        twoY = y0;
-                        twoX = x0;
+                        /* Single-blob fallback: the second IR blob is not visible (its
+                         * coordinates are the driver's 1023 sentinel).  Use the one
+                         * visible blob's raw normalised position.  No tilt correction is
+                         * applied, so accuracy is reduced compared with dual-blob mode,
+                         * but the gun will still track movement correctly. */
+                        int blobX = blob0Valid ? x0 : x1;
+                        int blobY = blob0Valid ? y0 : y1;
+                        finalX = (double)blobX / WII_IR_MAX;
+                        finalY = 1.0 - (double)blobY / WII_IR_MAX;
                     }
-
-                    /* Use some fancy maths that I don't understand fully */
-                    double valuex = 512 + cos(atan2(twoY - oneY, twoX - oneX) * -1) * (((oneX - twoX) / 2 + twoX) - 512) - sin(atan2(twoY - oneY, twoX - oneX) * -1) * (((oneY - twoY) / 2 + twoY) - 384);
-                    double valuey = 384 + sin(atan2(twoY - oneY, twoX - oneX) * -1) * (((oneX - twoX) / 2 + twoX) - 512) + cos(atan2(twoY - oneY, twoX - oneX) * -1) * (((oneY - twoY) / 2 + twoY) - 384);
-
-                    double finalX = (((double)valuex / (double)1023) * 1.0);
-                    double finalY = 1.0f - ((double)valuey / (double)1023);
 
                     /* Apply IR scale: multiply the displacement from screen centre so the
                      * cursor covers more (or less) of the screen per physical movement.
@@ -201,20 +226,19 @@ static void *wiiDeviceThread(void *_args)
                         finalY = 0.5 + (finalY - 0.5) * scale;
                     }
 
-                    /* Check for out-of-bound after scaling. */
+                    /* Only commit the position if it is within the [0, 1] screen bounds. */
                     if (!(finalX > 1.0 || finalY > 1.0 || finalX < 0.0 || finalY < 0.0))
                     {
-                        double clampedX = finalX;
-                        double clampedY = finalY;
-
                         /* Remember the last valid position so we can hold it when off-screen. */
-                        lastX = clampedX;
-                        lastY = clampedY;
+                        lastX = finalX;
+                        lastY = finalY;
 
-                        setAnalogue(args->jvsIO, args->inputs.abs[ABS_X].output, args->inputs.abs[ABS_X].reverse ? 1 - clampedX : clampedX);
-                        setAnalogue(args->jvsIO, args->inputs.abs[ABS_Y].output, args->inputs.abs[ABS_Y].reverse ? 1 - clampedY : clampedY);
-                        setGun(args->jvsIO, args->inputs.abs[ABS_X].output, args->inputs.abs[ABS_X].reverse ? 1 - clampedX : clampedX);
-                        setGun(args->jvsIO, args->inputs.abs[ABS_Y].output, args->inputs.abs[ABS_Y].reverse ? 1 - clampedY : clampedY);
+                        setSwitch(args->jvsIO, args->player, args->inputs.key[KEY_O].output, 0);
+
+                        setAnalogue(args->jvsIO, args->inputs.abs[ABS_X].output, args->inputs.abs[ABS_X].reverse ? 1 - finalX : finalX);
+                        setAnalogue(args->jvsIO, args->inputs.abs[ABS_Y].output, args->inputs.abs[ABS_Y].reverse ? 1 - finalY : finalY);
+                        setGun(args->jvsIO, args->inputs.abs[ABS_X].output, args->inputs.abs[ABS_X].reverse ? 1 - finalX : finalX);
+                        setGun(args->jvsIO, args->inputs.abs[ABS_Y].output, args->inputs.abs[ABS_Y].reverse ? 1 - finalY : finalY);
 
                         outOfBounds = false;
                     }
@@ -222,9 +246,9 @@ static void *wiiDeviceThread(void *_args)
 
                 if (outOfBounds)
                 {
-                    /* Set screen out and hold the last known gun position so the game
-                     * sees the cursor frozen at the edge rather than snapping to (0, 0).
-                     * The KEY_O switch signals the game that the gun is off-screen. */
+                    /* No IR blobs are visible (or the computed position is out of bounds).
+                     * Assert the screen-out signal and freeze the gun at the last known
+                     * position rather than snapping it to (0, 0). */
                     setSwitch(args->jvsIO, args->player, args->inputs.key[KEY_O].output, 1);
 
                     setAnalogue(args->jvsIO, args->inputs.abs[ABS_X].output, args->inputs.abs[ABS_X].reverse ? 1 - lastX : lastX);
