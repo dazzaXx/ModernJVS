@@ -123,6 +123,12 @@ static void *wiiDeviceThread(void *_args)
      * reported before any IR data arrives */
     int x0 = 1023, x1 = 1023, y0 = 1023, y1 = 1023;
 
+    /* Last-known normalised IR position, persisted across events so that when the
+     * IR dots go fully invisible (all coords == 1023) we still know which direction
+     * the gun was pointing when it went off-screen.  Initialised to 0.5 (centre). */
+    double finalX = 0.5;
+    double finalY = 0.5;
+
     while (getThreadsRunning())
     {
         FD_ZERO(&file_descriptor);
@@ -156,11 +162,6 @@ static void *wiiDeviceThread(void *_args)
                     y1 = event.value;
                     break;
                 }
-
-                /* Default to screen centre so the off-screen position is neutral when
-                 * the IR points are not visible (all coords == 1023). */
-                double finalX = 0.5;
-                double finalY = 0.5;
 
                 if ((x0 != 1023) && (x1 != 1023) && (y0 != 1023) && (y1 != 1023))
                 {
@@ -222,11 +223,11 @@ static void *wiiDeviceThread(void *_args)
                     setSwitch(args->jvsIO, args->player, args->inputs.key[KEY_O].output, 1);
 
                     /* Clamp the last known IR position to the nearest screen edge so that
-                     * the off-screen direction is preserved.  This ensures that games like
-                     * Time Crisis 4 (which use the analogue X position to distinguish left
-                     * vs. right off-screen) receive the correct edge value rather than
-                     * always receiving 0 (which, when REVERSE is applied, always maps to
-                     * the right side regardless of the actual direction). */
+                     * the off-screen direction is preserved.  finalX/finalY are declared
+                     * outside the event loop and keep the last computed position — even
+                     * when the IR dots go fully invisible (1023) — so the direction the
+                     * gun was pointing when it left the screen is correctly sent as 0.0
+                     * (one edge) or 1.0 (other edge), with reverse applied. */
                     double offX = finalX < 0.0 ? 0.0 : (finalX > 1.0 ? 1.0 : finalX);
                     double offY = finalY < 0.0 ? 0.0 : (finalY > 1.0 ? 1.0 : finalY);
 
