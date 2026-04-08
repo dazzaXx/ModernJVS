@@ -947,6 +947,11 @@ JVSStatus writePacket(JVSPacket *packet)
 	int outputIndex = 1;
 	outputBuffer[0] = SYNC;
 
+	/* Increment the length to include the checksum byte in the wire-format
+	 * length field, then restore it afterwards so that the packet struct
+	 * stays consistent (important for CMD_RETRANSMIT which re-calls this
+	 * function with the same outputPacket without rebuilding it). */
+	unsigned char savedLength = packet->length;
 	packet->length++;
 
 	/* Write out entire packet */
@@ -985,6 +990,11 @@ JVSStatus writePacket(JVSPacket *packet)
 	}
 
 	int written = 0, timeout = 0;
+
+	/* Restore the original data length before returning so that the packet
+	 * struct is left in a consistent state (needed by CMD_RETRANSMIT). */
+	packet->length = savedLength;
+
 	while (written < outputIndex)
 	{
 		if (timeout > JVS_RETRY_COUNT)
