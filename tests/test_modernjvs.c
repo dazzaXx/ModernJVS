@@ -35,7 +35,10 @@ extern int serialIO;
 
 /*
  * input.c references testButtonActive (normally defined in modernjvs.c).
- * Provide a stub here so the test binary links cleanly.
+ * In the real daemon this flag is set when the test button is held to
+ * activate test mode; controller threads read it to suppress normal input.
+ * Provide a stub here so the test binary links cleanly without needing
+ * modernjvs.c (which defines main()).
  */
 volatile int testButtonActive = 0;
 
@@ -98,6 +101,23 @@ static const char *g_current_test = "unknown";
 #define ESCAPE_BYTE ((unsigned char)0xD0)
 
 /**
+ * Write one byte to buf[] at *idx with JVS escaping applied.
+ * Escaped bytes (SYNC and ESCAPE) are expanded to a two-byte sequence.
+ * Accumulates the byte's value into *checksum.
+ */
+static void jvs_wire_put(unsigned char *buf, int *idx, unsigned char *checksum,
+                          unsigned char byte)
+{
+    *checksum = (unsigned char)((*checksum + byte) & 0xFF);
+    if (byte == SYNC_BYTE || byte == ESCAPE_BYTE) {
+        buf[(*idx)++] = ESCAPE_BYTE;
+        buf[(*idx)++] = (unsigned char)(byte - 1);
+    } else {
+        buf[(*idx)++] = byte;
+    }
+}
+
+/**
  * Build a raw JVS wire packet into buf[].
  * Returns the number of bytes written.
  *
@@ -114,22 +134,10 @@ static int jvs_build_wire(unsigned char *buf, unsigned char dest,
 
     buf[idx++] = SYNC_BYTE;
 
-#define ADD_BYTE(b)                                              \
-    do {                                                         \
-        unsigned char _b = (unsigned char)(b);                   \
-        checksum = (unsigned char)((checksum + _b) & 0xFF);      \
-        if (_b == SYNC_BYTE || _b == ESCAPE_BYTE) {             \
-            buf[idx++] = ESCAPE_BYTE;                            \
-            buf[idx++] = (unsigned char)(_b - 1);               \
-        } else {                                                 \
-            buf[idx++] = _b;                                     \
-        }                                                        \
-    } while (0)
-
-    ADD_BYTE(dest);
-    ADD_BYTE((unsigned char)(data_len + 1));   /* wire length */
+    jvs_wire_put(buf, &idx, &checksum, dest);
+    jvs_wire_put(buf, &idx, &checksum, (unsigned char)(data_len + 1));
     for (int i = 0; i < data_len; i++)
-        ADD_BYTE(data[i]);
+        jvs_wire_put(buf, &idx, &checksum, data[i]);
 
     /* Checksum itself is also escaped if needed */
     if (checksum == SYNC_BYTE || checksum == ESCAPE_BYTE) {
@@ -139,7 +147,6 @@ static int jvs_build_wire(unsigned char *buf, unsigned char dest,
         buf[idx++] = checksum;
     }
 
-#undef ADD_BYTE
     return idx;
 }
 
