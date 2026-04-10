@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.10)
 
 project(modernjvs
-        VERSION "5.17.18"
+        VERSION "5.17.19"
         LANGUAGES "C"
         DESCRIPTION "JVS I/O Emulator"
         HOMEPAGE_URL "https://github.com/dazzaXx/ModernJVS"
@@ -154,7 +154,7 @@ include(CPack)
 # Test target (built separately; does not require real hardware)
 # Sources exclude modernjvs.c (main) so the test runner provides its own main.
 # ──────────────────────────────────────────────────────────────────────────────
-option(BUILD_TESTS "Build the ModernJVS test suite" ON)
+option(BUILD_TESTS "Build the ModernJVS test suite" OFF)
 if(BUILD_TESTS)
     set(TEST_SOURCES
         tests/test_modernjvs.c
