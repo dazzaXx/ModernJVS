@@ -2702,33 +2702,26 @@ def bluetooth_pair(mac):
         # Trust first so the device can auto-reconnect in future
         _run_bt("trust", mac)
 
-        # First pair attempt using the default agent
-        pair_result = _run_bt("pair", mac, timeout=BT_PAIR_TIMEOUT)
+        # Pair using a piped interactive session with the NoInputNoOutput agent
+        # registered before the pair command is issued.  Running
+        # ``bluetoothctl pair <mac>`` as a plain non-interactive subprocess
+        # leaves no agent registered; BlueZ then waits for an agent to handle
+        # the pairing confirmation and hangs for the full BT_PAIR_TIMEOUT
+        # before giving up.  Registering NoInputNoOutput in the same session
+        # causes BlueZ to immediately accept the pairing without confirmation,
+        # avoiding the timeout for all controller types.
+        pair_result = _run_bt_piped([
+            "agent NoInputNoOutput",
+            "default-agent",
+            f"pair {mac}",
+            "quit",
+        ])
         pair_out = (pair_result.stdout + pair_result.stderr).lower()
         pair_ok = (
             pair_result.returncode == 0
             or "successful" in pair_out
             or "already paired" in pair_out
         )
-
-        # If pairing failed with AuthenticationFailed (common for Xbox
-        # controllers and other devices that require NoInputNoOutput agent),
-        # retry in a piped session with the appropriate agent set first.
-        if not pair_ok and "authenticationfailed" in pair_out.replace(" ", ""):
-            retry_result = _run_bt_piped([
-                "agent NoInputNoOutput",
-                "default-agent",
-                f"pair {mac}",
-                "quit",
-            ])
-            retry_out = (retry_result.stdout + retry_result.stderr).lower()
-            pair_ok = (
-                retry_result.returncode == 0
-                or "successful" in retry_out
-                or "already paired" in retry_out
-            )
-            if pair_ok:
-                pair_out = retry_out  # use retry output for subsequent checks
 
         if not pair_ok:
             detail = (pair_result.stdout.strip() + "\n" + pair_result.stderr.strip()).strip()
