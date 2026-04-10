@@ -154,7 +154,7 @@ include(CPack)
 # Test target (built separately; does not require real hardware)
 # Sources exclude modernjvs.c (main) so the test runner provides its own main.
 # ──────────────────────────────────────────────────────────────────────────────
-option(BUILD_TESTS "Build the ModernJVS test suite" ON)
+option(BUILD_TESTS "Build the ModernJVS test suite" OFF)
 if(BUILD_TESTS)
     set(TEST_SOURCES
         tests/test_modernjvs.c

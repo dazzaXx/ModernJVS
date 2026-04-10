@@ -481,6 +481,36 @@ Use one of these I/O board configurations:
 - **I/O Board Definitions:** `/etc/modernjvs/ios/` - Emulated I/O board specifications
 - **Device Mappings:** `/etc/modernjvs/devices/` - Controller-specific mappings
 
+## Developer Test Suite
+
+ModernJVS includes a test suite (`tests/test_modernjvs.c`) that exercises the JVS packet framing, IO state management, config parsing, and debug-level filtering — all without requiring real hardware (it uses a `socketpair` to emulate the RS485 wire).
+
+> **Note:** The test suite is intended for development and is **not built by default**. There is no need to run it for normal use.
+
+### Building and running the tests
+
+```bash
+mkdir -p build && cd build
+cmake .. -DBUILD_TESTS=ON
+make test_modernjvs
+./test_modernjvs
+```
+
+Or, if you want CMake's `ctest` runner:
+
+```bash
+ctest --output-on-failure
+```
+
+### What is tested
+
+| Module | Coverage |
+|--------|----------|
+| `jvs/io.c` | IO state management (pure logic, no hardware) |
+| `jvs/jvs.c` | JVS packet framing and `processPacket()` dispatch |
+| `console/config.c` | Config file and IO-board definition parsing |
+| `console/debug.c` | Debug-level filtering |
+
 ## Contributing
 
 Issues and pull requests welcome! If you have a game-specific configuration that works well, please consider contributing it back to the project.
