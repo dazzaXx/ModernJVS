@@ -2534,6 +2534,23 @@ BT_SUPERVISION_LE_LATENCY      = 0     # no slave latency
 # and disconnect, even though bluetoothctl connect already returned success.
 BT_SUPERVISION_STABLE_PERIOD  = 5
 
+# Path and desired values for LE connection parameters in BlueZ main.conf.
+# MinConnectionInterval and MaxConnectionInterval are in 1.25 ms units.
+# ConnectionSupervisionTimeout is in 10 ms units.
+# Setting MaxConnectionInterval to 800 (= 1000 ms) is deliberately permissive:
+# it lets the controller keep its own preferred interval (e.g. 15–50 ms) and
+# only the supervision timeout is effectively changed.  Without these settings
+# BlueZ may negotiate an aggressive interval during GATT service discovery,
+# causing LE controllers (e.g. Xbox One S wireless) to reject the parameter
+# update and disconnect immediately after pairing.
+_BT_MAIN_CONF_PATH = "/etc/bluetooth/main.conf"
+_BT_LE_DESIRED = {
+    "MinConnectionInterval":       6,    # 7.5 ms (BLE spec minimum)
+    "MaxConnectionInterval":       800,  # 1000 ms – keeps controller's preferred interval
+    "ConnectionLatency":           0,    # no peripheral latency
+    "ConnectionSupervisionTimeout": 300, # 3 s
+}
+
 # Known RS-485 / serial adapter VID:PID → human-readable chip name.
 # Used by diag_usb_devices() to highlight adapters in the USB inspector.
 _USB_RS485_KNOWN = {
@@ -2749,7 +2766,17 @@ def bluetooth_pair(mac):
             conn_ok = conn_result.returncode == 0 or "successful" in conn_out
 
         if conn_ok:
-            return {"ok": True, "name": name}
+            hint = None
+            if xbox:
+                hint = (
+                    "Xbox Wireless Controllers paired over Bluetooth LE require the "
+                    "xpadneo driver to stay awake during play. Without it the controller "
+                    "may power off after ~10 minutes of inactivity. "
+                    "Install with: sudo apt install dkms && "
+                    "git clone https://github.com/atar-axis/xpadneo.git && "
+                    "cd xpadneo && sudo ./install.sh"
+                )
+            return {"ok": True, "name": name, "hint": hint}
 
         # Paired but couldn't connect – still a partial success; give
         # device-appropriate reconnection guidance.
@@ -2905,7 +2932,140 @@ def get_bluetooth_status():
         "bluez_available":      bluez_available,
         "bt_service_running":   bt_service_running,
         "rfkill_soft_blocked":  rfkill_soft_blocked,
+        "le_params_configured": _check_ble_le_params(),
     }
+
+
+def _check_ble_le_params():
+    """Return True if /etc/bluetooth/main.conf already contains all desired [LE] values."""
+    try:
+        with open(_BT_MAIN_CONF_PATH, "r") as f:
+            lines = f.readlines()
+    except OSError:
+        return False
+    in_le = False
+    found = set()
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("["):
+            in_le = (stripped == "[LE]")
+            continue
+        if not in_le:
+            continue
+        for key, val in _BT_LE_DESIRED.items():
+            if re.match(
+                rf'^{re.escape(key)}\s*=\s*{re.escape(str(val))}\s*$',
+                stripped, re.IGNORECASE,
+            ):
+                found.add(key)
+    return found == set(_BT_LE_DESIRED)
+
+
+def configure_ble_le_params():
+    """Write permissive LE connection parameters to /etc/bluetooth/main.conf and
+    restart the Bluetooth service.
+
+    The [LE] section is added to main.conf if absent; existing values for the
+    four target keys are updated in-place so other customisations are preserved.
+    Lines that comment out one of the target keys are replaced with the active
+    value.
+
+    Fixing these parameters stops BlueZ from sending an LL_CONNECTION_UPDATE_REQ
+    with aggressive intervals during GATT service discovery, which causes LE
+    controllers such as the Xbox One S wireless to reject the update and
+    disconnect immediately after pairing.
+
+    Returns {"ok": True, "output": [lines]} on success, or {"error": ...}.
+    """
+    # Read the existing file, or start with an empty list if it does not exist.
+    try:
+        with open(_BT_MAIN_CONF_PATH, "r") as f:
+            original_lines = f.readlines()
+    except FileNotFoundError:
+        original_lines = []
+    except OSError as e:
+        return {"error": f"Could not read {_BT_MAIN_CONF_PATH}: {e}"}
+
+    new_lines = []
+    in_le_section = False
+    le_section_found = False
+    keys_written = set()
+
+    for line in original_lines:
+        stripped = line.strip()
+
+        # Detect section headers
+        if stripped.startswith("["):
+            if in_le_section:
+                # Flush any remaining desired keys before leaving the [LE] section
+                for key, val in _BT_LE_DESIRED.items():
+                    if key not in keys_written:
+                        new_lines.append(f"{key} = {val}\n")
+                        keys_written.add(key)
+            section_name = stripped.strip("[]")
+            in_le_section = (section_name == "LE")
+            if in_le_section:
+                le_section_found = True
+            new_lines.append(line)
+            continue
+
+        if in_le_section:
+            # Check whether this line (active or commented-out) is one of our keys.
+            bare = stripped.lstrip("#").lstrip(";").strip()
+            matched = False
+            for key, val in _BT_LE_DESIRED.items():
+                if re.match(
+                    rf'^{re.escape(key)}\s*=',
+                    bare, re.IGNORECASE,
+                ):
+                    new_lines.append(f"{key} = {val}\n")
+                    keys_written.add(key)
+                    matched = True
+                    break
+            if not matched:
+                new_lines.append(line)
+        else:
+            new_lines.append(line)
+
+    # EOF while still inside [LE] – flush remaining keys
+    if in_le_section:
+        for key, val in _BT_LE_DESIRED.items():
+            if key not in keys_written:
+                new_lines.append(f"{key} = {val}\n")
+                keys_written.add(key)
+
+    # No [LE] section found at all – append one
+    if not le_section_found:
+        if new_lines and not new_lines[-1].endswith("\n"):
+            new_lines.append("\n")
+        new_lines.append("\n[LE]\n")
+        for key, val in _BT_LE_DESIRED.items():
+            new_lines.append(f"{key} = {val}\n")
+
+    # Write the modified file
+    output_lines = []
+    try:
+        with open(_BT_MAIN_CONF_PATH, "w") as f:
+            f.writelines(new_lines)
+        output_lines.append(f"✓ LE connection parameters written to {_BT_MAIN_CONF_PATH}.")
+    except OSError as e:
+        return {"error": f"Could not write {_BT_MAIN_CONF_PATH}: {e}"}
+
+    # Restart the Bluetooth service so the new parameters take effect
+    try:
+        r = subprocess.run(
+            ["systemctl", "restart", "bluetooth"],
+            capture_output=True, text=True, timeout=15,
+        )
+        if r.returncode == 0:
+            output_lines.append("✓ Bluetooth service restarted with new LE parameters.")
+        else:
+            detail = (r.stdout + r.stderr).strip()
+            output_lines.append(f"⚠ Bluetooth service restart failed: {detail}")
+    except Exception as e:
+        output_lines.append(f"⚠ Could not restart Bluetooth service: {e}")
+
+    return {"ok": True, "output": output_lines}
 
 
 def setup_usb_bluetooth():
@@ -2963,6 +3123,13 @@ def setup_usb_bluetooth():
         output_lines.append("✓ Bluetooth service enabled.")
     except Exception:
         pass
+
+    # ---- Write permissive LE connection parameters ----
+    le_result = configure_ble_le_params()
+    if le_result.get("ok"):
+        output_lines.extend(le_result.get("output", []))
+    else:
+        output_lines.append(f"⚠ LE parameter setup: {le_result.get('error', 'unknown error')}")
 
     return {"ok": True, "output": output_lines}
 
@@ -3512,6 +3679,12 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
         elif path == "/api/bluetooth/setup_usb":
             self._json(setup_usb_bluetooth())
 
+        elif path == "/api/bluetooth/configure_le":
+            result = configure_ble_le_params()
+            if result.get("ok"):
+                audit_log("BT configure_le", "", ip=self.client_address[0])
+            self._json(result)
+
         elif path == "/api/bluetooth/set_supervision_timeout":
             self._json(set_bluetooth_supervision_timeout())
 
@@ -4002,11 +4175,23 @@ def _supervision_timeout_loop():
     connected.  Disconnected devices are pruned from both ``first_seen`` and
     ``seen`` so that a subsequent reconnect restarts the timing from scratch.
 
-    ``hcitool`` was removed from BlueZ >= 5.65.  The loop runs regardless; if
-    ``hcitool`` is absent, supervision commands silently no-op.
+    ``hcitool`` was removed from BlueZ >= 5.65.  When it is absent the active
+    supervision-timeout commands are skipped and a one-time notice is logged;
+    the connection-interval fix via /etc/bluetooth/main.conf (configured by
+    configure_ble_le_params) handles the LE parameter negotiation instead.
     """
     if not shutil.which("bluetoothctl"):
         return
+
+    hcitool_present = shutil.which("hcitool") is not None
+    if not hcitool_present:
+        print(
+            "[webui] BT supervision: hcitool not found (removed in BlueZ >= 5.65). "
+            "Runtime supervision-timeout adjustments are disabled. "
+            "LE connection stability is maintained via /etc/bluetooth/main.conf — "
+            "use 'Configure LE Parameters' in the Bluetooth tab if not already done.",
+            flush=True,
+        )
 
     # Addresses whose supervision timeout has already been applied.
     seen = set()
@@ -4037,15 +4222,16 @@ def _supervision_timeout_loop():
             # Process all connections that have not yet been handled.
             pending = {a for a in current if a in first_seen and a not in seen}
             if pending:
-                hci_info = _hcitool_connection_info() if shutil.which("hcitool") else {}
+                hci_info = _hcitool_connection_info() if hcitool_present else {}
                 for address in pending:
                     conn_type, handle = hci_info.get(address, ("ACL", "?"))
                     age = now - first_seen[address]
 
                     if age >= BT_SUPERVISION_STABLE_PERIOD:
-                        if hci_info and address not in hci_info:
-                            print(f"[webui] BT supervision: no HCI info for {address}, assuming BR/EDR", flush=True)
-                        _apply_supervision_timeout_for_connection(conn_type, address, handle)
+                        if hcitool_present:
+                            if hci_info and address not in hci_info:
+                                print(f"[webui] BT supervision: no HCI info for {address}, assuming BR/EDR", flush=True)
+                            _apply_supervision_timeout_for_connection(conn_type, address, handle)
                         seen.add(address)
                     # else: not yet at stable period; check next tick.
 
