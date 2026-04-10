@@ -2504,7 +2504,7 @@ _BT_DEVICE_RE = re.compile(r'^Device\s+([0-9A-Fa-f:]{17})\s+(.*)')
 # Timeout constants (seconds) for Bluetooth operations
 BT_SCAN_TIMEOUT    = 5   # safety margin added on top of BT_SCAN_DURATION for subprocess timeout
 BT_SCAN_DURATION   = 8   # seconds bluetoothctl scans before exiting (--timeout flag)
-BT_PAIR_TIMEOUT    = 30  # pairing can be slow on first attempt
+BT_PAIR_TIMEOUT    = 90  # must exceed BlueZ's ~60 s internal pairing timeout
 BT_CONNECT_TIMEOUT = 20  # connection attempt timeout
 BT_INFO_TIMEOUT    = 10  # info / trust / remove commands
 BT_CONNECT_RETRY_DELAY = 2  # seconds to wait before retrying a failed connection attempt
@@ -2789,6 +2789,13 @@ def bluetooth_pair(mac):
                 f"Paired successfully, but the connection attempt failed. {reconnect_tip}"
             ),
             "name": name,
+        }
+    except subprocess.TimeoutExpired:
+        return {
+            "error": (
+                "Pairing timed out. Make sure the controller is in pairing mode "
+                "and within range, then try again."
+            )
         }
     except Exception as e:
         return {"error": str(e)}
