@@ -808,6 +808,8 @@ async function loadBluetoothSection() {
   banner.innerHTML = '';
   paired.style.display = '';
   scanSect.style.display = '';
+  // Always reset scan results when (re-)entering the section
+  clearBluetoothScanResults();
 
   const s = await api('/api/bluetooth/status');
 

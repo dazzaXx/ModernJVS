@@ -318,14 +318,12 @@
           <tbody id="btPairedBody"><tr><td colspan="4" style="color:var(--muted)">Loading…</td></tr></tbody>
         </table>
         </div>
-        <div style="margin-top:0.6rem;">
-          <button class="btn btn-xs" style="background:var(--red);border-color:var(--red);" onclick="btRemoveAll(this)">✕ Clear All Paired Devices</button>
-        </div>
       </div>
 
       <div id="btScanSection" style="padding-top:1rem;border-top:1px solid var(--border);">
         <div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;margin-bottom:0.75rem;">
           <button class="btn btn-refresh" id="btScanBtn" onclick="btScan()">&#x1F50D; Scan for Devices (8s)</button>
+          <button class="btn btn-xs" style="background:var(--red);border-color:var(--red);" onclick="btRemoveAll(this)">✕ Clear All Paired Devices</button>
           <span id="btScanStatus" style="font-size:0.82rem;color:var(--muted);"></span>
         </div>
         <div class="table-wrap">
