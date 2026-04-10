@@ -2635,13 +2635,18 @@ def bluetooth_scan():
 def bluetooth_pair(mac):
     """Pair and connect a Bluetooth device by MAC address.
 
+    - For Xbox / Microsoft BLE controllers the ``NoInputNoOutput`` agent is
+      used from the first attempt.  Using the default agent first causes an
+      ``AuthenticationFailed`` exchange that can make the controller exit
+      pairing mode or power off before a retry is possible.  Xbox controllers
+      must be in pairing mode (hold the Pair button on the back until the
+      Xbox button flashes rapidly).
+    - For all other devices the default agent is tried first.  If that
+      fails with ``AuthenticationFailed`` (common for devices that do not
+      support passkey/PIN entry), the pair is retried with a
+      ``NoInputNoOutput`` agent.
     - For Wii Remotes the connection sometimes fails on the first attempt;
-      the function automatically retries once after a short delay.
-    - For Xbox Wireless Controllers (and any device that returns
-      AuthenticationFailed with the default agent), the function retries
-      using a ``NoInputNoOutput`` agent which tells BlueZ not to require
-      any PIN/passkey confirmation.  Xbox controllers must be in pairing
-      mode (hold the Pair button on the back until the Xbox button flashes).
+      the function automatically retries the connect step after a short delay.
     """
     if not _validate_bt_mac(mac):
         return {"error": "Invalid Bluetooth MAC address"}
@@ -2661,33 +2666,52 @@ def bluetooth_pair(mac):
         # Trust first so the device can auto-reconnect in future
         _run_bt("trust", mac)
 
-        # First pair attempt using the default agent
-        pair_result = _run_bt("pair", mac, timeout=BT_PAIR_TIMEOUT)
-        pair_out = (pair_result.stdout + pair_result.stderr).lower()
-        pair_ok = (
-            pair_result.returncode == 0
-            or "successful" in pair_out
-            or "already paired" in pair_out
-        )
-
-        # If pairing failed with AuthenticationFailed (common for Xbox
-        # controllers and other devices that require NoInputNoOutput agent),
-        # retry in a piped session with the appropriate agent set first.
-        if not pair_ok and "authenticationfailed" in pair_out.replace(" ", ""):
-            retry_result = _run_bt_piped([
+        # Xbox (and other Microsoft) BLE controllers require the
+        # NoInputNoOutput agent from the very first pair attempt.  Using the
+        # default agent first causes an AuthenticationFailed response which
+        # can make the controller exit pairing mode or power off before the
+        # retry has a chance to run.
+        if xbox:
+            pair_result = _run_bt_piped([
                 "agent NoInputNoOutput",
                 "default-agent",
                 f"pair {mac}",
                 "quit",
             ])
-            retry_out = (retry_result.stdout + retry_result.stderr).lower()
+            pair_out = (pair_result.stdout + pair_result.stderr).lower()
             pair_ok = (
-                retry_result.returncode == 0
-                or "successful" in retry_out
-                or "already paired" in retry_out
+                pair_result.returncode == 0
+                or "successful" in pair_out
+                or "already paired" in pair_out
             )
-            if pair_ok:
-                pair_out = retry_out  # use retry output for subsequent checks
+        else:
+            # First pair attempt using the default agent
+            pair_result = _run_bt("pair", mac, timeout=BT_PAIR_TIMEOUT)
+            pair_out = (pair_result.stdout + pair_result.stderr).lower()
+            pair_ok = (
+                pair_result.returncode == 0
+                or "successful" in pair_out
+                or "already paired" in pair_out
+            )
+
+            # If pairing failed with AuthenticationFailed (common for devices
+            # that require NoInputNoOutput agent), retry in a piped session
+            # with the appropriate agent set first.
+            if not pair_ok and "authenticationfailed" in pair_out.replace(" ", ""):
+                retry_result = _run_bt_piped([
+                    "agent NoInputNoOutput",
+                    "default-agent",
+                    f"pair {mac}",
+                    "quit",
+                ])
+                retry_out = (retry_result.stdout + retry_result.stderr).lower()
+                pair_ok = (
+                    retry_result.returncode == 0
+                    or "successful" in retry_out
+                    or "already paired" in retry_out
+                )
+                if pair_ok:
+                    pair_out = retry_out  # use retry output for subsequent checks
 
         if not pair_ok:
             detail = (pair_result.stdout.strip() + "\n" + pair_result.stderr.strip()).strip()
