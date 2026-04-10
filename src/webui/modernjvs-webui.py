@@ -10,6 +10,7 @@ import hmac
 import ipaddress
 import json
 import os
+import queue
 import re
 import secrets
 import shutil
@@ -2555,7 +2556,114 @@ def _run_bt(*args, timeout=BT_INFO_TIMEOUT):
     )
 
 
+def _run_bt_interactive_pair(mac, timeout=BT_PAIR_TIMEOUT):
+    """Pair a Bluetooth device using a NoInputNoOutput agent in an interactive
+    bluetoothctl session driven by :mod:`subprocess.Popen`.
 
+    Why not ``subprocess.run(["bluetoothctl"], input="…")``?
+    When all commands are fed to stdin at once and the pipe is closed,
+    bluetoothctl dispatches the ``pair`` D-Bus call and immediately reads
+    the next buffered line (``quit``), exiting before the pairing result
+    returns.  The process exits cleanly (``returncode == 0``) even though
+    pairing never completed — a false-positive.
+
+    Why not ``bluetoothctl --agent NoInputNoOutput pair <mac>``?
+    ``--agent`` is not a valid CLI flag for bluetoothctl; it is silently
+    ignored so the default agent is used, causing ``AuthenticationFailed``
+    for Xbox/BLE controllers.
+
+    This function uses :class:`subprocess.Popen` and a reader thread so
+    that each command is sent to stdin individually and the next command
+    is only written after the expected response has been received.  ``quit``
+    is therefore sent *after* the pair result arrives, not before.
+
+    Returns a ``(output, returncode)`` tuple where *output* is the combined
+    stdout/stderr text produced during the session.
+    """
+    line_q = queue.Queue()
+
+    proc = subprocess.Popen(
+        ["bluetoothctl"],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1,
+    )
+
+    output_lines = []
+
+    def _reader():
+        try:
+            for line in proc.stdout:
+                output_lines.append(line)
+                line_q.put(line)
+        finally:
+            line_q.put(None)  # sentinel – stdout closed
+
+    reader_thread = threading.Thread(target=_reader, daemon=True)
+    reader_thread.start()
+
+    def _wait_for(patterns, step_timeout):
+        """Read lines until one matches a pattern or the timeout expires."""
+        deadline = time.monotonic() + step_timeout
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return None
+            try:
+                line = line_q.get(timeout=min(remaining, 1.0))
+            except queue.Empty:
+                continue
+            if line is None:
+                return None
+            for p in patterns:
+                if p.lower() in line.lower():
+                    return line
+
+    def _send(cmd):
+        proc.stdin.write(cmd + "\n")
+        proc.stdin.flush()
+
+    try:
+        # 1. Register the NoInputNoOutput agent
+        _send("agent NoInputNoOutput")
+        _wait_for(["Agent registered", "Agent is already registered"], step_timeout=5)
+
+        # 2. Promote it to default agent
+        _send("default-agent")
+        _wait_for(["Default agent request successful"], step_timeout=5)
+
+        # 3. Pair – wait for the result before doing anything else
+        _send(f"pair {mac}")
+        _wait_for(
+            [
+                "Pairing successful",
+                "Failed to pair",
+                "AuthenticationFailed",
+                "Authentication Failed",
+                "already paired",
+                "Not available",
+                "org.bluez.Error",
+            ],
+            step_timeout=timeout,
+        )
+
+        # 4. Clean exit only *after* pair result is in
+        _send("quit")
+        proc.stdin.close()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+
+        reader_thread.join(timeout=2)
+        return "".join(output_lines), proc.returncode
+
+    except Exception:
+        proc.kill()
+        reader_thread.join(timeout=2)
+        raise
 
 
 def get_bluetooth_paired():
@@ -2622,31 +2730,18 @@ def bluetooth_pair(mac):
     """Pair and connect a Bluetooth device by MAC address.
 
     - For Xbox / Microsoft BLE controllers the ``NoInputNoOutput`` agent is
-      used from the first attempt via ``bluetoothctl --agent NoInputNoOutput
-      pair <mac>``.  Using the default agent first causes an
-      ``AuthenticationFailed`` exchange that can make the controller exit
-      pairing mode or power off before a retry is possible.  Xbox controllers
-      must be in pairing mode (hold the Pair button on the back until the
-      Xbox button flashes rapidly).
+      used from the very first attempt via an interactive Popen session
+      (see :func:`_run_bt_interactive_pair`).  Using the default agent first
+      causes an ``AuthenticationFailed`` exchange that can make the controller
+      exit pairing mode or power off before a retry is possible.  Xbox
+      controllers must be in pairing mode (hold the Pair button on the back
+      until the Xbox button flashes rapidly).
     - For all other devices the default agent is tried first.  If that
       fails with ``AuthenticationFailed`` (common for devices that do not
       support passkey/PIN entry), the pair is retried with
-      ``bluetoothctl --agent NoInputNoOutput pair <mac>``.
+      :func:`_run_bt_interactive_pair`.
     - For Wii Remotes the connection sometimes fails on the first attempt;
       the function automatically retries the connect step after a short delay.
-
-    .. note::
-        We intentionally do **not** use a piped interactive ``bluetoothctl``
-        session (``subprocess.run(["bluetoothctl"], input="…")``) for the
-        ``pair`` step.  When all commands are written to stdin at once and the
-        pipe is closed, bluetoothctl reads ``quit`` from the already-buffered
-        pipe immediately after dispatching the ``pair`` D-Bus call and exits
-        before the pairing result returns.  The process exits with
-        ``returncode == 0`` (clean quit) even though pairing never completed,
-        which produces a false-positive success.  The non-interactive
-        ``bluetoothctl [--agent CAP] pair <mac>`` form blocks until the
-        pairing succeeds or fails, matching the behaviour of the reliable
-        Wiimote path.
     """
     if not _validate_bt_mac(mac):
         return {"error": "Invalid Bluetooth MAC address"}
@@ -2671,19 +2766,10 @@ def bluetooth_pair(mac):
         # default agent first causes an AuthenticationFailed response which
         # can make the controller exit pairing mode or power off before the
         # retry has a chance to run.
-        # Use the non-interactive "--agent" flag so the command blocks until
-        # pairing completes (same behaviour as the Wiimote path).
         if xbox:
-            pair_result = _run_bt(
-                "--agent", "NoInputNoOutput", "pair", mac,
-                timeout=BT_PAIR_TIMEOUT,
-            )
-            pair_out = (pair_result.stdout + pair_result.stderr).lower()
-            pair_ok = (
-                pair_result.returncode == 0
-                or "pairing successful" in pair_out
-                or "already paired" in pair_out
-            )
+            pair_out, _ = _run_bt_interactive_pair(mac, timeout=BT_PAIR_TIMEOUT)
+            pair_out = pair_out.lower()
+            pair_ok = "pairing successful" in pair_out or "already paired" in pair_out
         else:
             # First pair attempt using the default agent
             pair_result = _run_bt("pair", mac, timeout=BT_PAIR_TIMEOUT)
@@ -2695,24 +2781,19 @@ def bluetooth_pair(mac):
             )
 
             # If pairing failed with AuthenticationFailed (common for devices
-            # that require NoInputNoOutput agent), retry with the explicit
-            # --agent flag so the command blocks until pairing completes.
+            # that require NoInputNoOutput agent), retry with an interactive
+            # session that sets the agent before pairing.
             if not pair_ok and "authenticationfailed" in pair_out.replace(" ", ""):
-                retry_result = _run_bt(
-                    "--agent", "NoInputNoOutput", "pair", mac,
-                    timeout=BT_PAIR_TIMEOUT,
-                )
-                retry_out = (retry_result.stdout + retry_result.stderr).lower()
+                retry_out, _ = _run_bt_interactive_pair(mac, timeout=BT_PAIR_TIMEOUT)
+                retry_out = retry_out.lower()
                 pair_ok = (
-                    retry_result.returncode == 0
-                    or "pairing successful" in retry_out
+                    "pairing successful" in retry_out
                     or "already paired" in retry_out
                 )
                 if pair_ok:
                     pair_out = retry_out  # use retry output for subsequent checks
 
         if not pair_ok:
-            detail = (pair_result.stdout.strip() + "\n" + pair_result.stderr.strip()).strip()
             if "authenticationfailed" in pair_out.replace(" ", ""):
                 if xbox:
                     return {
@@ -2727,10 +2808,10 @@ def bluetooth_pair(mac):
                     "error": (
                         "Pairing failed (Authentication Failed). "
                         "Make sure the controller is in pairing mode and try again. "
-                        f"Detail: {detail}"
+                        f"Detail: {pair_out.strip()}"
                     )
                 }
-            return {"error": f"Pairing failed: {detail}"}
+            return {"error": f"Pairing failed: {pair_out.strip()}"}
 
         # Connect – first attempt
         conn_result = _run_bt("connect", mac, timeout=BT_CONNECT_TIMEOUT)
