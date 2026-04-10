@@ -10,6 +10,7 @@ import hmac
 import ipaddress
 import json
 import os
+import queue
 import re
 import secrets
 import shutil
@@ -2510,30 +2511,6 @@ BT_INFO_TIMEOUT    = 10  # info / trust / remove commands
 BT_CONNECT_RETRY_DELAY = 2  # seconds to wait before retrying a failed connection attempt
 BT_CONNECT_MAX_RETRIES = 5  # number of automatic retries after an initial failed connect
 
-# Link supervision timeout constants applied to active Bluetooth connections.
-BT_SUPERVISION_TIMEOUT_BREDR   = 4800  # 3 s in 0.625 ms BR/EDR slots
-BT_SUPERVISION_TIMEOUT_LE      = 300   # 3 s in 10 ms LE units
-
-# LE connection-update (lecup) interval bounds.  The maximum is deliberately
-# set to 800 (= 1000 ms) so that the LL_CONNECTION_UPDATE_REQ only changes
-# the supervision timeout without forcing controllers to switch to a shorter
-# connection interval.  A controller currently using, say, a 15 ms interval
-# will keep that interval because 15 ms is already within [7.5 ms, 1000 ms].
-# The original code used max = 12 (15 ms), which forced devices with longer
-# negotiated intervals to change, causing some LE controllers to drop the link.
-BT_SUPERVISION_LE_INTERVAL_MIN = 6     # 7.5 ms  – BLE-spec minimum
-BT_SUPERVISION_LE_INTERVAL_MAX = 800   # 1000 ms – permissive; keeps current interval
-BT_SUPERVISION_LE_LATENCY      = 0     # no slave latency
-
-# Seconds a Bluetooth device must be continuously connected before the
-# supervision timeout is applied.  Applying hcitool commands too soon
-# interferes with the HID reporting-mode handshake on BR/EDR controllers
-# (e.g. Wii Remotes) and with GATT service discovery on LE controllers
-# (e.g. Xbox Wireless Controller).  Sending LL_CONNECTION_UPDATE_REQ during
-# active GATT setup can cause LE controllers to reject the parameter update
-# and disconnect, even though bluetoothctl connect already returned success.
-BT_SUPERVISION_STABLE_PERIOD  = 5
-
 # Known RS-485 / serial adapter VID:PID → human-readable chip name.
 # Used by diag_usb_devices() to highlight adapters in the USB inspector.
 _USB_RS485_KNOWN = {
@@ -2579,21 +2556,114 @@ def _run_bt(*args, timeout=BT_INFO_TIMEOUT):
     )
 
 
-def _run_bt_piped(commands, timeout=BT_PAIR_TIMEOUT):
-    """Send a sequence of newline-separated commands to a single interactive
-    bluetoothctl session via stdin and return the CompletedProcess.
+def _run_bt_interactive_pair(mac, timeout=BT_PAIR_TIMEOUT):
+    """Pair a Bluetooth device using a NoInputNoOutput agent in an interactive
+    bluetoothctl session driven by :mod:`subprocess.Popen`.
 
-    This is required for operations that need the agent to be set within the
-    same session (e.g. Xbox controllers need ``agent NoInputNoOutput`` before
-    ``pair``).
+    Why not ``subprocess.run(["bluetoothctl"], input="…")``?
+    When all commands are fed to stdin at once and the pipe is closed,
+    bluetoothctl dispatches the ``pair`` D-Bus call and immediately reads
+    the next buffered line (``quit``), exiting before the pairing result
+    returns.  The process exits cleanly (``returncode == 0``) even though
+    pairing never completed — a false-positive.
+
+    Why not ``bluetoothctl --agent NoInputNoOutput pair <mac>``?
+    ``--agent`` is not a valid CLI flag for bluetoothctl; it is silently
+    ignored so the default agent is used, causing ``AuthenticationFailed``
+    for Xbox/BLE controllers.
+
+    This function uses :class:`subprocess.Popen` and a reader thread so
+    that each command is sent to stdin individually and the next command
+    is only written after the expected response has been received.  ``quit``
+    is therefore sent *after* the pair result arrives, not before.
+
+    Returns a ``(output, returncode)`` tuple where *output* is the combined
+    stdout/stderr text produced during the session.
     """
-    return subprocess.run(
+    line_q = queue.Queue()
+
+    proc = subprocess.Popen(
         ["bluetoothctl"],
-        input="\n".join(commands) + "\n",
-        capture_output=True, text=True, timeout=timeout,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1,
     )
 
+    output_lines = []
 
+    def _reader():
+        try:
+            for line in proc.stdout:
+                output_lines.append(line)
+                line_q.put(line)
+        finally:
+            line_q.put(None)  # sentinel – stdout closed
+
+    reader_thread = threading.Thread(target=_reader, daemon=True)
+    reader_thread.start()
+
+    def _wait_for(patterns, step_timeout):
+        """Read lines until one matches a pattern or the timeout expires."""
+        deadline = time.monotonic() + step_timeout
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return None
+            try:
+                line = line_q.get(timeout=min(remaining, 1.0))
+            except queue.Empty:
+                continue
+            if line is None:
+                return None
+            for p in patterns:
+                if p.lower() in line.lower():
+                    return line
+
+    def _send(cmd):
+        proc.stdin.write(cmd + "\n")
+        proc.stdin.flush()
+
+    try:
+        # 1. Register the NoInputNoOutput agent
+        _send("agent NoInputNoOutput")
+        _wait_for(["Agent registered", "Agent is already registered"], step_timeout=5)
+
+        # 2. Promote it to default agent
+        _send("default-agent")
+        _wait_for(["Default agent request successful"], step_timeout=5)
+
+        # 3. Pair – wait for the result before doing anything else
+        _send(f"pair {mac}")
+        _wait_for(
+            [
+                "Pairing successful",
+                "Failed to pair",
+                "AuthenticationFailed",
+                "Authentication Failed",
+                "already paired",
+                "Not available",
+                "org.bluez.Error",
+            ],
+            step_timeout=timeout,
+        )
+
+        # 4. Clean exit only *after* pair result is in
+        _send("quit")
+        proc.stdin.close()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+
+        reader_thread.join(timeout=2)
+        return "".join(output_lines), proc.returncode
+
+    except Exception:
+        proc.kill()
+        reader_thread.join(timeout=2)
+        raise
 
 
 def get_bluetooth_paired():
@@ -2659,13 +2729,19 @@ def bluetooth_scan():
 def bluetooth_pair(mac):
     """Pair and connect a Bluetooth device by MAC address.
 
+    - For Xbox / Microsoft BLE controllers the ``NoInputNoOutput`` agent is
+      used from the very first attempt via an interactive Popen session
+      (see :func:`_run_bt_interactive_pair`).  Using the default agent first
+      causes an ``AuthenticationFailed`` exchange that can make the controller
+      exit pairing mode or power off before a retry is possible.  Xbox
+      controllers must be in pairing mode (hold the Pair button on the back
+      until the Xbox button flashes rapidly).
+    - For all other devices the default agent is tried first.  If that
+      fails with ``AuthenticationFailed`` (common for devices that do not
+      support passkey/PIN entry), the pair is retried with
+      :func:`_run_bt_interactive_pair`.
     - For Wii Remotes the connection sometimes fails on the first attempt;
-      the function automatically retries once after a short delay.
-    - For Xbox Wireless Controllers (and any device that returns
-      AuthenticationFailed with the default agent), the function retries
-      using a ``NoInputNoOutput`` agent which tells BlueZ not to require
-      any PIN/passkey confirmation.  Xbox controllers must be in pairing
-      mode (hold the Pair button on the back until the Xbox button flashes).
+      the function automatically retries the connect step after a short delay.
     """
     if not _validate_bt_mac(mac):
         return {"error": "Invalid Bluetooth MAC address"}
@@ -2685,36 +2761,39 @@ def bluetooth_pair(mac):
         # Trust first so the device can auto-reconnect in future
         _run_bt("trust", mac)
 
-        # First pair attempt using the default agent
-        pair_result = _run_bt("pair", mac, timeout=BT_PAIR_TIMEOUT)
-        pair_out = (pair_result.stdout + pair_result.stderr).lower()
-        pair_ok = (
-            pair_result.returncode == 0
-            or "successful" in pair_out
-            or "already paired" in pair_out
-        )
-
-        # If pairing failed with AuthenticationFailed (common for Xbox
-        # controllers and other devices that require NoInputNoOutput agent),
-        # retry in a piped session with the appropriate agent set first.
-        if not pair_ok and "authenticationfailed" in pair_out.replace(" ", ""):
-            retry_result = _run_bt_piped([
-                "agent NoInputNoOutput",
-                "default-agent",
-                f"pair {mac}",
-                "quit",
-            ])
-            retry_out = (retry_result.stdout + retry_result.stderr).lower()
+        # Xbox (and other Microsoft) BLE controllers require the
+        # NoInputNoOutput agent from the very first pair attempt.  Using the
+        # default agent first causes an AuthenticationFailed response which
+        # can make the controller exit pairing mode or power off before the
+        # retry has a chance to run.
+        if xbox:
+            pair_out, _ = _run_bt_interactive_pair(mac, timeout=BT_PAIR_TIMEOUT)
+            pair_out = pair_out.lower()
+            pair_ok = "pairing successful" in pair_out or "already paired" in pair_out
+        else:
+            # First pair attempt using the default agent
+            pair_result = _run_bt("pair", mac, timeout=BT_PAIR_TIMEOUT)
+            pair_out = (pair_result.stdout + pair_result.stderr).lower()
             pair_ok = (
-                retry_result.returncode == 0
-                or "successful" in retry_out
-                or "already paired" in retry_out
+                pair_result.returncode == 0
+                or "pairing successful" in pair_out
+                or "already paired" in pair_out
             )
-            if pair_ok:
-                pair_out = retry_out  # use retry output for subsequent checks
+
+            # If pairing failed with AuthenticationFailed (common for devices
+            # that require NoInputNoOutput agent), retry with an interactive
+            # session that sets the agent before pairing.
+            if not pair_ok and "authenticationfailed" in pair_out.replace(" ", ""):
+                retry_out, _ = _run_bt_interactive_pair(mac, timeout=BT_PAIR_TIMEOUT)
+                retry_out = retry_out.lower()
+                pair_ok = (
+                    "pairing successful" in retry_out
+                    or "already paired" in retry_out
+                )
+                if pair_ok:
+                    pair_out = retry_out  # use retry output for subsequent checks
 
         if not pair_ok:
-            detail = (pair_result.stdout.strip() + "\n" + pair_result.stderr.strip()).strip()
             if "authenticationfailed" in pair_out.replace(" ", ""):
                 if xbox:
                     return {
@@ -2729,10 +2808,10 @@ def bluetooth_pair(mac):
                     "error": (
                         "Pairing failed (Authentication Failed). "
                         "Make sure the controller is in pairing mode and try again. "
-                        f"Detail: {detail}"
+                        f"Detail: {pair_out.strip()}"
                     )
                 }
-            return {"error": f"Pairing failed: {detail}"}
+            return {"error": f"Pairing failed: {pair_out.strip()}"}
 
         # Connect – first attempt
         conn_result = _run_bt("connect", mac, timeout=BT_CONNECT_TIMEOUT)
@@ -2786,6 +2865,37 @@ def bluetooth_remove(mac):
         return {"error": (result.stdout + result.stderr).strip()}
     except Exception as e:
         return {"error": str(e)}
+
+
+def bluetooth_remove_all():
+    """Remove (unpair) all currently paired Bluetooth devices.
+
+    Iterates the paired device list and calls ``bluetoothctl remove`` on each
+    one.  Returns ``{"ok": True, "removed": N}`` where N is the number of
+    devices successfully removed.  If some devices could not be removed, their
+    MACs are included in a ``"failed"`` list.  Returns ``{"error": ...}`` if
+    the paired-device list could not be retrieved.
+    """
+    paired = get_bluetooth_paired()
+    if "error" in paired:
+        return {"error": paired["error"]}
+    devices = paired.get("devices", [])
+    removed = 0
+    failed = []
+    for dev in devices:
+        try:
+            result = _run_bt("remove", dev["mac"])
+            out = (result.stdout + result.stderr).lower()
+            if result.returncode == 0 or "removed" in out:
+                removed += 1
+            else:
+                failed.append(dev["mac"])
+        except Exception:
+            failed.append(dev["mac"])
+    resp = {"ok": True, "removed": removed}
+    if failed:
+        resp["failed"] = failed
+    return resp
 
 
 def bluetooth_connect(mac):
@@ -2965,108 +3075,6 @@ def setup_usb_bluetooth():
         pass
 
     return {"ok": True, "output": output_lines}
-
-
-def set_bluetooth_supervision_timeout():
-    """Apply a 3-second BR/EDR link supervision timeout to active ACL connections.
-
-    Only BR/EDR (ACL) connections are updated via ``hcitool lst <address> 4800``
-    (4800 × 0.625 ms = 3 s).
-
-    LE connections use ``hcitool lecup <handle> … 300`` with a permissive
-    max connection interval of BT_SUPERVISION_LE_INTERVAL_MAX (1000 ms).
-    The wide interval range ensures the controller keeps its current interval;
-    only the supervision timeout is effectively changed.
-
-    Returns {"ok": True, "output": [...lines], "count": N} on success, or
-    {"ok": True, "partial": True, "output": [...lines]} if some connections
-    could not be updated, or {"error": ...} on a hard failure.
-    """
-    if not shutil.which("hcitool"):
-        return {"error": "hcitool not found. hcitool was removed from BlueZ >= 5.65 — the automatic background supervision timeout handles this instead."}
-
-    try:
-        r = subprocess.run(
-            ["hcitool", "con"],
-            capture_output=True, text=True, timeout=5,
-        )
-    except Exception as e:
-        return {"error": f"Failed to list connections: {e}"}
-
-    output_lines = []
-    failed = False
-    count = 0
-
-    for line in r.stdout.splitlines():
-        # Lines look like:
-        #   < ACL XX:XX:XX:XX:XX:XX handle N state 1 lm MASTER  (BR/EDR)
-        #   < LE  XX:XX:XX:XX:XX:XX handle N state 1 lm MASTER  (LE)
-        parts = line.split()
-        if len(parts) < 5 or parts[0] != '<' or "handle" not in parts:
-            continue
-        try:
-            handle_idx = parts.index("handle")
-            if handle_idx + 1 >= len(parts):
-                continue
-            conn_type = parts[1]   # "ACL" or "LE"
-            address   = parts[2]
-            handle    = parts[handle_idx + 1]
-        except (IndexError, ValueError):
-            continue
-
-        if not _validate_bt_mac(address):
-            output_lines.append(f"⚠ Skipping connection with unexpected address format: {address}")
-            continue
-
-        try:
-            if conn_type == "ACL":
-                sub = subprocess.run(
-                    ["hcitool", "lst", address, str(BT_SUPERVISION_TIMEOUT_BREDR)],
-                    capture_output=True, text=True, timeout=5,
-                )
-                if sub.returncode == 0:
-                    output_lines.append(
-                        f"✓ Set supervision timeout to 3 s for {address} (handle {handle}) [BR/EDR]"
-                    )
-                    count += 1
-                else:
-                    output_lines.append(
-                        f"✗ Failed for {address} [BR/EDR]: {(sub.stdout + sub.stderr).strip()}"
-                    )
-                    failed = True
-            elif conn_type == "LE":
-                sub = subprocess.run(
-                    ["hcitool", "lecup", handle,
-                     str(BT_SUPERVISION_LE_INTERVAL_MIN),
-                     str(BT_SUPERVISION_LE_INTERVAL_MAX),
-                     str(BT_SUPERVISION_LE_LATENCY),
-                     str(BT_SUPERVISION_TIMEOUT_LE)],
-                    capture_output=True, text=True, timeout=5,
-                )
-                if sub.returncode == 0:
-                    output_lines.append(
-                        f"✓ Set supervision timeout to 3 s for {address} (handle {handle}) [LE]"
-                    )
-                    count += 1
-                else:
-                    output_lines.append(
-                        f"✗ Failed for {address} [LE]: {(sub.stdout + sub.stderr).strip()}"
-                    )
-                    failed = True
-            else:
-                output_lines.append(
-                    f"⚠ Skipping unknown connection type '{conn_type}' for {address}"
-                )
-        except Exception as e:
-            output_lines.append(f"✗ Error processing {address}: {e}")
-            failed = True
-
-    if count == 0 and not failed:
-        output_lines.append("No active Bluetooth connections found.")
-
-    if failed:
-        return {"ok": True, "partial": True, "output": output_lines}
-    return {"ok": True, "output": output_lines, "count": count}
 
 
 class WebUIHandler(http.server.BaseHTTPRequestHandler):
@@ -3498,6 +3506,12 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
                 audit_log("BT remove", data.get("mac", ""), ip=self.client_address[0])
             self._json(result)
 
+        elif path == "/api/bluetooth/remove_all":
+            result = bluetooth_remove_all()
+            if result.get("ok"):
+                audit_log("BT remove all", f"{result.get('removed', 0)} device(s)", ip=self.client_address[0])
+            self._json(result)
+
         elif path == "/api/bluetooth/connect":
             try:
                 data = json.loads(body) if body else {}
@@ -3511,9 +3525,6 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
 
         elif path == "/api/bluetooth/setup_usb":
             self._json(setup_usb_bluetooth())
-
-        elif path == "/api/bluetooth/set_supervision_timeout":
-            self._json(set_bluetooth_supervision_timeout())
 
         elif path == "/api/webui/password":
             try:
@@ -3897,169 +3908,7 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
 # Entry point
 # ---------------------------------------------------------------------------
 
-def _apply_supervision_timeout_for_connection(conn_type, address, handle):
-    """Apply the link supervision timeout to a single Bluetooth connection.
-
-    For LE connections a valid HCI handle is required; ``hcitool lecup`` is
-    called with a deliberately permissive max connection interval
-    (BT_SUPERVISION_LE_INTERVAL_MAX = 1000 ms) so that the controller keeps
-    its current interval and only the supervision timeout is effectively
-    extended.  This avoids the controller-level disconnection that occurred
-    with the original aggressive 15 ms max interval.
-
-    For BR/EDR (ACL) connections ``hcitool lst <address>`` is used.
-
-    Returns True on success, False on failure or when parameters are unusable.
-    """
-    try:
-        if conn_type == "LE":
-            if not handle or handle == "?":
-                return False  # Cannot update without a valid HCI handle.
-            sub = subprocess.run(
-                ["hcitool", "lecup", handle,
-                 str(BT_SUPERVISION_LE_INTERVAL_MIN),
-                 str(BT_SUPERVISION_LE_INTERVAL_MAX),
-                 str(BT_SUPERVISION_LE_LATENCY),
-                 str(BT_SUPERVISION_TIMEOUT_LE)],
-                capture_output=True, text=True, timeout=5,
-            )
-            if sub.returncode == 0:
-                print(f"[webui] BT supervision: set 3 s timeout for {address} (handle {handle}) [LE]", flush=True)
-                return True
-            else:
-                print(f"[webui] BT supervision: failed for {address} [LE]: {(sub.stdout + sub.stderr).strip()}", flush=True)
-        else:
-            # ACL (BR/EDR): hcitool lst takes the device address directly.
-            sub = subprocess.run(
-                ["hcitool", "lst", address, str(BT_SUPERVISION_TIMEOUT_BREDR)],
-                capture_output=True, text=True, timeout=5,
-            )
-            if sub.returncode == 0:
-                handle_info = f" (handle {handle})" if handle and handle != "?" else ""
-                print(f"[webui] BT supervision: set 3 s timeout for {address}{handle_info} [BR/EDR]", flush=True)
-                return True
-            else:
-                print(f"[webui] BT supervision: failed for {address} [BR/EDR]: {(sub.stdout + sub.stderr).strip()}", flush=True)
-    except Exception as e:
-        print(f"[webui] BT supervision: error processing {address}: {e}", flush=True)
-    return False
-
-
-def _hcitool_connection_info():
-    """Return a dict mapping Bluetooth address → (conn_type, handle) from
-    ``hcitool con``.
-
-    This is a best-effort call; an empty dict is returned on any failure so
-    that callers can fall back gracefully.
-    """
-    info = {}
-    if not shutil.which("hcitool"):
-        return info
-    try:
-        r = subprocess.run(
-            ["hcitool", "con"],
-            capture_output=True, text=True, timeout=5,
-        )
-        for line in r.stdout.splitlines():
-            parts = line.split()
-            # Minimum valid line: "< ACL/LE <address> handle <N>" = 5 tokens
-            if len(parts) < 5 or parts[0] != '<' or "handle" not in parts:
-                continue
-            try:
-                handle_idx = parts.index("handle")
-                if handle_idx + 1 >= len(parts):
-                    continue
-                conn_type = parts[1]
-                address   = parts[2]
-                handle    = parts[handle_idx + 1]
-            except (IndexError, ValueError):
-                continue
-            if _validate_bt_mac(address):
-                info[address] = (conn_type, handle)
-    except Exception:
-        pass
-    return info
-
-
-def _supervision_timeout_loop():
-    """Background thread: watch for new Bluetooth connections and apply the
-    3-second link supervision timeout.
-
-    Both **LE connections** (e.g. Xbox Wireless Controller) and **BR/EDR
-    connections** (e.g. Wii Remote) are processed only after
-    BT_SUPERVISION_STABLE_PERIOD seconds of continuous connection.
-
-    Applying supervision commands too soon interferes with the HID
-    reporting-mode handshake on BR/EDR controllers and with GATT service
-    discovery on LE controllers.  In particular, sending
-    ``LL_CONNECTION_UPDATE_REQ`` (via ``hcitool lecup``) during active GATT
-    setup causes some LE controllers (e.g. Xbox Wireless Controller) to reject
-    the parameter update and disconnect, even though ``bluetoothctl connect``
-    already returned success.  Waiting for BT_SUPERVISION_STABLE_PERIOD ensures
-    GATT is complete before the supervision timeout is adjusted.
-
-    The ``first_seen`` dict tracks when each address was first observed as
-    connected.  Disconnected devices are pruned from both ``first_seen`` and
-    ``seen`` so that a subsequent reconnect restarts the timing from scratch.
-
-    ``hcitool`` was removed from BlueZ >= 5.65.  The loop runs regardless; if
-    ``hcitool`` is absent, supervision commands silently no-op.
-    """
-    if not shutil.which("bluetoothctl"):
-        return
-
-    # Addresses whose supervision timeout has already been applied.
-    seen = set()
-    # Addresses first observed as connected; maps address -> monotonic timestamp.
-    first_seen = {}
-
-    while True:
-        try:
-            r = subprocess.run(
-                ["bluetoothctl", "devices", "Connected"],
-                capture_output=True, text=True, timeout=5,
-            )
-            current = set()
-            for line in r.stdout.splitlines():
-                m = _BT_DEVICE_RE.match(line.strip())
-                if not m:
-                    continue
-                address = m.group(1)
-                if _validate_bt_mac(address):
-                    current.add(address)
-
-            now = time.monotonic()
-
-            # Record first-seen time for devices that just appeared.
-            for address in current - seen - set(first_seen):
-                first_seen[address] = now
-
-            # Process all connections that have not yet been handled.
-            pending = {a for a in current if a in first_seen and a not in seen}
-            if pending:
-                hci_info = _hcitool_connection_info() if shutil.which("hcitool") else {}
-                for address in pending:
-                    conn_type, handle = hci_info.get(address, ("ACL", "?"))
-                    age = now - first_seen[address]
-
-                    if age >= BT_SUPERVISION_STABLE_PERIOD:
-                        if hci_info and address not in hci_info:
-                            print(f"[webui] BT supervision: no HCI info for {address}, assuming BR/EDR", flush=True)
-                        _apply_supervision_timeout_for_connection(conn_type, address, handle)
-                        seen.add(address)
-                    # else: not yet at stable period; check next tick.
-
-            # Forget disconnected devices so reconnects are processed from scratch.
-            seen &= current
-            first_seen = {a: t for a, t in first_seen.items() if a in current}
-        except Exception as e:
-            print(f"[webui] WARNING: BT supervision watch error: {e}", flush=True)
-        time.sleep(1)
-
-
 def main():
-    t = threading.Thread(target=_supervision_timeout_loop, daemon=True)
-    t.start()
     server = http.server.ThreadingHTTPServer(("0.0.0.0", WEBUI_PORT), WebUIHandler)
     print(f"ModernJVS WebUI running on http://0.0.0.0:{WEBUI_PORT}")
     try:

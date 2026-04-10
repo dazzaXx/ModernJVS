@@ -12,7 +12,10 @@ function showTab(name, btn) {
   if (name === 'config') loadConfig();
   if (name === 'profiles') loadProfiles();
   if (name === 'devices') { loadDevices(); loadBluetoothSection(); populateInputTesterDevices(); }
-  if (name !== 'devices') stopInputTest(); // stop streaming when leaving the Devices tab
+  if (name !== 'devices') {
+    stopInputTest(); // stop streaming when leaving the Devices tab
+    clearBluetoothScanResults(); // discard stale scan list when leaving the Devices tab
+  }
   if (name !== 'diagnostics') cancelDiagTests(); // abort any in-flight diag tests when leaving
   if (name === 'diagnostics') loadDiagnostics();
   if (name === 'webui-settings') { initAppearancePanel(); loadSessions(); }
@@ -789,6 +792,12 @@ function _escHtml(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }
 
+function clearBluetoothScanResults() {
+  document.getElementById('btScanTable').style.display = 'none';
+  document.getElementById('btScanBody').innerHTML = '';
+  document.getElementById('btScanStatus').textContent = '';
+}
+
 async function loadBluetoothSection() {
   const banner    = document.getElementById('btStatusBanner');
   const paired    = document.getElementById('btPairedSection');
@@ -799,6 +808,8 @@ async function loadBluetoothSection() {
   banner.innerHTML = '';
   paired.style.display = '';
   scanSect.style.display = '';
+  // Always reset scan results when (re-)entering the section
+  clearBluetoothScanResults();
 
   const s = await api('/api/bluetooth/status');
 
@@ -971,13 +982,12 @@ async function btPair(mac, name, btn) {
     showAlert('btAlert', '✓ ' + (d.name || name) + ' paired and connected successfully.', false);
   }
   // Clear the scan results so the list doesn't linger after a successful pair
-  const scanTable = document.getElementById('btScanTable');
-  const scanBody  = document.getElementById('btScanBody');
-  const scanStatus = document.getElementById('btScanStatus');
-  if (scanTable)  { scanTable.style.display = 'none'; }
-  if (scanBody)   { scanBody.innerHTML = ''; }
-  if (scanStatus) { scanStatus.textContent = ''; }
+  clearBluetoothScanResults();
   await loadBluetoothPaired();
+  // BlueZ may not update its paired-device list immediately after BLE bonding;
+  // schedule a second refresh so the device appears even if the first query
+  // ran before BlueZ committed the pairing to its device database.
+  setTimeout(loadBluetoothPaired, 2000);
 }
 
 async function btRemove(mac, btn) {
@@ -998,6 +1008,31 @@ async function btRemove(mac, btn) {
   showAlert('btAlert', '✓ Device removed successfully.', false);
   await loadBluetoothPaired();
 }
+async function btRemoveAll(btn) {
+  if (!confirm('Remove ALL paired Bluetooth devices? This cannot be undone.')) return;
+  btn.disabled = true;
+  btn.textContent = 'Removing…';
+
+  const d = await api('/api/bluetooth/remove_all', {method: 'POST'});
+
+  btn.disabled = false;
+  btn.textContent = '✕ Clear All Paired Devices';
+  if (d.error) {
+    showAlert('btAlert', 'Error clearing paired devices: ' + d.error, true);
+    return;
+  }
+  const removed = d.removed || 0;
+  const failed  = d.failed  || [];
+  if (failed.length > 0) {
+    showAlert('btAlert', `✓ Removed ${removed} device${removed === 1 ? '' : 's'}; could not remove: ${failed.join(', ')}`, true);
+  } else {
+    showAlert('btAlert', removed > 0
+      ? `✓ Removed ${removed} paired device${removed === 1 ? '' : 's'}.`
+      : '✓ No paired devices to remove.', false);
+  }
+  await loadBluetoothPaired();
+}
+
 async function btConnect(mac, btn) {
   btn.disabled = true;
   btn.textContent = 'Connecting…';
@@ -1639,6 +1674,28 @@ async function loadUsbDevices() {
   }).join('');
 }
 
+// ---- Connected input device poller ----
+// Tracks a fingerprint of the /dev/input/event* list so the Devices tab
+// refreshes automatically when controllers are plugged in or removed.
+let _inputDeviceKey = null;
+
+async function pollInputDevices() {
+  const d = await api('/api/input_devices');
+  if (d.error) return;
+  const key = (d.devices || []).map(x => x.event).join(',');
+  if (_inputDeviceKey === null) {
+    _inputDeviceKey = key; // initialise without triggering a refresh
+    return;
+  }
+  if (key !== _inputDeviceKey) {
+    _inputDeviceKey = key;
+    if (document.getElementById('panel-devices').classList.contains('active')) {
+      loadDevices();
+      populateInputTesterDevices();
+    }
+  }
+}
+
 // ---- Init ----
 // Fetch appearance settings from the server and apply them before first render.
 // Falls back to sensible defaults if the server hasn't stored any yet.
@@ -1649,6 +1706,7 @@ refreshDashboard();
 refreshSysinfo();
 setInterval(refreshDashboard, 2000);
 setInterval(refreshSysinfo, 5000);
+setInterval(pollInputDevices, 3000);
 
 // Fetch version once and show in header badge (desktop) and footer (mobile)
 api('/api/version').then(d => {
