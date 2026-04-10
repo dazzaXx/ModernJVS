@@ -984,6 +984,10 @@ async function btPair(mac, name, btn) {
   // Clear the scan results so the list doesn't linger after a successful pair
   clearBluetoothScanResults();
   await loadBluetoothPaired();
+  // BlueZ may not update its paired-device list immediately after BLE bonding;
+  // schedule a second refresh so the device appears even if the first query
+  // ran before BlueZ committed the pairing to its device database.
+  setTimeout(loadBluetoothPaired, 2000);
 }
 
 async function btRemove(mac, btn) {
