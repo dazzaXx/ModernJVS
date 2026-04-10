@@ -1670,6 +1670,28 @@ async function loadUsbDevices() {
   }).join('');
 }
 
+// ---- Connected input device poller ----
+// Tracks a fingerprint of the /dev/input/event* list so the Devices tab
+// refreshes automatically when controllers are plugged in or removed.
+let _inputDeviceKey = null;
+
+async function pollInputDevices() {
+  const d = await api('/api/input_devices');
+  if (d.error) return;
+  const key = (d.devices || []).map(x => x.event).join(',');
+  if (_inputDeviceKey === null) {
+    _inputDeviceKey = key; // initialise without triggering a refresh
+    return;
+  }
+  if (key !== _inputDeviceKey) {
+    _inputDeviceKey = key;
+    if (document.getElementById('panel-devices').classList.contains('active')) {
+      loadDevices();
+      populateInputTesterDevices();
+    }
+  }
+}
+
 // ---- Init ----
 // Fetch appearance settings from the server and apply them before first render.
 // Falls back to sensible defaults if the server hasn't stored any yet.
@@ -1680,6 +1702,7 @@ refreshDashboard();
 refreshSysinfo();
 setInterval(refreshDashboard, 2000);
 setInterval(refreshSysinfo, 5000);
+setInterval(pollInputDevices, 3000);
 
 // Fetch version once and show in header badge (desktop) and footer (mobile)
 api('/api/version').then(d => {
