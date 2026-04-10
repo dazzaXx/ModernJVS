@@ -2679,9 +2679,13 @@ def bluetooth_pair(mac):
                 "quit",
             ])
             pair_out = (pair_result.stdout + pair_result.stderr).lower()
+            # NOTE: use "pairing successful" not just "successful" – the
+            # interactive bluetoothctl session also emits "Default agent
+            # request successful" for the agent registration step, which would
+            # cause a false-positive match before the pair command runs.
             pair_ok = (
                 pair_result.returncode == 0
-                or "successful" in pair_out
+                or "pairing successful" in pair_out
                 or "already paired" in pair_out
             )
         else:
@@ -2690,7 +2694,7 @@ def bluetooth_pair(mac):
             pair_out = (pair_result.stdout + pair_result.stderr).lower()
             pair_ok = (
                 pair_result.returncode == 0
-                or "successful" in pair_out
+                or "pairing successful" in pair_out
                 or "already paired" in pair_out
             )
 
@@ -2707,7 +2711,7 @@ def bluetooth_pair(mac):
                 retry_out = (retry_result.stdout + retry_result.stderr).lower()
                 pair_ok = (
                     retry_result.returncode == 0
-                    or "successful" in retry_out
+                    or "pairing successful" in retry_out
                     or "already paired" in retry_out
                 )
                 if pair_ok:
