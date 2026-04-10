@@ -12,7 +12,16 @@ function showTab(name, btn) {
   if (name === 'config') loadConfig();
   if (name === 'profiles') loadProfiles();
   if (name === 'devices') { loadDevices(); loadBluetoothSection(); populateInputTesterDevices(); }
-  if (name !== 'devices') stopInputTest(); // stop streaming when leaving the Devices tab
+  if (name !== 'devices') {
+    stopInputTest(); // stop streaming when leaving the Devices tab
+    // Clear the Bluetooth scan results so stale device lists don't persist
+    const scanTable  = document.getElementById('btScanTable');
+    const scanBody   = document.getElementById('btScanBody');
+    const scanStatus = document.getElementById('btScanStatus');
+    if (scanTable)  { scanTable.style.display = 'none'; }
+    if (scanBody)   { scanBody.innerHTML = ''; }
+    if (scanStatus) { scanStatus.textContent = ''; }
+  }
   if (name !== 'diagnostics') cancelDiagTests(); // abort any in-flight diag tests when leaving
   if (name === 'diagnostics') loadDiagnostics();
   if (name === 'webui-settings') { initAppearancePanel(); loadSessions(); }
@@ -998,6 +1007,26 @@ async function btRemove(mac, btn) {
   showAlert('btAlert', '✓ Device removed successfully.', false);
   await loadBluetoothPaired();
 }
+async function btRemoveAll(btn) {
+  if (!confirm('Remove ALL paired Bluetooth devices? This cannot be undone.')) return;
+  btn.disabled = true;
+  btn.textContent = 'Removing…';
+
+  const d = await api('/api/bluetooth/remove_all', {method: 'POST'});
+
+  btn.disabled = false;
+  btn.textContent = '✕ Clear All Paired Devices';
+  if (d.error) {
+    showAlert('btAlert', 'Error clearing paired devices: ' + d.error, true);
+    return;
+  }
+  const removed = d.removed || 0;
+  showAlert('btAlert', removed > 0
+    ? `✓ Removed ${removed} paired device${removed === 1 ? '' : 's'}.`
+    : '✓ No paired devices to remove.', false);
+  await loadBluetoothPaired();
+}
+
 async function btConnect(mac, btn) {
   btn.disabled = true;
   btn.textContent = 'Connecting…';

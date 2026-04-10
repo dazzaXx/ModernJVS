@@ -2788,6 +2788,30 @@ def bluetooth_remove(mac):
         return {"error": str(e)}
 
 
+def bluetooth_remove_all():
+    """Remove (unpair) all currently paired Bluetooth devices.
+
+    Iterates the paired device list and calls ``bluetoothctl remove`` on each
+    one.  Returns ``{"ok": True, "removed": N}`` where N is the number of
+    devices successfully removed, or ``{"error": ...}`` if the paired-device
+    list could not be retrieved.
+    """
+    paired = get_bluetooth_paired()
+    if "error" in paired:
+        return {"error": paired["error"]}
+    devices = paired.get("devices", [])
+    removed = 0
+    for dev in devices:
+        try:
+            result = _run_bt("remove", dev["mac"])
+            out = (result.stdout + result.stderr).lower()
+            if result.returncode == 0 or "removed" in out:
+                removed += 1
+        except Exception:
+            pass
+    return {"ok": True, "removed": removed}
+
+
 def bluetooth_connect(mac):
     """Connect to an already-paired Bluetooth device by MAC address.
 
@@ -3496,6 +3520,12 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
             result = bluetooth_remove(data.get("mac", ""))
             if result.get("ok"):
                 audit_log("BT remove", data.get("mac", ""), ip=self.client_address[0])
+            self._json(result)
+
+        elif path == "/api/bluetooth/remove_all":
+            result = bluetooth_remove_all()
+            if result.get("ok"):
+                audit_log("BT remove all", f"{result.get('removed', 0)} device(s)", ip=self.client_address[0])
             self._json(result)
 
         elif path == "/api/bluetooth/connect":
