@@ -2943,6 +2943,14 @@ def _check_ble_le_params():
             lines = f.readlines()
     except OSError:
         return False
+    # Pre-compile one pattern per key so the regex is not rebuilt every iteration.
+    check_patterns = {
+        key: re.compile(
+            rf'^{re.escape(key)}\s*=\s*{re.escape(str(val))}\s*$',
+            re.IGNORECASE,
+        )
+        for key, val in _BT_LE_DESIRED.items()
+    }
     in_le = False
     found = set()
     for line in lines:
@@ -2952,11 +2960,8 @@ def _check_ble_le_params():
             continue
         if not in_le:
             continue
-        for key, val in _BT_LE_DESIRED.items():
-            if re.match(
-                rf'^{re.escape(key)}\s*=\s*{re.escape(str(val))}\s*$',
-                stripped, re.IGNORECASE,
-            ):
+        for key, pat in check_patterns.items():
+            if pat.match(stripped):
                 found.add(key)
     return found == set(_BT_LE_DESIRED)
 
@@ -2986,6 +2991,13 @@ def configure_ble_le_params():
     except OSError as e:
         return {"error": f"Could not read {_BT_MAIN_CONF_PATH}: {e}"}
 
+    # Pre-compile a key-prefix pattern for each target key so the regex is not
+    # rebuilt on every line of the configuration file.
+    key_patterns = {
+        key: re.compile(rf'^{re.escape(key)}\s*=', re.IGNORECASE)
+        for key in _BT_LE_DESIRED
+    }
+
     new_lines = []
     in_le_section = False
     le_section_found = False
@@ -3013,12 +3025,9 @@ def configure_ble_le_params():
             # Check whether this line (active or commented-out) is one of our keys.
             bare = stripped.lstrip("#").lstrip(";").strip()
             matched = False
-            for key, val in _BT_LE_DESIRED.items():
-                if re.match(
-                    rf'^{re.escape(key)}\s*=',
-                    bare, re.IGNORECASE,
-                ):
-                    new_lines.append(f"{key} = {val}\n")
+            for key, pat in key_patterns.items():
+                if pat.match(bare):
+                    new_lines.append(f"{key} = {_BT_LE_DESIRED[key]}\n")
                     keys_written.add(key)
                     matched = True
                     break
@@ -3034,7 +3043,11 @@ def configure_ble_le_params():
                 new_lines.append(f"{key} = {val}\n")
                 keys_written.add(key)
 
-    # No [LE] section found at all – append one
+    # No [LE] section found at all – append one.
+    # The leading "\n" in "\n[LE]\n" ensures the section is separated from the
+    # preceding content by a blank line regardless of whether the file already
+    # ends with a newline character (the guard below covers the edge case where
+    # the last line has no trailing newline, keeping exactly one blank line).
     if not le_section_found:
         if new_lines and not new_lines[-1].endswith("\n"):
             new_lines.append("\n")
@@ -4229,6 +4242,9 @@ def _supervision_timeout_loop():
 
                     if age >= BT_SUPERVISION_STABLE_PERIOD:
                         if hcitool_present:
+                            # hci_info may be empty if _hcitool_connection_info()
+                            # failed (e.g. hcitool returned an error).  In that
+                            # case assume BR/EDR so the safer lst command is tried.
                             if hci_info and address not in hci_info:
                                 print(f"[webui] BT supervision: no HCI info for {address}, assuming BR/EDR", flush=True)
                             _apply_supervision_timeout_for_connection(conn_type, address, handle)

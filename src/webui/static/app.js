@@ -790,16 +790,16 @@ function _escHtml(s) {
 }
 
 async function loadBluetoothSection() {
-  const banner    = document.getElementById('btStatusBanner');
-  const lesBanner = document.getElementById('btLeParamsBanner');
-  const paired    = document.getElementById('btPairedSection');
-  const scanSect  = document.getElementById('btScanSection');
+  const banner         = document.getElementById('btStatusBanner');
+  const leParamsBanner = document.getElementById('btLeParamsBanner');
+  const paired         = document.getElementById('btPairedSection');
+  const scanSect       = document.getElementById('btScanSection');
 
   // Reset banners and show normal sections initially
   banner.style.display = 'none';
   banner.innerHTML = '';
-  lesBanner.style.display = 'none';
-  lesBanner.innerHTML = '';
+  leParamsBanner.style.display = 'none';
+  leParamsBanner.innerHTML = '';
   paired.style.display = '';
   scanSect.style.display = '';
 
@@ -823,13 +823,13 @@ async function loadBluetoothSection() {
     // disconnecting immediately after pairing due to aggressive BlueZ defaults.
     if (!s.le_params_configured) {
       const configBtn = '<button class="btn btn-xs" style="margin-left:0.5rem;vertical-align:middle;" onclick="btConfigureLE()">&#x2699;&#xFE0F; Configure LE Parameters</button>';
-      lesBanner.innerHTML = (
+      leParamsBanner.innerHTML = (
         '&#x26A0; Bluetooth LE connection parameters are not configured. '
         + 'Xbox One S and other Bluetooth LE controllers may disconnect immediately '
         + 'after pairing without them. ' + configBtn
       );
-      lesBanner.className = 'alert err';
-      lesBanner.style.display = 'block';
+      leParamsBanner.className = 'alert err';
+      leParamsBanner.style.display = 'block';
     }
     await loadBluetoothPaired();
     return;
@@ -870,10 +870,10 @@ async function loadBluetoothSection() {
 }
 
 async function btConfigureLE() {
-  const lesBanner = document.getElementById('btLeParamsBanner');
-  lesBanner.innerHTML = '⏳ Configuring LE parameters…';
-  lesBanner.className = 'alert ok';
-  lesBanner.style.display = 'block';
+  const leParamsBanner = document.getElementById('btLeParamsBanner');
+  leParamsBanner.innerHTML = '⏳ Configuring LE parameters…';
+  leParamsBanner.className = 'alert ok';
+  leParamsBanner.style.display = 'block';
 
   document.querySelectorAll('[onclick="btConfigureLE()"]').forEach(b => { b.disabled = true; });
 
@@ -882,15 +882,14 @@ async function btConfigureLE() {
   document.querySelectorAll('[onclick="btConfigureLE()"]').forEach(b => { b.disabled = false; });
 
   if (d.error) {
-    lesBanner.innerHTML = '✗ LE configuration failed: ' + _escHtml(d.error);
-    lesBanner.className = 'alert err';
+    leParamsBanner.innerHTML = '✗ LE configuration failed: ' + _escHtml(d.error);
+    leParamsBanner.className = 'alert err';
     return;
   }
 
-  const lines = (d.output || []).join('\n');
-  lesBanner.innerText = '✓ LE parameters configured.\n\n' + lines;
-  lesBanner.className = 'alert ok';
-  lesBanner.style.whiteSpace = 'pre-wrap';
+  leParamsBanner.innerText = '✓ LE parameters configured.\n\n' + (d.output || []).join('\n');
+  leParamsBanner.className = 'alert ok';
+  leParamsBanner.style.whiteSpace = 'pre-wrap';
   setTimeout(() => loadBluetoothSection(), 1500);
 }
 
