@@ -14,13 +14,7 @@ function showTab(name, btn) {
   if (name === 'devices') { loadDevices(); loadBluetoothSection(); populateInputTesterDevices(); }
   if (name !== 'devices') {
     stopInputTest(); // stop streaming when leaving the Devices tab
-    // Clear the Bluetooth scan results so stale device lists don't persist
-    const scanTable  = document.getElementById('btScanTable');
-    const scanBody   = document.getElementById('btScanBody');
-    const scanStatus = document.getElementById('btScanStatus');
-    if (scanTable)  { scanTable.style.display = 'none'; }
-    if (scanBody)   { scanBody.innerHTML = ''; }
-    if (scanStatus) { scanStatus.textContent = ''; }
+    clearBluetoothScanResults(); // discard stale scan list when leaving the Devices tab
   }
   if (name !== 'diagnostics') cancelDiagTests(); // abort any in-flight diag tests when leaving
   if (name === 'diagnostics') loadDiagnostics();
@@ -798,6 +792,12 @@ function _escHtml(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }
 
+function clearBluetoothScanResults() {
+  document.getElementById('btScanTable').style.display = 'none';
+  document.getElementById('btScanBody').innerHTML = '';
+  document.getElementById('btScanStatus').textContent = '';
+}
+
 async function loadBluetoothSection() {
   const banner    = document.getElementById('btStatusBanner');
   const paired    = document.getElementById('btPairedSection');
@@ -980,12 +980,7 @@ async function btPair(mac, name, btn) {
     showAlert('btAlert', '✓ ' + (d.name || name) + ' paired and connected successfully.', false);
   }
   // Clear the scan results so the list doesn't linger after a successful pair
-  const scanTable = document.getElementById('btScanTable');
-  const scanBody  = document.getElementById('btScanBody');
-  const scanStatus = document.getElementById('btScanStatus');
-  if (scanTable)  { scanTable.style.display = 'none'; }
-  if (scanBody)   { scanBody.innerHTML = ''; }
-  if (scanStatus) { scanStatus.textContent = ''; }
+  clearBluetoothScanResults();
   await loadBluetoothPaired();
 }
 
@@ -1021,9 +1016,14 @@ async function btRemoveAll(btn) {
     return;
   }
   const removed = d.removed || 0;
-  showAlert('btAlert', removed > 0
-    ? `✓ Removed ${removed} paired device${removed === 1 ? '' : 's'}.`
-    : '✓ No paired devices to remove.', false);
+  const failed  = d.failed  || [];
+  if (failed.length > 0) {
+    showAlert('btAlert', `✓ Removed ${removed} device${removed === 1 ? '' : 's'}; could not remove: ${failed.join(', ')}`, true);
+  } else {
+    showAlert('btAlert', removed > 0
+      ? `✓ Removed ${removed} paired device${removed === 1 ? '' : 's'}.`
+      : '✓ No paired devices to remove.', false);
+  }
   await loadBluetoothPaired();
 }
 

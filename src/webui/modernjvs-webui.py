@@ -2793,23 +2793,30 @@ def bluetooth_remove_all():
 
     Iterates the paired device list and calls ``bluetoothctl remove`` on each
     one.  Returns ``{"ok": True, "removed": N}`` where N is the number of
-    devices successfully removed, or ``{"error": ...}`` if the paired-device
-    list could not be retrieved.
+    devices successfully removed.  If some devices could not be removed, their
+    MACs are included in a ``"failed"`` list.  Returns ``{"error": ...}`` if
+    the paired-device list could not be retrieved.
     """
     paired = get_bluetooth_paired()
     if "error" in paired:
         return {"error": paired["error"]}
     devices = paired.get("devices", [])
     removed = 0
+    failed = []
     for dev in devices:
         try:
             result = _run_bt("remove", dev["mac"])
             out = (result.stdout + result.stderr).lower()
             if result.returncode == 0 or "removed" in out:
                 removed += 1
+            else:
+                failed.append(dev["mac"])
         except Exception:
-            pass
-    return {"ok": True, "removed": removed}
+            failed.append(dev["mac"])
+    resp = {"ok": True, "removed": removed}
+    if failed:
+        resp["failed"] = failed
+    return resp
 
 
 def bluetooth_connect(mac):
