@@ -844,7 +844,16 @@ JVSStatus readPacket(JVSPacket *packet)
 			{
 				phase = 0;
 				dataIndex = 0;
-				index++;
+				/* Slide any bytes already received after this SYNC to the front of
+				 * the buffer so the 255-byte window never exhausts.  Without this,
+				 * noise before a valid SYNC fills the buffer and causes readBytes()
+				 * to be called with amount=0, spinning the outer loop indefinitely
+				 * while the serial fd stays ready. */
+				int remaining = bytesAvailable - (index + 1);
+				if (remaining > 0)
+					memmove(inputBuffer, inputBuffer + index + 1, (size_t)remaining);
+				bytesAvailable = (remaining > 0) ? remaining : 0;
+				index = 0;
 				continue;
 			}
 

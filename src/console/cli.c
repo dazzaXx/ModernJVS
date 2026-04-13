@@ -186,26 +186,28 @@ static JVSCLIStatus enableDevice(char *deviceName)
                 if (strcmp(dir->d_name, ".") == 0 || strcmp(dir->d_name, "..") == 0)
                     continue;
 
-                char gamePath[MAX_PATH_LENGTH];
-                int ret = snprintf(gamePath, sizeof(gamePath), "%s%s", DEFAULT_DEVICE_MAPPING_PATH, dir->d_name);
-                if (ret < 0 || ret >= (int)sizeof(gamePath))
+                /* Only process files that end in ".disabled" */
+                size_t nameLen = strlen(dir->d_name);
+                const char *disabledSuffix = ".disabled";
+                size_t suffixLen = strlen(disabledSuffix);
+                if (nameLen <= suffixLen ||
+                    strcmp(dir->d_name + nameLen - suffixLen, disabledSuffix) != 0)
                     continue;
 
-                char gamePathEnabled[MAX_PATH_LENGTH];
-                int len = snprintf(gamePathEnabled, sizeof(gamePathEnabled), "%s", gamePath);
-                if (len < 0 || len >= (int)sizeof(gamePathEnabled))
+                char devicePath[MAX_PATH_LENGTH];
+                int ret = snprintf(devicePath, sizeof(devicePath), "%s%s", DEFAULT_DEVICE_MAPPING_PATH, dir->d_name);
+                if (ret < 0 || ret >= (int)sizeof(devicePath))
                     continue;
 
-                for (int i = 0; i < len; i++)
-                {
-                    if (gamePathEnabled[i] == '.')
-                    {
-                        gamePathEnabled[i] = 0;
-                        break;
-                    }
-                }
+                /* Strip the ".disabled" suffix to get the enabled path */
+                char devicePathEnabled[MAX_PATH_LENGTH];
+                ret = snprintf(devicePathEnabled, sizeof(devicePathEnabled), "%s%.*s",
+                               DEFAULT_DEVICE_MAPPING_PATH,
+                               (int)(nameLen - suffixLen), dir->d_name);
+                if (ret < 0 || ret >= (int)sizeof(devicePathEnabled))
+                    continue;
 
-                rename(gamePath, gamePathEnabled);
+                rename(devicePath, devicePathEnabled);
             }
             closedir(d);
         }
