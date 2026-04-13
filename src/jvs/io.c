@@ -1,11 +1,14 @@
 #include <string.h>
 #include <math.h>
+#include <pthread.h>
 
 #include "jvs/io.h"
 #include "console/debug.h"
 
 int initIO(JVSIO *io)
 {
+	pthread_mutex_init(&io->stateMutex, NULL);
+
 	for (int player = 0; player < (io->capabilities.players + 1); player++)
 		io->state.inputSwitch[player] = 0;
 
@@ -33,6 +36,7 @@ int setSwitch(JVSIO *io, JVSPlayer player, JVSInput switchNumber, int value)
 		return 0;
 	}
 
+	pthread_mutex_lock(&io->stateMutex);
 	if (value)
 	{
 		io->state.inputSwitch[player] |= switchNumber;
@@ -41,6 +45,7 @@ int setSwitch(JVSIO *io, JVSPlayer player, JVSInput switchNumber, int value)
 	{
 		io->state.inputSwitch[player] &= ~switchNumber;
 	}
+	pthread_mutex_unlock(&io->stateMutex);
 
 	return 1;
 }
@@ -54,7 +59,9 @@ int incrementCoin(JVSIO *io, JVSPlayer player, int amount)
 	if (player - 1 >= io->capabilities.coins)
 		return 0;
 
+	pthread_mutex_lock(&io->stateMutex);
 	io->state.coinCount[player - 1] = io->state.coinCount[player - 1] + amount;
+	pthread_mutex_unlock(&io->stateMutex);
 	return 1;
 }
 
@@ -62,7 +69,9 @@ int setAnalogue(JVSIO *io, JVSInput channel, double value)
 {
 	if (channel >= io->capabilities.analogueInChannels)
 		return 0;
+	pthread_mutex_lock(&io->stateMutex);
 	io->state.analogueChannel[channel] = (int)((double)value * (double)io->analogueMax);
+	pthread_mutex_unlock(&io->stateMutex);
 	return 1;
 }
 
@@ -72,6 +81,7 @@ int setGun(JVSIO *io, JVSInput channel, double value)
 	if (channel >= io->capabilities.gunChannels * 2)
 		return 0;
 
+	pthread_mutex_lock(&io->stateMutex);
 	if (channel % 2 == 0)
 	{
 		io->state.gunChannel[channel] = (int)((double)value * (double)io->gunXMax);
@@ -80,6 +90,7 @@ int setGun(JVSIO *io, JVSInput channel, double value)
 	{
 		io->state.gunChannel[channel] = (int)((double)((double)1.0 - value) * (double)io->gunYMax);
 	}
+	pthread_mutex_unlock(&io->stateMutex);
 	return 1;
 }
 
@@ -88,7 +99,9 @@ int setRotary(JVSIO *io, JVSInput channel, int value)
 	if (channel >= io->capabilities.rotaryChannels)
 		return 0;
 
+	pthread_mutex_lock(&io->stateMutex);
 	io->state.rotaryChannel[channel] = value;
+	pthread_mutex_unlock(&io->stateMutex);
 	return 1;
 }
 

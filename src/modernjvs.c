@@ -4,6 +4,7 @@
 #include <unistd.h>
 #include <errno.h>
 #include <sys/stat.h>
+#include <pthread.h>
 
 #include "console/cli.h"
 #include "console/config.h"
@@ -40,6 +41,70 @@ static void writeTestModeState(int active)
     }
     fprintf(f, "%d", active);
     fclose(f);
+}
+
+typedef struct
+{
+    volatile int *running;
+    JVSIO *io;
+} JVSThreadArguments;
+
+/**
+ * Persistent JVS packet processing thread
+ *
+ * Runs independently of the controller hot-plug lifecycle so that
+ * JVS communication with the arcade machine is never interrupted
+ * while input threads are being stopped and restarted.
+ *
+ * @param _args Pointer to a heap-allocated JVSThreadArguments struct
+ *              (ownership is transferred; this thread frees it on exit).
+ * @returns NULL
+ */
+static void *jvsThread(void *_args)
+{
+    JVSThreadArguments *args = (JVSThreadArguments *)_args;
+    int lastTestButtonActive = 0;
+
+    while (*args->running != -1)
+    {
+        JVSStatus processingStatus = processPacket(args->io);
+
+        /* Apply software test-button state.
+         * Snapshot the volatile once so both the comparison and the
+         * setSwitch call operate on the same consistent value.
+         * When active, re-assert on every iteration so that a controller
+         * button mapped to BUTTON_TEST cannot override the software latch
+         * via its key-up event. */
+        int activeSnapshot = testButtonActive;
+        if (activeSnapshot != lastTestButtonActive)
+        {
+            lastTestButtonActive = activeSnapshot;
+            setSwitch(args->io, SYSTEM, BUTTON_TEST, activeSnapshot);
+            writeTestModeState(activeSnapshot);
+        }
+        else if (activeSnapshot)
+        {
+            setSwitch(args->io, SYSTEM, BUTTON_TEST, 1);
+        }
+
+        switch (processingStatus)
+        {
+        case JVS_STATUS_ERROR_CHECKSUM:
+            debug(0, "Error: A checksum error occurred (Expected if controllers hot-plugged)\n");
+            break;
+        case JVS_STATUS_ERROR_WRITE_FAIL:
+            debug(0, "Error: A write failure occurred\n");
+            break;
+        case JVS_STATUS_ERROR:
+            debug(0, "Error: A generic error occurred\n");
+            break;
+        default:
+            break;
+        }
+    }
+
+    free(args);
+    return NULL;
 }
 
 int main(int argc, char **argv)
@@ -108,6 +173,11 @@ int main(int argc, char **argv)
     JVSIO secondIO = {0};
     secondIO.deviceID = -1;    // -1 indicates no device ID assigned yet
     int jvsInitialized = 0;
+
+    /* The JVS processing thread runs for the lifetime of the program so that
+     * packet handling is never interrupted by controller hot-plug reinit.
+     * It is started once after initJVS() succeeds and joined on exit. */
+    pthread_t jvsThreadID = 0;
 
     JVSInputStatus lastInputState = JVS_INPUT_STATUS_SUCCESS;
     while (running != -1)
@@ -241,51 +311,34 @@ int main(int argc, char **argv)
             debug(0, "on %s.\n\n", config.devicePath);
 
             jvsInitialized = 1;
+
+            /* Start the persistent JVS processing thread now that the
+             * connection is initialised.  This thread runs for the entire
+             * lifetime of the program and is never stopped on hot-plug. */
+            JVSThreadArguments *jvsArgs = malloc(sizeof(JVSThreadArguments));
+            if (!jvsArgs)
+            {
+                debug(0, "Critical: Failed to malloc JVS thread arguments\n");
+                return EXIT_FAILURE;
+            }
+            jvsArgs->running = &running;
+            jvsArgs->io = &io;
+            if (pthread_create(&jvsThreadID, NULL, jvsThread, jvsArgs) != 0)
+            {
+                debug(0, "Critical: Could not start JVS processing thread\n");
+                free(jvsArgs);
+                return EXIT_FAILURE;
+            }
         }
         else
         {
             debug(1, "Reinitializing inputs while maintaining JVS connection...\n");
         }
 
-        /* Process packets forever */
-        JVSStatus processingStatus;
-        int lastTestButtonActive = 0;
+        /* Wait for a hot-plug event or shutdown signal.
+         * JVS packet processing continues uninterrupted in jvsThread. */
         while (running == 1)
-        {
-            processingStatus = processPacket(&io);
-
-            /* Apply software test-button state.
-             * Snapshot the volatile once so both the comparison and the
-             * setSwitch call operate on the same consistent value.
-             * When active, re-assert on every iteration so that a controller
-             * button mapped to BUTTON_TEST cannot override the software latch
-             * via its key-up event. */
-            int activeSnapshot = testButtonActive;
-            if (activeSnapshot != lastTestButtonActive)
-            {
-                lastTestButtonActive = activeSnapshot;
-                setSwitch(&io, SYSTEM, BUTTON_TEST, activeSnapshot);
-                writeTestModeState(activeSnapshot);
-            }
-            else if (activeSnapshot)
-            {
-                setSwitch(&io, SYSTEM, BUTTON_TEST, 1);
-            }
-            switch (processingStatus)
-            {
-            case JVS_STATUS_ERROR_CHECKSUM:
-                debug(0, "Error: A checksum error occurred (Expected if controllers hot-plugged)\n");
-                break;
-            case JVS_STATUS_ERROR_WRITE_FAIL:
-                debug(0, "Error: A write failure occurred\n");
-                break;
-            case JVS_STATUS_ERROR:
-                debug(0, "Error: A generic error occurred\n");
-                break;
-            default:
-                break;
-            }
-        }
+            usleep(10 * 1000);
 
         lastInputState = inputStatus;
         cleanup();
@@ -293,6 +346,10 @@ int main(int argc, char **argv)
 
     /* Remove the runtime state file now that the daemon is stopping. */
     unlink(TESTMODE_STATE_PATH);
+
+    /* Wait for the JVS processing thread to finish. */
+    if (jvsThreadID != 0)
+        pthread_join(jvsThreadID, NULL);
 
     /* Close the file pointer */
     if (!disconnectJVS())

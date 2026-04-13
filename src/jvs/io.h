@@ -3,6 +3,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <pthread.h>
 
 #define JVS_MAX_STATE_SIZE 100
 #define MAX_JVS_NAME_SIZE 2048
@@ -180,6 +181,7 @@ typedef struct JVSIO
     int gunXMax;
     int gunYMax;
     JVSState state;
+    pthread_mutex_t stateMutex; /* guards concurrent access to state */
     JVSCapabilities capabilities;
     struct JVSIO *chainedIO;
 } JVSIO;

@@ -3,6 +3,7 @@
 #include "console/debug.h"
 
 #include <time.h>
+#include <pthread.h>
 
 /* The in and out packets used to read and write to and from*/
 JVSPacket inputPacket, outputPacket;
@@ -386,6 +387,14 @@ JVSStatus processPacket(JVSIO *jvsIO)
 			size = 3;
 			debug(1, "CMD_READ_SWITCHES - Players: %d, Switches: %d\n", 
 				inputPacket.data[index + 1], inputPacket.data[index + 2]);
+
+			/* Snapshot switch state under the mutex so input threads cannot
+			 * write a partial update while we assemble the response. */
+			int switchSnapshot[JVS_MAX_STATE_SIZE];
+			pthread_mutex_lock(&jvsIO->stateMutex);
+			memcpy(switchSnapshot, jvsIO->state.inputSwitch, sizeof(jvsIO->state.inputSwitch));
+			pthread_mutex_unlock(&jvsIO->stateMutex);
+
 			// Bounds check before writing the 2-byte header (REPORT_SUCCESS + system switch byte)
 			if (outputPacket.length + 2 > JVS_MAX_PACKET_SIZE)
 			{
@@ -393,7 +402,7 @@ JVSStatus processPacket(JVSIO *jvsIO)
 				return JVS_STATUS_ERROR;
 			}
 			outputPacket.data[outputPacket.length] = REPORT_SUCCESS;
-			outputPacket.data[outputPacket.length + 1] = jvsIO->state.inputSwitch[0];
+			outputPacket.data[outputPacket.length + 1] = switchSnapshot[0];
 			outputPacket.length += 2;
 			for (int i = 0; i < inputPacket.data[index + 1]; i++)
 			{
@@ -412,7 +421,7 @@ JVSStatus processPacket(JVSIO *jvsIO)
 						debug(0, "Error: Output packet size exceeded in CMD_READ_SWITCHES\n");
 						return JVS_STATUS_ERROR;
 					}
-					outputPacket.data[outputPacket.length++] = jvsIO->state.inputSwitch[i + 1] >> (8 - (j * 8));
+					outputPacket.data[outputPacket.length++] = switchSnapshot[i + 1] >> (8 - (j * 8));
 				}
 			}
 		}
@@ -423,13 +432,21 @@ JVSStatus processPacket(JVSIO *jvsIO)
 			size = 2;
 			int numberCoinSlots = inputPacket.data[index + 1];
 			debug(1, "CMD_READ_COINS - Reading %d coin slot(s)\n", numberCoinSlots);
-			outputPacket.data[outputPacket.length++] = REPORT_SUCCESS;
 
 			if (numberCoinSlots > JVS_MAX_STATE_SIZE)
 			{
 				debug(0, "Error: Coin slot count %d exceeds maximum %d in CMD_READ_COINS\n", numberCoinSlots, JVS_MAX_STATE_SIZE);
 				return JVS_STATUS_ERROR;
 			}
+
+			/* Snapshot coin counts under the mutex. */
+			int coinSnapshot[JVS_MAX_STATE_SIZE];
+			pthread_mutex_lock(&jvsIO->stateMutex);
+			memcpy(coinSnapshot, jvsIO->state.coinCount, sizeof(jvsIO->state.coinCount));
+			pthread_mutex_unlock(&jvsIO->stateMutex);
+
+			outputPacket.data[outputPacket.length++] = REPORT_SUCCESS;
+
 			for (int i = 0; i < numberCoinSlots; i++)
 			{
 				// Bounds check to prevent buffer overflow
@@ -439,8 +456,8 @@ JVSStatus processPacket(JVSIO *jvsIO)
 					return JVS_STATUS_ERROR;
 				}
 				// Send coin count as 2 bytes (high byte with 5-bit limit, then low byte)
-				outputPacket.data[outputPacket.length] = (jvsIO->state.coinCount[i] >> 8) & 0x1F;
-				outputPacket.data[outputPacket.length + 1] = jvsIO->state.coinCount[i] & 0xFF;
+				outputPacket.data[outputPacket.length] = (coinSnapshot[i] >> 8) & 0x1F;
+				outputPacket.data[outputPacket.length + 1] = coinSnapshot[i] & 0xFF;
 				outputPacket.length += 2;
 			}
 		}
@@ -452,13 +469,20 @@ JVSStatus processPacket(JVSIO *jvsIO)
 			int numberChannels = inputPacket.data[index + 1];
 			debug(1, "CMD_READ_ANALOGS - Reading %d analog channel(s)\n", numberChannels);
 
-			outputPacket.data[outputPacket.length++] = REPORT_SUCCESS;
-
 			if (numberChannels > JVS_MAX_STATE_SIZE)
 			{
 				debug(0, "Error: Analogue channel count %d exceeds maximum %d in CMD_READ_ANALOGS\n", numberChannels, JVS_MAX_STATE_SIZE);
 				return JVS_STATUS_ERROR;
 			}
+
+			/* Snapshot analogue channel state under the mutex. */
+			int analogueSnapshot[JVS_MAX_STATE_SIZE];
+			pthread_mutex_lock(&jvsIO->stateMutex);
+			memcpy(analogueSnapshot, jvsIO->state.analogueChannel, sizeof(jvsIO->state.analogueChannel));
+			pthread_mutex_unlock(&jvsIO->stateMutex);
+
+			outputPacket.data[outputPacket.length++] = REPORT_SUCCESS;
+
 			for (int i = 0; i < numberChannels; i++)
 			{
 				// Bounds check to prevent buffer overflow
@@ -468,7 +492,7 @@ JVSStatus processPacket(JVSIO *jvsIO)
 					return JVS_STATUS_ERROR;
 				}
 				/* By default left align the data */
-				int analogueData = jvsIO->state.analogueChannel[i] << jvsIO->analogueRestBits;
+				int analogueData = analogueSnapshot[i] << jvsIO->analogueRestBits;
 				outputPacket.data[outputPacket.length] = analogueData >> 8;
 				outputPacket.data[outputPacket.length + 1] = analogueData;
 				outputPacket.length += 2;
@@ -482,13 +506,20 @@ JVSStatus processPacket(JVSIO *jvsIO)
 			int numberChannels = inputPacket.data[index + 1];
 			debug(1, "CMD_READ_ROTARY - Reading %d rotary channel(s)\n", numberChannels);
 
-			outputPacket.data[outputPacket.length++] = REPORT_SUCCESS;
-
 			if (numberChannels > JVS_MAX_STATE_SIZE)
 			{
 				debug(0, "Error: Rotary channel count %d exceeds maximum %d in CMD_READ_ROTARY\n", numberChannels, JVS_MAX_STATE_SIZE);
 				return JVS_STATUS_ERROR;
 			}
+
+			/* Snapshot rotary channel state under the mutex. */
+			int rotarySnapshot[JVS_MAX_STATE_SIZE];
+			pthread_mutex_lock(&jvsIO->stateMutex);
+			memcpy(rotarySnapshot, jvsIO->state.rotaryChannel, sizeof(jvsIO->state.rotaryChannel));
+			pthread_mutex_unlock(&jvsIO->stateMutex);
+
+			outputPacket.data[outputPacket.length++] = REPORT_SUCCESS;
+
 			for (int i = 0; i < numberChannels; i++)
 			{
 				// Bounds check to prevent buffer overflow
@@ -497,8 +528,8 @@ JVSStatus processPacket(JVSIO *jvsIO)
 					debug(0, "Error: Output packet size exceeded in CMD_READ_ROTARY\n");
 					return JVS_STATUS_ERROR;
 				}
-				outputPacket.data[outputPacket.length] = jvsIO->state.rotaryChannel[i] >> 8;
-				outputPacket.data[outputPacket.length + 1] = jvsIO->state.rotaryChannel[i] & 0xFF;
+				outputPacket.data[outputPacket.length] = rotarySnapshot[i] >> 8;
+				outputPacket.data[outputPacket.length + 1] = rotarySnapshot[i] & 0xFF;
 				outputPacket.length += 2;
 			}
 		}
@@ -626,10 +657,12 @@ JVSStatus processPacket(JVSIO *jvsIO)
 
 			outputPacket.data[outputPacket.length++] = REPORT_SUCCESS;
 
+			pthread_mutex_lock(&jvsIO->stateMutex);
 			/* Prevent overflow of coins */
 			if (coin_increment + jvsIO->state.coinCount[slot_index] > 16383)
 				coin_increment = 16383 - jvsIO->state.coinCount[slot_index];
 			jvsIO->state.coinCount[slot_index] += coin_increment;
+			pthread_mutex_unlock(&jvsIO->stateMutex);
 		}
 		break;
 
@@ -658,10 +691,12 @@ JVSStatus processPacket(JVSIO *jvsIO)
 
 			outputPacket.data[outputPacket.length++] = REPORT_SUCCESS;
 
+			pthread_mutex_lock(&jvsIO->stateMutex);
 			/* Prevent underflow of coins */
 			if (coin_decrement > jvsIO->state.coinCount[slot_index])
 				coin_decrement = jvsIO->state.coinCount[slot_index];
 			jvsIO->state.coinCount[slot_index] -= coin_decrement;
+			pthread_mutex_unlock(&jvsIO->stateMutex);
 		}
 		break;
 
@@ -696,8 +731,6 @@ JVSStatus processPacket(JVSIO *jvsIO)
 			int numberGuns = inputPacket.data[index + 1];
 			debug(1, "CMD_READ_LIGHTGUN - Reading %d gun(s)\n", numberGuns);
 
-			outputPacket.data[outputPacket.length++] = REPORT_SUCCESS;
-
 			/* Each gun occupies two consecutive state slots (X then Y), so the
 			 * maximum safe gun count is half the state array size. */
 			if (numberGuns > JVS_MAX_STATE_SIZE / 2)
@@ -705,6 +738,15 @@ JVSStatus processPacket(JVSIO *jvsIO)
 				debug(0, "Error: Gun count %d exceeds maximum %d in CMD_READ_LIGHTGUN\n", numberGuns, JVS_MAX_STATE_SIZE / 2);
 				return JVS_STATUS_ERROR;
 			}
+
+			/* Snapshot gun channel state under the mutex. */
+			int gunSnapshot[JVS_MAX_STATE_SIZE];
+			pthread_mutex_lock(&jvsIO->stateMutex);
+			memcpy(gunSnapshot, jvsIO->state.gunChannel, sizeof(jvsIO->state.gunChannel));
+			pthread_mutex_unlock(&jvsIO->stateMutex);
+
+			outputPacket.data[outputPacket.length++] = REPORT_SUCCESS;
+
 			for (int i = 0; i < numberGuns; i++)
 			{
 				if (outputPacket.length + 4 > JVS_MAX_PACKET_SIZE)
@@ -717,8 +759,8 @@ JVSStatus processPacket(JVSIO *jvsIO)
 				int xData = 0, yData = 0;
 				if (i < jvsIO->capabilities.gunChannels)
 				{
-					xData = jvsIO->state.gunChannel[i * 2] << jvsIO->gunXRestBits;
-					yData = jvsIO->state.gunChannel[i * 2 + 1] << jvsIO->gunYRestBits;
+					xData = gunSnapshot[i * 2] << jvsIO->gunXRestBits;
+					yData = gunSnapshot[i * 2 + 1] << jvsIO->gunYRestBits;
 				}
 				outputPacket.data[outputPacket.length] = xData >> 8;
 				outputPacket.data[outputPacket.length + 1] = xData;
