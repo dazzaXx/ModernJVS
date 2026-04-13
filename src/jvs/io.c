@@ -6,16 +6,16 @@
 
 int initIO(JVSIO *io)
 {
-	for (int player = 0; player < (io->capabilities.players + 1); player++)
+	for (int player = 0; player < (io->capabilities.players + 1) && player < JVS_MAX_STATE_SIZE; player++)
 		io->state.inputSwitch[player] = 0;
 
-	for (int analogueChannels = 0; analogueChannels < io->capabilities.analogueInChannels; analogueChannels++)
+	for (int analogueChannels = 0; analogueChannels < io->capabilities.analogueInChannels && analogueChannels < JVS_MAX_STATE_SIZE; analogueChannels++)
 		io->state.analogueChannel[analogueChannels] = 0;
 
-	for (int rotaryChannels = 0; rotaryChannels < io->capabilities.rotaryChannels; rotaryChannels++)
+	for (int rotaryChannels = 0; rotaryChannels < io->capabilities.rotaryChannels && rotaryChannels < JVS_MAX_STATE_SIZE; rotaryChannels++)
 		io->state.rotaryChannel[rotaryChannels] = 0;
 
-	for (int player = 0; player < io->capabilities.coins; player++)
+	for (int player = 0; player < io->capabilities.coins && player < JVS_MAX_STATE_SIZE; player++)
 		io->state.coinCount[player] = 0;
 
 	io->analogueMax = pow(2, io->capabilities.analogueInBits) - 1;
@@ -27,7 +27,7 @@ int initIO(JVSIO *io)
 
 int setSwitch(JVSIO *io, JVSPlayer player, JVSInput switchNumber, int value)
 {
-	if (player > io->capabilities.players)
+	if (player > io->capabilities.players || player >= JVS_MAX_STATE_SIZE)
 	{
 		debug(0, "Error: That player %d does not exist.\n", player);
 		return 0;

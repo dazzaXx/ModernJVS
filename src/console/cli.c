@@ -183,6 +183,9 @@ static JVSCLIStatus enableDevice(char *deviceName)
         {
             while ((dir = readdir(d)) != NULL)
             {
+                if (strcmp(dir->d_name, ".") == 0 || strcmp(dir->d_name, "..") == 0)
+                    continue;
+
                 char gamePath[MAX_PATH_LENGTH];
                 int ret = snprintf(gamePath, sizeof(gamePath), "%s%s", DEFAULT_DEVICE_MAPPING_PATH, dir->d_name);
                 if (ret < 0 || ret >= (int)sizeof(gamePath))
@@ -258,6 +261,9 @@ static JVSCLIStatus disableDevice(char *deviceName)
         {
             while ((dir = readdir(d)) != NULL)
             {
+                if (strcmp(dir->d_name, ".") == 0 || strcmp(dir->d_name, "..") == 0)
+                    continue;
+
                 char gamePathEnabled[MAX_PATH_LENGTH];
                 int ret = snprintf(gamePathEnabled, sizeof(gamePathEnabled), "%s%s", DEFAULT_DEVICE_MAPPING_PATH, dir->d_name);
                 if (ret < 0 || ret >= (int)sizeof(gamePathEnabled))
@@ -330,6 +336,7 @@ static JVSCLIStatus printListing(void)
     if (getInputs(deviceList) != JVS_INPUT_STATUS_SUCCESS)
     {
         debug(0, "ModernJVS failed to detect any controllers.\nMake sure you are running as root.\n");
+        free(deviceList);
         return JVS_CLI_STATUS_ERROR;
     }
 

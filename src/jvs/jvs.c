@@ -8,7 +8,9 @@
 JVSPacket inputPacket, outputPacket;
 
 /* The in and out buffer used to read and write to and from */
-unsigned char outputBuffer[JVS_MAX_PACKET_SIZE], inputBuffer[JVS_MAX_PACKET_SIZE];
+/* outputBuffer must hold the worst-case escaped output:
+ * 1 SYNC + 2*(destination+length+JVS_MAX_PACKET_SIZE) bytes escaped + 2 checksum bytes */
+unsigned char outputBuffer[JVS_MAX_PACKET_SIZE * 2 + 5], inputBuffer[JVS_MAX_PACKET_SIZE];
 
 /* Packet counter for debugging */
 static unsigned long packetCounter = 0;
