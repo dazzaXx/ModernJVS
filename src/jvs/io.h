@@ -190,6 +190,7 @@ JVSCapabilities *getCapabilities(void);
 JVSState *getState(void);
 
 int initIO(JVSIO *io);
+void destroyIO(JVSIO *io);
 int setSwitch(JVSIO *io, JVSPlayer player, JVSInput switchNumber, int value);
 int incrementCoin(JVSIO *io, JVSPlayer player, int amount);
 int setAnalogue(JVSIO *io, JVSInput channel, double value);

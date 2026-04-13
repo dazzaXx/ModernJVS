@@ -28,6 +28,11 @@ int initIO(JVSIO *io)
 	return 1;
 }
 
+void destroyIO(JVSIO *io)
+{
+	pthread_mutex_destroy(&io->stateMutex);
+}
+
 int setSwitch(JVSIO *io, JVSPlayer player, JVSInput switchNumber, int value)
 {
 	if (player > io->capabilities.players)

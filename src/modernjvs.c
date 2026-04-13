@@ -177,7 +177,8 @@ int main(int argc, char **argv)
     /* The JVS processing thread runs for the lifetime of the program so that
      * packet handling is never interrupted by controller hot-plug reinit.
      * It is started once after initJVS() succeeds and joined on exit. */
-    pthread_t jvsThreadID = 0;
+    pthread_t jvsThreadID;
+    int jvsThreadStarted = 0;
 
     JVSInputStatus lastInputState = JVS_INPUT_STATUS_SUCCESS;
     while (running != -1)
@@ -329,6 +330,7 @@ int main(int argc, char **argv)
                 free(jvsArgs);
                 return EXIT_FAILURE;
             }
+            jvsThreadStarted = 1;
         }
         else
         {
@@ -348,8 +350,13 @@ int main(int argc, char **argv)
     unlink(TESTMODE_STATE_PATH);
 
     /* Wait for the JVS processing thread to finish. */
-    if (jvsThreadID != 0)
+    if (jvsThreadStarted)
         pthread_join(jvsThreadID, NULL);
+
+    /* Release mutex resources for both IO boards. */
+    destroyIO(&io);
+    if (io.chainedIO != NULL)
+        destroyIO(io.chainedIO);
 
     /* Close the file pointer */
     if (!disconnectJVS())
