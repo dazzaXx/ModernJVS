@@ -10,12 +10,14 @@
 
 #include "controller/input.h"
 
-// Poll devices every one second
-#define TIME_POLL_DEVICES 1
+/* Poll devices every one second (implemented as 20 × 50 ms slices so that
+ * stopAllThreads() can join this thread within ~50 ms instead of ~1 s). */
+#define TIME_POLL_DEVICES_US (50 * 1000)
+#define TIME_POLL_SLICES     20
 
 typedef struct
 {
-    volatile int *running;
+    volatile int *reinit;
 
 } WatchdogThreadArguments;
 
@@ -35,7 +37,7 @@ static void *watchdogThread(void *_args)
         if (currentDeviceCount == -1)
         {
             debug(1, "Watchdog: Error accessing /dev/input, triggering reinitialization\n");
-            *args->running = 0;
+            *args->reinit = 1;
             break;
         }
         else if (currentDeviceCount != originalDevicesCount)
@@ -50,10 +52,14 @@ static void *watchdogThread(void *_args)
                 debug(1, "Watchdog: Device disconnected (%d -> %d), triggering reinitialization\n", 
                       originalDevicesCount, currentDeviceCount);
             }
-            *args->running = 0;
+            *args->reinit = 1;
             break;
         }
-        sleep(TIME_POLL_DEVICES);
+
+        /* Sleep in short slices so stopAllThreads() can join this thread quickly
+         * (within one slice, i.e. ~50 ms) rather than waiting up to a full second. */
+        for (int s = 0; s < TIME_POLL_SLICES && getThreadsRunning(); s++)
+            usleep(TIME_POLL_DEVICES_US);
     }
 
     if (_args != NULL)
@@ -65,7 +71,7 @@ static void *watchdogThread(void *_args)
     return 0;
 }
 
-WatchdogStatus initWatchdog(volatile int *running)
+WatchdogStatus initWatchdog(volatile int *reinit)
 {
     WatchdogThreadArguments *args = malloc(sizeof(WatchdogThreadArguments));
     if (args == NULL)
@@ -74,7 +80,7 @@ WatchdogStatus initWatchdog(volatile int *running)
         return WATCHDOG_STATUS_ERROR;
     }
     
-    args->running = running;
+    args->reinit = reinit;
 
     if (THREAD_STATUS_SUCCESS != createThread(watchdogThread, args))
     {

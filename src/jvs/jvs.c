@@ -7,8 +7,11 @@
 /* The in and out packets used to read and write to and from*/
 JVSPacket inputPacket, outputPacket;
 
-/* The in and out buffer used to read and write to and from */
-unsigned char outputBuffer[JVS_MAX_PACKET_SIZE], inputBuffer[JVS_MAX_PACKET_SIZE];
+/* The in and out buffer used to read and write to and from.
+ * outputBuffer must be large enough for a worst-case escaped packet:
+ * 1 SYNC + 2*(JVS_MAX_PACKET_SIZE + 1 header bytes) + 2 escaped checksum bytes.
+ * inputBuffer only needs to hold one raw (wire-format) chunk at a time. */
+unsigned char outputBuffer[JVS_MAX_PACKET_SIZE * 2 + 4], inputBuffer[JVS_MAX_PACKET_SIZE];
 
 /* Packet counter for debugging */
 static unsigned long packetCounter = 0;
@@ -412,7 +415,15 @@ JVSStatus processPacket(JVSIO *jvsIO)
 						debug(0, "Error: Output packet size exceeded in CMD_READ_SWITCHES\n");
 						return JVS_STATUS_ERROR;
 					}
-					outputPacket.data[outputPacket.length++] = jvsIO->state.inputSwitch[i + 1] >> (8 - (j * 8));
+					/* Extract high byte (j==0) or low byte (j==1); return 0x00 for
+					 * any additional bytes a game may request (avoids UB from a
+					 * negative right-shift when j >= 2). */
+					if (j == 0)
+						outputPacket.data[outputPacket.length++] = (unsigned char)(jvsIO->state.inputSwitch[i + 1] >> 8);
+					else if (j == 1)
+						outputPacket.data[outputPacket.length++] = (unsigned char)(jvsIO->state.inputSwitch[i + 1] & 0xFF);
+					else
+						outputPacket.data[outputPacket.length++] = (unsigned char)0x00;
 				}
 			}
 		}
@@ -772,6 +783,11 @@ JVSStatus processPacket(JVSIO *jvsIO)
 			// Dip switch status
 			case 0x03:
 			{
+				if (outputPacket.length + 1 > JVS_MAX_PACKET_SIZE)
+				{
+					debug(0, "Error: Output packet size exceeded in CMD_NAMCO_SPECIFIC 0x03\n");
+					return JVS_STATUS_ERROR;
+				}
 				unsigned char dips = 0xFF;
 				outputPacket.data[outputPacket.length++] = dips;
 			}
@@ -780,6 +796,11 @@ JVSStatus processPacket(JVSIO *jvsIO)
 			// Unsure
 			case 0x04:
 			{
+				if (outputPacket.length + 2 > JVS_MAX_PACKET_SIZE)
+				{
+					debug(0, "Error: Output packet size exceeded in CMD_NAMCO_SPECIFIC 0x04\n");
+					return JVS_STATUS_ERROR;
+				}
 				outputPacket.data[outputPacket.length++] = 0xFF;
 				outputPacket.data[outputPacket.length++] = 0xFF;
 			}
@@ -788,6 +809,11 @@ JVSStatus processPacket(JVSIO *jvsIO)
 			// ID Check (0xFF is what Triforce branch sends)
 			case 0x18:
 			{
+				if (outputPacket.length + 1 > JVS_MAX_PACKET_SIZE)
+				{
+					debug(0, "Error: Output packet size exceeded in CMD_NAMCO_SPECIFIC 0x18\n");
+					return JVS_STATUS_ERROR;
+				}
 				size += 4;
 				outputPacket.data[outputPacket.length++] = 0xFF;
 			}

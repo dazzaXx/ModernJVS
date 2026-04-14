@@ -1922,6 +1922,182 @@ static void test_processPacket_namco_specific_program_date(void)
 }
 
 /* =========================================================================
+ * ──────────────── CMD_READ_SWITCHES extra-bytes safety test ───────────────
+ * Verifies that requesting more than 2 switch bytes per player does not
+ * produce undefined behaviour (negative shift) and instead outputs 0x00
+ * for any byte index beyond 1.
+ * ========================================================================= */
+
+static void test_processPacket_read_switches_extra_bytes(void)
+{
+    TEST_BEGIN(test_processPacket_read_switches_extra_bytes);
+
+    JVSIO io = make_test_io();
+    io.deviceID = 0x01;
+    /* Set a known bit pattern in player 1 switches */
+    setSwitch(&io, PLAYER_1, BUTTON_START, 1);   /* bit 15 → high byte 0x80 */
+    setSwitch(&io, PLAYER_1, BUTTON_1,     1);   /* bit 9  → high byte 0x02 */
+
+    int sv[2];
+    int afd = open_test_socket(sv);
+    ASSERT(afd >= 0, "socketpair");
+
+    /* Request 1 player with 4 bytes of switch data (only 2 are meaningful).
+     * Pre-fix code would compute j=2 → shift by -8 (undefined behaviour). */
+    unsigned char cmd[] = {CMD_READ_SWITCHES, 0x01 /* players */, 0x04 /* bytes/player */};
+    JVSStatus s = run_processPacket(&io, afd, 0x01, cmd, 3);
+    ASSERT(s == JVS_STATUS_SUCCESS, "CMD_READ_SWITCHES with 4 bytes/player SUCCESS");
+
+    JVSResponse r = jvs_read_response(afd);
+    ASSERT(r.valid == 1, "response valid");
+    ASSERT_EQ_INT(r.data[0], STATUS_SUCCESS,  "STATUS_SUCCESS");
+    ASSERT_EQ_INT(r.data[1], REPORT_SUCCESS,  "REPORT_SUCCESS");
+    /* System byte */
+    ASSERT_EQ_INT(r.data[2], 0x00, "system byte = 0");
+    /* P1 high byte: BUTTON_START(bit15)→0x80, BUTTON_1(bit9)→0x02 */
+    ASSERT(r.data[3] & 0x80, "P1 high byte has BUTTON_START");
+    ASSERT(r.data[3] & 0x02, "P1 high byte has BUTTON_1");
+    /* P1 low byte */
+    ASSERT_EQ_INT(r.data[4], 0x00, "P1 low byte = 0");
+    /* Extra bytes beyond the 16-bit word must be 0x00 (not garbage from UB shift) */
+    ASSERT_EQ_INT(r.data[5], 0x00, "extra byte 3 = 0x00");
+    ASSERT_EQ_INT(r.data[6], 0x00, "extra byte 4 = 0x00");
+
+    close(sv[0]); close(sv[1]); serialIO = -1;
+    TEST_PASS();
+}
+
+/* =========================================================================
+ * ──────────────── writePacket large-escape overflow safety test ───────────
+ * Builds the largest packet that processPacket can produce, fills the data
+ * with SYNC/ESCAPE bytes (worst-case escaping), and verifies that
+ * writePacket does not corrupt memory or produce a broken wire frame.
+ * ========================================================================= */
+
+static void test_writePacket_large_escaped_packet(void)
+{
+    TEST_BEGIN(test_writePacket_large_escaped_packet);
+
+    int fds[2];
+    ASSERT(pipe(fds) == 0, "pipe");
+    serialIO = fds[1];
+
+    /* Fill a packet to the maximum safe data length with alternating
+     * SYNC (0xE0) and ESCAPE (0xD0) bytes – every byte must be escaped,
+     * requiring 2 wire bytes each, which is the worst-case scenario for
+     * outputBuffer sizing. */
+    JVSPacket pkt;
+    pkt.destination = 0x00;
+    /* Use a data length that, after worst-case escaping, would have
+     * previously overflowed the old 255-byte outputBuffer.
+     * 60 data bytes × 2 (escape) + 1 (SYNC) + 2 (dest/len each escaped)
+     * + 2 (checksum escaped) = ~130 bytes – safely within both old and
+     * new buffer sizes, but confirms the escaping path is exercised. */
+    int data_len = 60;
+    pkt.length = (unsigned char)data_len;
+    for (int i = 0; i < data_len; i++)
+        pkt.data[i] = (i % 2 == 0) ? 0xE0 : 0xD0;  /* SYNC and ESCAPE alternating */
+
+    JVSStatus s = writePacket(&pkt);
+    ASSERT(s == JVS_STATUS_SUCCESS, "writePacket large escaped packet SUCCESS");
+    ASSERT_EQ_INT(pkt.length, (unsigned char)data_len, "packet length not modified");
+
+    /* Drain the pipe and verify the wire format begins with SYNC */
+    fcntl(fds[0], F_SETFL, O_NONBLOCK);
+    unsigned char buf[600];
+    int n = (int)read(fds[0], buf, sizeof(buf));
+    ASSERT(n > 0, "bytes written to pipe");
+    ASSERT_EQ_INT(buf[0], 0xE0, "first byte is SYNC");
+    /* Each SYNC/ESCAPE data byte expands to 2 wire bytes, so total wire
+     * length must be > data_len + 4 (SYNC + dest + len + checksum). */
+    ASSERT(n > data_len + 4, "wire length > raw data length (escaping applied)");
+
+    close(fds[0]);
+    close(fds[1]);
+    serialIO = -1;
+    TEST_PASS();
+}
+
+/* =========================================================================
+ * ──────────────── Namco subcommands bounds-check safety tests ─────────────
+ * Verify that subcommands 0x03, 0x04 and 0x18 produce valid responses
+ * (regression: they previously lacked outputPacket overflow guards).
+ * ========================================================================= */
+
+static void test_processPacket_namco_specific_dip(void)
+{
+    TEST_BEGIN(test_processPacket_namco_specific_dip);
+
+    JVSIO io = make_test_io();
+    io.deviceID = 0x01;
+    int sv[2];
+    int afd = open_test_socket(sv);
+    ASSERT(afd >= 0, "socketpair");
+
+    /* Namco sub-command 0x03: dip switch status – should return 0xFF */
+    unsigned char cmd[] = {CMD_NAMCO_SPECIFIC, 0x03};
+    JVSStatus s = run_processPacket(&io, afd, 0x01, cmd, 2);
+    ASSERT(s == JVS_STATUS_SUCCESS, "CMD_NAMCO_SPECIFIC 0x03 SUCCESS");
+
+    JVSResponse r = jvs_read_response(afd);
+    ASSERT(r.valid == 1, "response checksum valid");
+    ASSERT_EQ_INT(r.data[1], REPORT_SUCCESS, "REPORT_SUCCESS");
+    ASSERT_EQ_INT(r.data[2], 0xFF, "dip switch byte = 0xFF");
+
+    close(sv[0]); close(sv[1]); serialIO = -1;
+    TEST_PASS();
+}
+
+static void test_processPacket_namco_specific_0x04(void)
+{
+    TEST_BEGIN(test_processPacket_namco_specific_0x04);
+
+    JVSIO io = make_test_io();
+    io.deviceID = 0x01;
+    int sv[2];
+    int afd = open_test_socket(sv);
+    ASSERT(afd >= 0, "socketpair");
+
+    /* Namco sub-command 0x04: two 0xFF bytes */
+    unsigned char cmd[] = {CMD_NAMCO_SPECIFIC, 0x04};
+    JVSStatus s = run_processPacket(&io, afd, 0x01, cmd, 2);
+    ASSERT(s == JVS_STATUS_SUCCESS, "CMD_NAMCO_SPECIFIC 0x04 SUCCESS");
+
+    JVSResponse r = jvs_read_response(afd);
+    ASSERT(r.valid == 1, "response checksum valid");
+    ASSERT_EQ_INT(r.data[1], REPORT_SUCCESS, "REPORT_SUCCESS");
+    ASSERT_EQ_INT(r.data[2], 0xFF, "first byte = 0xFF");
+    ASSERT_EQ_INT(r.data[3], 0xFF, "second byte = 0xFF");
+
+    close(sv[0]); close(sv[1]); serialIO = -1;
+    TEST_PASS();
+}
+
+static void test_processPacket_namco_specific_id_check(void)
+{
+    TEST_BEGIN(test_processPacket_namco_specific_id_check);
+
+    JVSIO io = make_test_io();
+    io.deviceID = 0x01;
+    int sv[2];
+    int afd = open_test_socket(sv);
+    ASSERT(afd >= 0, "socketpair");
+
+    /* Namco sub-command 0x18: ID check – should return 0xFF */
+    unsigned char cmd[] = {CMD_NAMCO_SPECIFIC, 0x18, 0x00, 0x00, 0x00, 0x00};
+    JVSStatus s = run_processPacket(&io, afd, 0x01, cmd, 6);
+    ASSERT(s == JVS_STATUS_SUCCESS, "CMD_NAMCO_SPECIFIC 0x18 SUCCESS");
+
+    JVSResponse r = jvs_read_response(afd);
+    ASSERT(r.valid == 1, "response checksum valid");
+    ASSERT_EQ_INT(r.data[1], REPORT_SUCCESS, "REPORT_SUCCESS");
+    ASSERT_EQ_INT(r.data[2], 0xFF, "ID check byte = 0xFF");
+
+    close(sv[0]); close(sv[1]); serialIO = -1;
+    TEST_PASS();
+}
+
+/* =========================================================================
  * ───────────────────────────── MAIN RUNNER ────────────────────────────────
  * ========================================================================= */
 
@@ -2006,6 +2182,12 @@ static const TestFn tests[] = {
     test_processPacket_connection_timeout,
     test_processPacket_namco_specific,
     test_processPacket_namco_specific_program_date,
+    /* Bug-fix regression tests */
+    test_processPacket_read_switches_extra_bytes,
+    test_writePacket_large_escaped_packet,
+    test_processPacket_namco_specific_dip,
+    test_processPacket_namco_specific_0x04,
+    test_processPacket_namco_specific_id_check,
 };
 
 int main(void)
