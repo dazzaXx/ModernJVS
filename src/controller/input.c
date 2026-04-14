@@ -812,6 +812,14 @@ JVSInputStatus getInputs(DeviceList *deviceList)
             continue;
         }
 
+        // Stop enumerating if the device list is full
+        if (validDeviceIndex >= MAX_DEVICES)
+        {
+            debug(0, "Warning: Maximum device limit (%d) reached, ignoring remaining devices\n", MAX_DEVICES);
+            close(device);
+            break;
+        }
+
         // This is a valid device, so add it to our list
         Device *dev = &deviceList->devices[validDeviceIndex];
         strncpy(dev->path, tempPath, MAX_PATH - 1);

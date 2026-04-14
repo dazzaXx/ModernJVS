@@ -381,7 +381,10 @@ void handleSignal(int signal)
 {
     if (signal == SIGINT)
     {
-        debug(0, "\nModernJVS is stopping...\n");
+        /* Write a literal newline+message using write() which is async-signal-safe.
+         * debug()/printf() are NOT safe to call from a signal handler. */
+        const char msg[] = "\nModernJVS is stopping...\n";
+        write(STDOUT_FILENO, msg, sizeof(msg) - 1);
         running = -1;
     }
     else if (signal == SIGUSR1)

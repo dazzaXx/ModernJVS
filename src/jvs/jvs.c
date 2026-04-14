@@ -9,7 +9,9 @@
 JVSPacket inputPacket, outputPacket;
 
 /* The in and out buffer used to read and write to and from */
-unsigned char outputBuffer[JVS_MAX_PACKET_SIZE], inputBuffer[JVS_MAX_PACKET_SIZE];
+/* outputBuffer must hold the worst-case escaped output:
+ * 1 SYNC + 2*(destination+length+JVS_MAX_PACKET_SIZE) bytes escaped + 2 checksum bytes */
+unsigned char outputBuffer[JVS_MAX_PACKET_SIZE * 2 + 5], inputBuffer[JVS_MAX_PACKET_SIZE];
 
 /* Packet counter for debugging */
 static unsigned long packetCounter = 0;
@@ -884,7 +886,16 @@ JVSStatus readPacket(JVSPacket *packet)
 			{
 				phase = 0;
 				dataIndex = 0;
-				index++;
+				/* Slide any bytes already received after this SYNC to the front of
+				 * the buffer so the 255-byte window never exhausts.  Without this,
+				 * noise before a valid SYNC fills the buffer and causes readBytes()
+				 * to be called with amount=0, spinning the outer loop indefinitely
+				 * while the serial fd stays ready. */
+				int remaining = bytesAvailable - (index + 1);
+				if (remaining > 0)
+					memmove(inputBuffer, inputBuffer + index + 1, (size_t)remaining);
+				bytesAvailable = (remaining > 0) ? remaining : 0;
+				index = 0;
 				continue;
 			}
 

@@ -183,26 +183,31 @@ static JVSCLIStatus enableDevice(char *deviceName)
         {
             while ((dir = readdir(d)) != NULL)
             {
-                char gamePath[MAX_PATH_LENGTH];
-                int ret = snprintf(gamePath, sizeof(gamePath), "%s%s", DEFAULT_DEVICE_MAPPING_PATH, dir->d_name);
-                if (ret < 0 || ret >= (int)sizeof(gamePath))
+                if (strcmp(dir->d_name, ".") == 0 || strcmp(dir->d_name, "..") == 0)
                     continue;
 
-                char gamePathEnabled[MAX_PATH_LENGTH];
-                int len = snprintf(gamePathEnabled, sizeof(gamePathEnabled), "%s", gamePath);
-                if (len < 0 || len >= (int)sizeof(gamePathEnabled))
+                /* Only process files that end in ".disabled" */
+                size_t nameLen = strlen(dir->d_name);
+                const char *disabledSuffix = ".disabled";
+                size_t suffixLen = strlen(disabledSuffix);
+                if (nameLen <= suffixLen ||
+                    strcmp(dir->d_name + nameLen - suffixLen, disabledSuffix) != 0)
                     continue;
 
-                for (int i = 0; i < len; i++)
-                {
-                    if (gamePathEnabled[i] == '.')
-                    {
-                        gamePathEnabled[i] = 0;
-                        break;
-                    }
-                }
+                char devicePath[MAX_PATH_LENGTH];
+                int ret = snprintf(devicePath, sizeof(devicePath), "%s%s", DEFAULT_DEVICE_MAPPING_PATH, dir->d_name);
+                if (ret < 0 || ret >= (int)sizeof(devicePath))
+                    continue;
 
-                rename(gamePath, gamePathEnabled);
+                /* Strip the ".disabled" suffix to get the enabled path */
+                char devicePathEnabled[MAX_PATH_LENGTH];
+                ret = snprintf(devicePathEnabled, sizeof(devicePathEnabled), "%s%.*s",
+                               DEFAULT_DEVICE_MAPPING_PATH,
+                               (int)(nameLen - suffixLen), dir->d_name);
+                if (ret < 0 || ret >= (int)sizeof(devicePathEnabled))
+                    continue;
+
+                rename(devicePath, devicePathEnabled);
             }
             closedir(d);
         }
@@ -258,6 +263,9 @@ static JVSCLIStatus disableDevice(char *deviceName)
         {
             while ((dir = readdir(d)) != NULL)
             {
+                if (strcmp(dir->d_name, ".") == 0 || strcmp(dir->d_name, "..") == 0)
+                    continue;
+
                 char gamePathEnabled[MAX_PATH_LENGTH];
                 int ret = snprintf(gamePathEnabled, sizeof(gamePathEnabled), "%s%s", DEFAULT_DEVICE_MAPPING_PATH, dir->d_name);
                 if (ret < 0 || ret >= (int)sizeof(gamePathEnabled))
@@ -330,6 +338,7 @@ static JVSCLIStatus printListing(void)
     if (getInputs(deviceList) != JVS_INPUT_STATUS_SUCCESS)
     {
         debug(0, "ModernJVS failed to detect any controllers.\nMake sure you are running as root.\n");
+        free(deviceList);
         return JVS_CLI_STATUS_ERROR;
     }
 
