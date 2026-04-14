@@ -331,7 +331,7 @@ int main(int argc, char **argv)
         switch (processingStatus)
         {
         case JVS_STATUS_ERROR_CHECKSUM:
-            debug(0, "Error: A checksum error occurred\n");
+            debug(0, "Error: A checksum error occurred (unexpected during normal operation; the arcade board will retransmit)\n");
             break;
         case JVS_STATUS_ERROR_WRITE_FAIL:
             debug(0, "Error: A write failure occurred\n");

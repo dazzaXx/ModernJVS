@@ -148,6 +148,18 @@ int initDevice(char *devicePath, int senseLineType, int senseLinePin)
   return 1;
 }
 
+/**
+ * Flush the serial receive buffer.
+ *
+ * Discards all bytes currently queued in the kernel RX buffer and waits
+ * 100 ms to let any bytes already in-flight on the wire arrive and be
+ * discarded before the next read.  Call this after any gap where the
+ * caller was unable to service incoming packets (e.g. after a controller
+ * reinit) to prevent the JVS packet parser from seeing stale mid-packet
+ * data and reporting a false checksum error.
+ *
+ * @returns 1 always
+ */
 int flushDevice(void)
 {
   tcflush(serialIO, TCIFLUSH);
