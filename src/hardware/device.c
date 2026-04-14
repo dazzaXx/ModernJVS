@@ -148,6 +148,27 @@ int initDevice(char *devicePath, int senseLineType, int senseLinePin)
   return 1;
 }
 
+/**
+ * Flush the serial receive buffer
+ *
+ * Discards any bytes waiting in the serial receive (input) buffer and
+ * waits 100 ms to let the hardware settle. This should be called after
+ * a controller reinit to prevent stale data from causing checksum errors
+ * when packet processing resumes.
+ *
+ * @returns 1 on success, 0 if the flush failed
+ */
+int flushDevice(void)
+{
+  if (tcflush(serialIO, TCIFLUSH) != 0)
+  {
+    debug(1, "Warning: Failed to flush serial receive buffer: %s\n", strerror(errno));
+    return 0;
+  }
+  usleep(100 * 1000);
+  return 1;
+}
+
 int closeDevice(void)
 {
   tcflush(serialIO, TCIOFLUSH);
