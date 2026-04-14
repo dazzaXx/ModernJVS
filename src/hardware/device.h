@@ -21,6 +21,7 @@
 
 int initDevice(char *devicePath, int senseLineType, int senseLinePin);
 int closeDevice(void);
+int flushDevice(void);
 int readBytes(unsigned char *buffer, int amount);
 int writeBytes(unsigned char *buffer, int amount);
 int setSenseLine(int state);

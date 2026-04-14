@@ -245,6 +245,11 @@ int main(int argc, char **argv)
         else
         {
             debug(1, "Reinitializing inputs while maintaining JVS connection...\n");
+            /* Discard bytes that accumulated on the serial RX buffer while
+             * controller threads were stopped and being reinitialized.
+             * Without this flush, readPacket() may start mid-packet and
+             * report a spurious checksum error on the first iteration. */
+            flushDevice();
         }
 
         /* Process packets forever */
@@ -274,7 +279,7 @@ int main(int argc, char **argv)
             switch (processingStatus)
             {
             case JVS_STATUS_ERROR_CHECKSUM:
-                debug(0, "Error: A checksum error occurred (Expected if controllers hot-plugged)\n");
+                debug(0, "Error: A checksum error occurred\n");
                 break;
             case JVS_STATUS_ERROR_WRITE_FAIL:
                 debug(0, "Error: A write failure occurred\n");
