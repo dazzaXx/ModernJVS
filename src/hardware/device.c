@@ -148,6 +148,13 @@ int initDevice(char *devicePath, int senseLineType, int senseLinePin)
   return 1;
 }
 
+int flushDevice(void)
+{
+  tcflush(serialIO, TCIFLUSH);
+  usleep(100 * 1000);
+  return 1;
+}
+
 int closeDevice(void)
 {
   tcflush(serialIO, TCIOFLUSH);

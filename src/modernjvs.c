@@ -297,6 +297,14 @@ int main(int argc, char **argv)
                 setThreadsRunning(1);
                 controllersNeedReinit = 1;
             }
+            else
+            {
+                /* Discard any bytes that accumulated in the serial RX buffer
+                 * while controller threads were being restarted.  Without this
+                 * flush the parser may see a mid-packet byte sequence on the
+                 * very next processPacket() call and report a checksum error. */
+                flushDevice();
+            }
         }
 
         /* ── Process the next JVS packet ─────────────────────────────────── */
