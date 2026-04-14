@@ -324,6 +324,32 @@ static void test_initIO_zeros_state(void)
     TEST_PASS();
 }
 
+static void test_destroyIO_cleanup(void)
+{
+    TEST_BEGIN(test_destroyIO_cleanup);
+
+    /* Verify that initIO followed by destroyIO completes without aborting.
+     * destroyIO() must call pthread_mutex_destroy on the mutex that initIO()
+     * initialised – if the mutex is still locked or was never initialised this
+     * call aborts.  A clean run (no crash, no assertion failure) is the pass
+     * criterion. */
+    JVSIO io;
+    memset(&io, 0, sizeof(io));
+    io.capabilities.players           = 2;
+    io.capabilities.analogueInChannels = 4;
+    io.capabilities.analogueInBits    = 10;
+    io.capabilities.rotaryChannels    = 2;
+    io.capabilities.coins             = 2;
+    io.capabilities.gunChannels       = 2;
+    io.capabilities.gunXBits          = 12;
+    io.capabilities.gunYBits          = 12;
+
+    int r = initIO(&io);
+    ASSERT(r == 1, "initIO must succeed before destroyIO");
+    destroyIO(&io);  /* must not abort */
+    TEST_PASS();
+}
+
 static void test_setSwitch_system(void)
 {
     TEST_BEGIN(test_setSwitch_system);
@@ -384,6 +410,34 @@ static void test_setSwitch_out_of_range_player(void)
     int r = setSwitch(&io, PLAYER_3, BUTTON_1, 1);
     ASSERT(r == 0, "setSwitch for player > max should return 0");
     ASSERT(io.state.inputSwitch[3] == 0, "inputSwitch[3] should stay 0");
+    TEST_PASS();
+}
+
+static void test_setSwitch_max_state_size_bound(void)
+{
+    TEST_BEGIN(test_setSwitch_max_state_size_bound);
+
+    /* Exercise the second guard in setSwitch: player >= JVS_MAX_STATE_SIZE.
+     * Construct an IO where capabilities.players == JVS_MAX_STATE_SIZE so
+     * player > capabilities.players is FALSE, yet player >= JVS_MAX_STATE_SIZE
+     * is TRUE.  This ensures the new bounds check prevents an out-of-bounds
+     * write to inputSwitch[]. */
+    JVSIO io;
+    memset(&io, 0, sizeof(io));
+    io.capabilities.players           = JVS_MAX_STATE_SIZE;  /* 100 */
+    io.capabilities.analogueInChannels = 0;
+    io.capabilities.analogueInBits    = 10;
+    io.capabilities.rotaryChannels    = 0;
+    io.capabilities.coins             = 0;
+    io.capabilities.gunChannels       = 0;
+    io.capabilities.gunXBits          = 0;
+    io.capabilities.gunYBits          = 0;
+    initIO(&io);
+
+    /* player = JVS_MAX_STATE_SIZE (100) satisfies player >= JVS_MAX_STATE_SIZE */
+    int r = setSwitch(&io, (JVSPlayer)JVS_MAX_STATE_SIZE, BUTTON_1, 1);
+    ASSERT(r == 0, "setSwitch with player == JVS_MAX_STATE_SIZE must be rejected");
+    destroyIO(&io);
     TEST_PASS();
 }
 
@@ -1025,6 +1079,69 @@ static void test_readPacket_sync_resets_parser(void)
     /* The second SYNC inside 'wire' resets the parser and delivers the good packet */
     ASSERT(s == JVS_STATUS_SUCCESS || s == JVS_STATUS_ERROR_CHECKSUM,
            "parser recovers after spurious SYNC");
+    close(fds[0]);
+    close(fds[1]);
+    serialIO = -1;
+    TEST_PASS();
+}
+
+static void test_readPacket_large_noise_before_sync(void)
+{
+    TEST_BEGIN(test_readPacket_large_noise_before_sync);
+
+    /* Reproduce the spin-loop fixed by the SYNC-slide patch.
+     *
+     * Without the fix, a SYNC found at the last position of a full input
+     * buffer (bytesAvailable == JVS_MAX_PACKET_SIZE) caused the outer loop
+     * to call readBytes(buf + JVS_MAX_PACKET_SIZE, 0), which returned 0 (not
+     * -1) while the fd was still ready, spinning indefinitely.
+     *
+     * With the fix, the SYNC triggers a slide of post-SYNC bytes to the front
+     * of the buffer, reclaiming space so readBytes() is called with a positive
+     * count on the next outer-loop iteration.
+     *
+     * Construction (JVS_MAX_PACKET_SIZE == 255 bytes of noise):
+     *   noise[0]      = 0x01   (destination – not SYNC)
+     *   noise[1]      = 0xFF   (length 255 → parser waits for 254 data bytes;
+     *                           checksum comparison is never reached)
+     *   noise[2..253] = 0x01   (252 data bytes)
+     *   noise[254]    = SYNC   (at the very last buffer slot)
+     * Followed immediately by a complete valid wire packet.
+     *
+     * Without the fix: after consuming noise[254]==SYNC the inner loop
+     * increments index to 255, exits, bytesAvailable==255, and
+     * readBytes(buf+255, 0) spins.
+     * With the fix: SYNC triggers a slide to bytesAvailable==0; the outer
+     * loop then reads the valid packet with a positive count → SUCCESS. */
+    unsigned char data[] = {0xF1, 0x02};   /* CMD_ASSIGN_ADDR, address 2 */
+    unsigned char wire[32];
+    int wlen = jvs_build_wire(wire, BROADCAST, data, 2);
+
+    /* JVS_MAX_PACKET_SIZE bytes of crafted noise, SYNC at the last slot */
+    unsigned char noise[JVS_MAX_PACKET_SIZE];
+    noise[0] = 0x01;                                    /* destination */
+    noise[1] = 0xFF;                                    /* length = 255 */
+    memset(noise + 2, 0x01, JVS_MAX_PACKET_SIZE - 3);  /* data bytes */
+    noise[JVS_MAX_PACKET_SIZE - 1] = SYNC_BYTE;        /* SYNC at last slot */
+
+    int stream_len = JVS_MAX_PACKET_SIZE + wlen;
+    unsigned char *stream = malloc((size_t)stream_len);
+    ASSERT(stream != NULL, "malloc stream");
+    memcpy(stream, noise, JVS_MAX_PACKET_SIZE);
+    memcpy(stream + JVS_MAX_PACKET_SIZE, wire, wlen);
+
+    int fds[2];
+    ASSERT(pipe(fds) == 0, "pipe");
+    serialIO = fds[0];
+    ssize_t written = write(fds[1], stream, (size_t)stream_len);
+    ASSERT(written == (ssize_t)stream_len, "full stream written to pipe");
+    free(stream);
+
+    JVSPacket pkt;
+    memset(&pkt, 0, sizeof(pkt));
+    JVSStatus s = readPacket(&pkt);
+    ASSERT(s == JVS_STATUS_SUCCESS, "readPacket recovers after buffer-filling noise with SYNC at last slot");
+    ASSERT_EQ_INT(pkt.destination, BROADCAST, "correct destination after noise");
     close(fds[0]);
     close(fds[1]);
     serialIO = -1;
@@ -1930,10 +2047,12 @@ typedef void (*TestFn)(void);
 static const TestFn tests[] = {
     /* IO state */
     test_initIO_zeros_state,
+    test_destroyIO_cleanup,
     test_setSwitch_system,
     test_setSwitch_player1,
     test_setSwitch_player2,
     test_setSwitch_out_of_range_player,
+    test_setSwitch_max_state_size_bound,
     test_setSwitch_all_buttons,
     test_incrementCoin_basic,
     test_incrementCoin_system_rejected,
@@ -1971,6 +2090,7 @@ static const TestFn tests[] = {
     test_readPacket_escape_bytes,
     test_readPacket_escape_escape_byte,
     test_readPacket_sync_resets_parser,
+    test_readPacket_large_noise_before_sync,
     test_readPacket_timeout,
     test_writePacket_basic,
     test_writePacket_length_not_modified,
