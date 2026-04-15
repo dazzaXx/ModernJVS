@@ -8,7 +8,11 @@
 JVSPacket inputPacket, outputPacket;
 
 /* The in and out buffer used to read and write to and from */
-unsigned char outputBuffer[JVS_MAX_PACKET_SIZE], inputBuffer[JVS_MAX_PACKET_SIZE];
+/* outputBuffer must accommodate worst-case escaping: SYNC (1) + destination (up to 2)
+ * + length (up to 2) + all data bytes (each up to 2 after escaping) + checksum (up to 2).
+ * Worst case: 1 + 2 + 2 + 2*JVS_MAX_PACKET_SIZE + 2 = 2*JVS_MAX_PACKET_SIZE + 7 bytes.
+ * Sized to 2*JVS_MAX_PACKET_SIZE + 8 to include one byte of headroom. */
+unsigned char outputBuffer[JVS_MAX_PACKET_SIZE * 2 + 8], inputBuffer[JVS_MAX_PACKET_SIZE];
 
 /* Packet counter for debugging */
 static unsigned long packetCounter = 0;
@@ -772,6 +776,11 @@ JVSStatus processPacket(JVSIO *jvsIO)
 			// Dip switch status
 			case 0x03:
 			{
+				if (outputPacket.length + 1 > JVS_MAX_PACKET_SIZE)
+				{
+					debug(0, "Error: Output packet size exceeded in CMD_NAMCO_SPECIFIC 0x03\n");
+					return JVS_STATUS_ERROR;
+				}
 				unsigned char dips = 0xFF;
 				outputPacket.data[outputPacket.length++] = dips;
 			}
@@ -780,6 +789,11 @@ JVSStatus processPacket(JVSIO *jvsIO)
 			// Unsure
 			case 0x04:
 			{
+				if (outputPacket.length + 2 > JVS_MAX_PACKET_SIZE)
+				{
+					debug(0, "Error: Output packet size exceeded in CMD_NAMCO_SPECIFIC 0x04\n");
+					return JVS_STATUS_ERROR;
+				}
 				outputPacket.data[outputPacket.length++] = 0xFF;
 				outputPacket.data[outputPacket.length++] = 0xFF;
 			}
@@ -842,6 +856,7 @@ JVSStatus readPacket(JVSPacket *packet)
 			{
 				phase = 0;
 				dataIndex = 0;
+				checksum = 0x00;
 				index++;
 				continue;
 			}

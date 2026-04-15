@@ -813,6 +813,12 @@ JVSInputStatus getInputs(DeviceList *deviceList)
         }
 
         // This is a valid device, so add it to our list
+        if (validDeviceIndex >= MAX_DEVICES)
+        {
+            debug(0, "Warning: Maximum device count (%d) reached, ignoring additional devices\n", MAX_DEVICES);
+            close(device);
+            continue;
+        }
         Device *dev = &deviceList->devices[validDeviceIndex];
         strncpy(dev->path, tempPath, MAX_PATH - 1);
         dev->path[MAX_PATH - 1] = '\0';

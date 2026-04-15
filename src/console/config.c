@@ -68,7 +68,16 @@ JVSConfigStatus getDefaultConfig(JVSConfig *config)
     return JVS_CONFIG_STATUS_SUCCESS;
 }
 
-JVSConfigStatus parseConfig(char *path, JVSConfig *config)
+/* Maximum INCLUDE nesting depth to prevent infinite recursion on self-referential files */
+#define MAX_INCLUDE_DEPTH 10
+
+/* Forward declarations for internal recursive helpers */
+static JVSConfigStatus parseConfigInternal(char *path, JVSConfig *config, int depth);
+static JVSConfigStatus parseInputMappingInternal(char *path, InputMappings *inputMappings, int depth);
+static JVSConfigStatus parseOutputMappingInternal(char *path, OutputMappings *outputMappings, char *configPath, char *secondConfigPath, int depth);
+
+/* Internal implementation that tracks recursion depth via a parameter */
+static JVSConfigStatus parseConfigInternal(char *path, JVSConfig *config, int depth)
 {
     FILE *file;
     char buffer[MAX_LINE_LENGTH];
@@ -92,8 +101,10 @@ JVSConfigStatus parseConfig(char *path, JVSConfig *config)
         if (strcmp(command, "INCLUDE") == 0)
         {
             char *token = getNextToken(NULL, " ", &saveptr);
-            if (token)
-                parseConfig(token, config);
+            if (token && depth < MAX_INCLUDE_DEPTH)
+                parseConfigInternal(token, config, depth + 1);
+            else if (token)
+                debug(0, "Error: Maximum INCLUDE depth (%d) exceeded, skipping '%s'\n", MAX_INCLUDE_DEPTH, token);
         }
         else if (strcmp(command, "SENSE_LINE_TYPE") == 0)
         {
@@ -201,7 +212,13 @@ JVSConfigStatus parseConfig(char *path, JVSConfig *config)
     return JVS_CONFIG_STATUS_SUCCESS;
 }
 
-JVSConfigStatus parseInputMapping(char *path, InputMappings *inputMappings)
+JVSConfigStatus parseConfig(char *path, JVSConfig *config)
+{
+    return parseConfigInternal(path, config, 0);
+}
+
+/* Internal implementation that tracks recursion depth via a parameter */
+static JVSConfigStatus parseInputMappingInternal(char *path, InputMappings *inputMappings, int depth)
 {
     FILE *file;
     char buffer[MAX_LINE_LENGTH];
@@ -216,6 +233,7 @@ JVSConfigStatus parseInputMapping(char *path, InputMappings *inputMappings)
         return JVS_CONFIG_STATUS_FILE_NOT_FOUND;
 
     inputMappings->player = DEFAULT_PLAYER;
+    inputMappings->length = 0;
 
     while (fgets(buffer, MAX_LINE_LENGTH, file))
     {
@@ -231,12 +249,16 @@ JVSConfigStatus parseInputMapping(char *path, InputMappings *inputMappings)
         if (strcmp(command, "INCLUDE") == 0)
         {
             char *token = getNextToken(NULL, " ", &saveptr);
-            if (token)
+            if (token && depth < MAX_INCLUDE_DEPTH)
             {
-                InputMappings tempInputMappings;
-                JVSConfigStatus status = parseInputMapping(token, &tempInputMappings);
+                InputMappings tempInputMappings = {0};
+                JVSConfigStatus status = parseInputMappingInternal(token, &tempInputMappings, depth + 1);
                 if (status == JVS_CONFIG_STATUS_SUCCESS)
                     memcpy(inputMappings, &tempInputMappings, sizeof(InputMappings));
+            }
+            else if (token)
+            {
+                debug(0, "Error: Maximum INCLUDE depth (%d) exceeded, skipping '%s'\n", MAX_INCLUDE_DEPTH, token);
             }
         }
         else if (strcmp(command, "PLAYER") == 0)
@@ -398,7 +420,13 @@ JVSConfigStatus parseInputMapping(char *path, InputMappings *inputMappings)
     return JVS_CONFIG_STATUS_SUCCESS;
 }
 
-JVSConfigStatus parseOutputMapping(char *path, OutputMappings *outputMappings, char *configPath, char *secondConfigPath)
+JVSConfigStatus parseInputMapping(char *path, InputMappings *inputMappings)
+{
+    return parseInputMappingInternal(path, inputMappings, 0);
+}
+
+/* Internal implementation that tracks recursion depth via a parameter */
+static JVSConfigStatus parseOutputMappingInternal(char *path, OutputMappings *outputMappings, char *configPath, char *secondConfigPath, int depth)
 {
     FILE *file;
     char buffer[MAX_LINE_LENGTH];
@@ -411,6 +439,8 @@ JVSConfigStatus parseOutputMapping(char *path, OutputMappings *outputMappings, c
 
     if ((file = fopen(gamePath, "r")) == NULL)
         return JVS_CONFIG_STATUS_FILE_NOT_FOUND;
+
+    outputMappings->length = 0;
 
     while (fgets(buffer, MAX_LINE_LENGTH, file))
     {
@@ -447,12 +477,16 @@ JVSConfigStatus parseOutputMapping(char *path, OutputMappings *outputMappings, c
         if (strcmp(command, "INCLUDE") == 0)
         {
             char *token = getNextToken(NULL, " ", &saveptr);
-            if (token)
+            if (token && depth < MAX_INCLUDE_DEPTH)
             {
-                OutputMappings tempOutputMappings;
-                JVSConfigStatus status = parseOutputMapping(token, &tempOutputMappings, configPath, secondConfigPath);
+                OutputMappings tempOutputMappings = {0};
+                JVSConfigStatus status = parseOutputMappingInternal(token, &tempOutputMappings, configPath, secondConfigPath, depth + 1);
                 if (status == JVS_CONFIG_STATUS_SUCCESS)
                     memcpy(outputMappings, &tempOutputMappings, sizeof(OutputMappings));
+            }
+            else if (token)
+            {
+                debug(0, "Error: Maximum INCLUDE depth (%d) exceeded, skipping '%s'\n", MAX_INCLUDE_DEPTH, token);
             }
         }
         else if (strcmp(command, "EMULATE") == 0)
@@ -564,6 +598,11 @@ JVSConfigStatus parseOutputMapping(char *path, OutputMappings *outputMappings, c
     fclose(file);
 
     return JVS_CONFIG_STATUS_SUCCESS;
+}
+
+JVSConfigStatus parseOutputMapping(char *path, OutputMappings *outputMappings, char *configPath, char *secondConfigPath)
+{
+    return parseOutputMappingInternal(path, outputMappings, configPath, secondConfigPath, 0);
 }
 
 JVSConfigStatus parseIO(char *path, JVSCapabilities *capabilities)

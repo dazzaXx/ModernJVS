@@ -27,7 +27,7 @@ int initIO(JVSIO *io)
 
 int setSwitch(JVSIO *io, JVSPlayer player, JVSInput switchNumber, int value)
 {
-	if (player > io->capabilities.players)
+	if ((int)player < 0 || player > io->capabilities.players)
 	{
 		debug(0, "Error: That player %d does not exist.\n", player);
 		return 0;
@@ -54,13 +54,16 @@ int incrementCoin(JVSIO *io, JVSPlayer player, int amount)
 	if (player - 1 >= io->capabilities.coins)
 		return 0;
 
-	io->state.coinCount[player - 1] = io->state.coinCount[player - 1] + amount;
+	io->state.coinCount[player - 1] += amount;
+	/* Cap at 16383 (max representable by the 13-bit JVS wire format) */
+	if (io->state.coinCount[player - 1] > 16383)
+		io->state.coinCount[player - 1] = 16383;
 	return 1;
 }
 
 int setAnalogue(JVSIO *io, JVSInput channel, double value)
 {
-	if (channel >= io->capabilities.analogueInChannels)
+	if ((int)channel < 0 || channel >= io->capabilities.analogueInChannels)
 		return 0;
 	io->state.analogueChannel[channel] = (int)((double)value * (double)io->analogueMax);
 	return 1;
@@ -69,7 +72,7 @@ int setAnalogue(JVSIO *io, JVSInput channel, double value)
 int setGun(JVSIO *io, JVSInput channel, double value)
 {
 	// Bounds check to prevent array overflow
-	if (channel >= io->capabilities.gunChannels * 2)
+	if ((int)channel < 0 || channel >= io->capabilities.gunChannels * 2)
 		return 0;
 
 	if (channel % 2 == 0)
@@ -85,7 +88,7 @@ int setGun(JVSIO *io, JVSInput channel, double value)
 
 int setRotary(JVSIO *io, JVSInput channel, int value)
 {
-	if (channel >= io->capabilities.rotaryChannels)
+	if ((int)channel < 0 || channel >= io->capabilities.rotaryChannels)
 		return 0;
 
 	io->state.rotaryChannel[channel] = value;
@@ -94,7 +97,7 @@ int setRotary(JVSIO *io, JVSInput channel, int value)
 
 int getRotary(JVSIO *io, JVSInput channel)
 {
-	if (channel >= io->capabilities.rotaryChannels)
+	if ((int)channel < 0 || channel >= io->capabilities.rotaryChannels)
 		return 0;
 
 	return io->state.rotaryChannel[channel];
