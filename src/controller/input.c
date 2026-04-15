@@ -182,7 +182,12 @@ static void *wiiDeviceThread(void *_args)
                         twoX = x0;
                     }
 
-                    /* Use some fancy maths that I don't understand fully */
+                    /* Compute a tilt-corrected midpoint from the two IR sensor dots.
+                     * The Wiimote reports two IR points (x0,y0) and (x1,y1). We sort
+                     * them left-to-right, then use the vector between them to rotate the
+                     * midpoint back to a canonical horizontal orientation, compensating
+                     * for any physical tilt of the Wiimote. The result is a normalised
+                     * (0.0–1.0) screen coordinate centred on the IR bar. */
                     double valuex = 512 + cos(atan2(twoY - oneY, twoX - oneX) * -1) * (((oneX - twoX) / 2 + twoX) - 512) - sin(atan2(twoY - oneY, twoX - oneX) * -1) * (((oneY - twoY) / 2 + twoY) - 384);
                     double valuey = 384 + sin(atan2(twoY - oneY, twoX - oneX) * -1) * (((oneX - twoX) / 2 + twoX) - 512) + cos(atan2(twoY - oneY, twoX - oneX) * -1) * (((oneY - twoY) / 2 + twoY) - 384);
 
@@ -427,7 +432,9 @@ static void *deviceThread(void *_args)
 
             case EV_ABS:
             {
-                /* Support HAT Controlls */
+                /* Handle HAT switch (D-pad) events: the axis min value maps to the
+                 * primary output button and the axis max value maps to the secondary
+                 * output button; any value in between clears both buttons. */
                 if (args->inputs.abs[event.code].type == HAT)
                 {
 
@@ -847,7 +854,8 @@ JVSInputStatus getInputs(DeviceList *deviceList)
             }
         }
 
-        // Make it lower case and replace letters
+        // Normalize the full device name to lowercase, replacing spaces, slashes,
+        // and parentheses with dashes to produce a filename-safe device mapping name
         for (size_t j = 0; j < strlen(dev->fullName); j++)
         {
             dev->name[j] = tolower(dev->fullName[j]);
@@ -878,7 +886,7 @@ JVSInputStatus getInputs(DeviceList *deviceList)
         if (!test_bit_diff(EV_ABS, bit[0]) && test_bit_diff(EV_REP, bit[0]) && test_bit_diff(EV_KEY, bit[0]))
             dev->type = DEVICE_TYPE_KEYBOARD;
 
-        // Relative events means its a mouse!
+        // If it reports relative-axis events it is a mouse
         if (test_bit_diff(EV_REL, bit[0]))
         {
             dev->type = DEVICE_TYPE_MOUSE;

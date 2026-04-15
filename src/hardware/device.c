@@ -286,7 +286,7 @@ int setSerialAttributes(int fd, int myBaud)
   }
 
   tcflush(serialIO, TCIOFLUSH);
-  usleep(100 * 1000); // Required to make flush work, for some reason
+  usleep(100 * 1000); /* Allow DTR/RTS signals and the serial FIFO to settle before use */
 
   return 0;
 }
@@ -667,7 +667,8 @@ int setSenseLine(int state)
 
   switch (localSenseLineType)
   {
-  /* Normal Float Style */
+  /* Float/Sink sense line: state=0 floats the pin (set as INPUT, signals no device);
+   * state=1 drives the pin LOW (signals device present to the arcade board) */
   case 1:
   {
     if (!state)

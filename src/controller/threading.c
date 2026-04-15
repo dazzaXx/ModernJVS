@@ -44,7 +44,7 @@ ThreadStatus createThread(void *thread_entry(void *), void *args)
 
 void stopAllThreads(void)
 {
-    /* Set flags for all threads to terminate itself */
+    /* Signal all threads to terminate themselves */
     setThreadsRunning(0);
 
     pthread_mutex_lock(&ThreadManagerData.mutex_manager);
