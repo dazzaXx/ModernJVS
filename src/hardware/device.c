@@ -316,11 +316,7 @@ int setupGPIO(int pin)
 
 int setGPIODirection(int pin, int dir)
 {
-  struct gpiod_chip *chip = open_gpio_chip();
-  if (!chip)
-    return 0;
-  
-  // Release existing request only if we're changing pins or direction
+  // Release existing request if we're changing pins or direction
   if (line_request && (current_pin != pin || current_direction != dir))
   {
     gpiod_line_request_release(line_request);
@@ -328,14 +324,16 @@ int setGPIODirection(int pin, int dir)
     current_pin = -1;
     current_direction = -1;
   }
-  
+
   // If we already have a request for this pin and direction, reuse it
   if (line_request && current_pin == pin && current_direction == dir)
-  {
-    gpiod_chip_close(chip);
     return 1;
-  }
-  
+
+  // Only open the chip when we actually need a new line request
+  struct gpiod_chip *chip = open_gpio_chip();
+  if (!chip)
+    return 0;
+
   struct gpiod_line_settings *settings = gpiod_line_settings_new();
   if (!settings)
   {

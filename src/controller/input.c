@@ -110,7 +110,7 @@ static void *wiiDeviceThread(void *_args)
     int fd = open(args->devicePath, O_RDONLY);
     if (fd < 0)
     {
-        debug(0, "Warning: Failed to open Wii Remote device.");
+        debug(0, "Warning: Failed to open Wii Remote device.\n");
         return 0;
     }
 

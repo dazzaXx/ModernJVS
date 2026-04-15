@@ -1,4 +1,5 @@
 #include <dirent.h>
+#include <errno.h>
 #include <stdio.h>
 #include <string.h>
 #include <ctype.h>
@@ -127,7 +128,7 @@ static JVSCLIStatus editFile(char *filePath)
     pid_t pid = fork();
     if (pid == -1)
     {
-        perror("Error: Failed to fork process");
+        debug(0, "Error: Failed to fork process: %s\n", strerror(errno));
         return JVS_CLI_STATUS_ERROR;
     }
     else if (pid == 0)
@@ -183,24 +184,24 @@ static JVSCLIStatus enableDevice(char *deviceName)
         {
             while ((dir = readdir(d)) != NULL)
             {
+                /* Only process files that end with ".disabled" */
+                size_t len = strlen(dir->d_name);
+                const char *suffix = ".disabled";
+                size_t sufLen = strlen(suffix);
+                if (len <= sufLen || strcmp(dir->d_name + len - sufLen, suffix) != 0)
+                    continue;
+
                 char gamePath[MAX_PATH_LENGTH];
                 int ret = snprintf(gamePath, sizeof(gamePath), "%s%s", DEFAULT_DEVICE_MAPPING_PATH, dir->d_name);
                 if (ret < 0 || ret >= (int)sizeof(gamePath))
                     continue;
 
+                /* Build the enabled path: strip the ".disabled" suffix */
                 char gamePathEnabled[MAX_PATH_LENGTH];
-                int len = snprintf(gamePathEnabled, sizeof(gamePathEnabled), "%s", gamePath);
-                if (len < 0 || len >= (int)sizeof(gamePathEnabled))
+                ret = snprintf(gamePathEnabled, sizeof(gamePathEnabled), "%s%.*s",
+                               DEFAULT_DEVICE_MAPPING_PATH, (int)(len - sufLen), dir->d_name);
+                if (ret < 0 || ret >= (int)sizeof(gamePathEnabled))
                     continue;
-
-                for (int i = 0; i < len; i++)
-                {
-                    if (gamePathEnabled[i] == '.')
-                    {
-                        gamePathEnabled[i] = 0;
-                        break;
-                    }
-                }
 
                 rename(gamePath, gamePathEnabled);
             }
@@ -258,6 +259,15 @@ static JVSCLIStatus disableDevice(char *deviceName)
         {
             while ((dir = readdir(d)) != NULL)
             {
+                /* Skip hidden entries and files already disabled */
+                if (dir->d_name[0] == '.')
+                    continue;
+                size_t len = strlen(dir->d_name);
+                const char *suffix = ".disabled";
+                size_t sufLen = strlen(suffix);
+                if (len >= sufLen && strcmp(dir->d_name + len - sufLen, suffix) == 0)
+                    continue;
+
                 char gamePathEnabled[MAX_PATH_LENGTH];
                 int ret = snprintf(gamePathEnabled, sizeof(gamePathEnabled), "%s%s", DEFAULT_DEVICE_MAPPING_PATH, dir->d_name);
                 if (ret < 0 || ret >= (int)sizeof(gamePathEnabled))
@@ -330,6 +340,8 @@ static JVSCLIStatus printListing(void)
     if (getInputs(deviceList) != JVS_INPUT_STATUS_SUCCESS)
     {
         debug(0, "ModernJVS failed to detect any controllers.\nMake sure you are running as root.\n");
+        free(deviceList);
+        deviceList = NULL;
         return JVS_CLI_STATUS_ERROR;
     }
 
