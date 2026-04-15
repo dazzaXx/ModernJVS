@@ -8,10 +8,10 @@
 JVSPacket inputPacket, outputPacket;
 
 /* The in and out buffer used to read and write to and from */
-/* outputBuffer must accommodate worst-case escaping: every byte in the packet
- * (destination + length + all data bytes) could be escaped (2 bytes each),
- * plus the SYNC prefix byte and an escaped checksum (2 bytes). */
-unsigned char outputBuffer[JVS_MAX_PACKET_SIZE * 2 + 4], inputBuffer[JVS_MAX_PACKET_SIZE];
+/* outputBuffer must accommodate worst-case escaping: SYNC (1) + destination (up to 2)
+ * + length (up to 2) + all data bytes (each up to 2 after escaping) + checksum (up to 2).
+ * Worst case: 1 + 2*(JVS_MAX_PACKET_SIZE + 2) + 2 = 2*JVS_MAX_PACKET_SIZE + 7 bytes. */
+unsigned char outputBuffer[JVS_MAX_PACKET_SIZE * 2 + 8], inputBuffer[JVS_MAX_PACKET_SIZE];
 
 /* Packet counter for debugging */
 static unsigned long packetCounter = 0;
