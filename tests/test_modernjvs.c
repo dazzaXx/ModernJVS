@@ -606,6 +606,85 @@ static void test_jvsInputFromString_unknown(void)
     TEST_PASS();
 }
 
+/* ── New tests for PR bug-fixes ──────────────────────────────────────────── */
+
+/*
+ * setSwitch must reject a negative player index.
+ * jvsPlayerFromString("INVALID") returns (JVSPlayer)-1, which before the fix
+ * would pass the "player > capabilities.players" check and underflow the array.
+ */
+static void test_setSwitch_negative_player(void)
+{
+    TEST_BEGIN(test_setSwitch_negative_player);
+    JVSIO io = make_test_io();
+
+    /* Cast -1 explicitly to JVSPlayer to simulate what jvsPlayerFromString
+     * returns on a lookup failure. */
+    int r = setSwitch(&io, (JVSPlayer)-1, BUTTON_1, 1);
+    ASSERT_EQ_INT(r, 0, "setSwitch with player -1 must return 0");
+    TEST_PASS();
+}
+
+/*
+ * setAnalogue must reject a negative channel index.
+ */
+static void test_setAnalogue_negative_channel(void)
+{
+    TEST_BEGIN(test_setAnalogue_negative_channel);
+    JVSIO io = make_test_io();
+
+    int r = setAnalogue(&io, (JVSInput)-1, 1.0);
+    ASSERT_EQ_INT(r, 0, "setAnalogue with channel -1 must return 0");
+    TEST_PASS();
+}
+
+/*
+ * setGun must reject a negative channel index.
+ */
+static void test_setGun_negative_channel(void)
+{
+    TEST_BEGIN(test_setGun_negative_channel);
+    JVSIO io = make_test_io();
+
+    int r = setGun(&io, (JVSInput)-1, 1.0);
+    ASSERT_EQ_INT(r, 0, "setGun with channel -1 must return 0");
+    TEST_PASS();
+}
+
+/*
+ * setRotary / getRotary must reject a negative channel index.
+ */
+static void test_setRotary_negative_channel(void)
+{
+    TEST_BEGIN(test_setRotary_negative_channel);
+    JVSIO io = make_test_io();
+
+    int r = setRotary(&io, (JVSInput)-1, 999);
+    ASSERT_EQ_INT(r, 0, "setRotary with channel -1 must return 0");
+    ASSERT_EQ_INT(getRotary(&io, (JVSInput)-1), 0, "getRotary with channel -1 must return 0");
+    TEST_PASS();
+}
+
+/*
+ * incrementCoin must cap the coin count at 16383 (13-bit JVS wire max).
+ */
+static void test_incrementCoin_cap_at_16383(void)
+{
+    TEST_BEGIN(test_incrementCoin_cap_at_16383);
+    JVSIO io = make_test_io();
+
+    /* Increment well past the 16383 cap */
+    incrementCoin(&io, PLAYER_1, 16000);
+    incrementCoin(&io, PLAYER_1, 16000);
+    ASSERT_EQ_INT(io.state.coinCount[0], 16383, "coin count capped at 16383");
+
+    /* A single large increment also caps correctly */
+    io.state.coinCount[1] = 0;
+    incrementCoin(&io, PLAYER_2, 99999);
+    ASSERT_EQ_INT(io.state.coinCount[1], 16383, "large single increment capped at 16383");
+    TEST_PASS();
+}
+
 static void test_jvsPlayerFromString_known(void)
 {
     TEST_BEGIN(test_jvsPlayerFromString_known);
@@ -1022,9 +1101,62 @@ static void test_readPacket_sync_resets_parser(void)
     JVSPacket pkt;
     memset(&pkt, 0, sizeof(pkt));
     JVSStatus s = readPacket(&pkt);
-    /* The second SYNC inside 'wire' resets the parser and delivers the good packet */
-    ASSERT(s == JVS_STATUS_SUCCESS || s == JVS_STATUS_ERROR_CHECKSUM,
-           "parser recovers after spurious SYNC");
+    /* The second SYNC inside 'wire' resets the parser (including checksum)
+     * so the good packet must decode with SUCCESS. */
+    ASSERT(s == JVS_STATUS_SUCCESS, "parser recovers after spurious SYNC");
+    close(fds[0]);
+    close(fds[1]);
+    serialIO = -1;
+    TEST_PASS();
+}
+
+/*
+ * Verify that the checksum accumulator is correctly zeroed when a SYNC byte
+ * is seen mid-stream, so a valid packet that follows a partial one decodes
+ * with the right checksum.
+ *
+ * Stream layout (all wire-escaped):
+ *   [partial bad packet: SYNC dest=0x02 len=0x05 data=0xAA]
+ *   [valid full packet:  SYNC dest=0x01 len=0x02 data=0x10 checksum]
+ *
+ * Before the fix the checksum was never reset; the partial packet's bytes
+ * would pollute the accumulator, causing the second packet to fail with
+ * JVS_STATUS_ERROR_CHECKSUM.
+ */
+static void test_readPacket_checksum_reset_on_sync(void)
+{
+    TEST_BEGIN(test_readPacket_checksum_reset_on_sync);
+
+    /* Build a valid packet: dest=0x01, data=[0x10] */
+    unsigned char valid_data[] = {0x10};
+    unsigned char valid_wire[32];
+    int valid_len = jvs_build_wire(valid_wire, 0x01, valid_data, 1);
+
+    unsigned char stream[128];
+    int slen = 0;
+
+    /* Partial bad packet: SYNC + dest + length (no data, no complete packet) */
+    stream[slen++] = 0xE0;  /* SYNC */
+    stream[slen++] = 0x02;  /* dest */
+    stream[slen++] = 0x05;  /* length (claims 4 data bytes – won't arrive) */
+    stream[slen++] = 0xAA;  /* one data byte – leaves stream incomplete */
+
+    /* Immediately follow with the well-formed packet */
+    memcpy(stream + slen, valid_wire, valid_len);
+    slen += valid_len;
+
+    int fds[2];
+    ASSERT(pipe(fds) == 0, "pipe");
+    serialIO = fds[0];
+    write(fds[1], stream, slen);
+
+    JVSPacket pkt;
+    memset(&pkt, 0, sizeof(pkt));
+    JVSStatus s = readPacket(&pkt);
+    ASSERT(s == JVS_STATUS_SUCCESS,
+           "valid packet after partial one must succeed (checksum reset on SYNC)");
+    ASSERT_EQ_INT(pkt.destination, 0x01, "correct destination decoded");
+    ASSERT_EQ_INT(pkt.data[0], 0x10, "correct command byte decoded");
     close(fds[0]);
     close(fds[1]);
     serialIO = -1;
@@ -1921,6 +2053,108 @@ static void test_processPacket_namco_specific_program_date(void)
     TEST_PASS();
 }
 
+/*
+ * Namco sub-command 0x03: DIP switch status.
+ * Must return REPORT_SUCCESS followed by exactly one byte of 0xFF.
+ */
+static void test_processPacket_namco_specific_dip_switch(void)
+{
+    TEST_BEGIN(test_processPacket_namco_specific_dip_switch);
+
+    JVSIO io = make_test_io();
+    io.deviceID = 0x01;
+    int sv[2];
+    int afd = open_test_socket(sv);
+    ASSERT(afd >= 0, "socketpair");
+
+    unsigned char cmd[] = {CMD_NAMCO_SPECIFIC, 0x03};
+    JVSStatus s = run_processPacket(&io, afd, 0x01, cmd, 2);
+    ASSERT(s == JVS_STATUS_SUCCESS, "CMD_NAMCO_SPECIFIC 0x03 SUCCESS");
+
+    JVSResponse r = jvs_read_response(afd);
+    ASSERT(r.valid == 1, "response checksum valid");
+    ASSERT_EQ_INT(r.data[0], STATUS_SUCCESS,  "STATUS_SUCCESS");
+    ASSERT_EQ_INT(r.data[1], REPORT_SUCCESS,  "REPORT_SUCCESS");
+    ASSERT_EQ_INT(r.data[2], 0xFF, "DIP byte = 0xFF");
+
+    close(sv[0]); close(sv[1]); serialIO = -1;
+    TEST_PASS();
+}
+
+/*
+ * Namco sub-command 0x04: unknown status bytes.
+ * Must return REPORT_SUCCESS followed by two bytes of 0xFF.
+ */
+static void test_processPacket_namco_specific_04(void)
+{
+    TEST_BEGIN(test_processPacket_namco_specific_04);
+
+    JVSIO io = make_test_io();
+    io.deviceID = 0x01;
+    int sv[2];
+    int afd = open_test_socket(sv);
+    ASSERT(afd >= 0, "socketpair");
+
+    unsigned char cmd[] = {CMD_NAMCO_SPECIFIC, 0x04};
+    JVSStatus s = run_processPacket(&io, afd, 0x01, cmd, 2);
+    ASSERT(s == JVS_STATUS_SUCCESS, "CMD_NAMCO_SPECIFIC 0x04 SUCCESS");
+
+    JVSResponse r = jvs_read_response(afd);
+    ASSERT(r.valid == 1, "response checksum valid");
+    ASSERT_EQ_INT(r.data[0], STATUS_SUCCESS,  "STATUS_SUCCESS");
+    ASSERT_EQ_INT(r.data[1], REPORT_SUCCESS,  "REPORT_SUCCESS");
+    ASSERT_EQ_INT(r.data[2], 0xFF, "first byte = 0xFF");
+    ASSERT_EQ_INT(r.data[3], 0xFF, "second byte = 0xFF");
+
+    close(sv[0]); close(sv[1]); serialIO = -1;
+    TEST_PASS();
+}
+
+/*
+ * INCLUDE depth limit: a chain of 12 files each including the next should not
+ * crash or recurse infinitely.  After MAX_INCLUDE_DEPTH (10) levels the
+ * remaining files are silently skipped.  The settings set in the first 10
+ * files must be applied; the setting in file 11 must NOT be applied.
+ */
+static void test_parseConfig_include_depth_limit(void)
+{
+    TEST_BEGIN(test_parseConfig_include_depth_limit);
+
+#define CHAIN_LEN 12
+    char paths[CHAIN_LEN][64];
+    for (int i = 0; i < CHAIN_LEN; i++)
+        snprintf(paths[i], sizeof(paths[i]), "/tmp/mjtest_chain_%02d.conf", i);
+
+    /* Write from the deepest file upward so each includes the next */
+    for (int i = CHAIN_LEN - 1; i >= 0; i--)
+    {
+        FILE *f = fopen(paths[i], "w");
+        ASSERT(f != NULL, "create chain file");
+        if (i < CHAIN_LEN - 1)
+            fprintf(f, "INCLUDE %s\n", paths[i + 1]);
+        /* Every file sets DEBUG_MODE to its depth index */
+        fprintf(f, "DEBUG_MODE %d\n", i);
+        fclose(f);
+    }
+
+    JVSConfig cfg;
+    getDefaultConfig(&cfg);
+    /* Must not crash or hang */
+    parseConfig(paths[0], &cfg);
+
+    /* File 0 sets DEBUG_MODE 0, file 1 sets 1, … file 10 (depth 10 = limit)
+     * would be skipped.  The last successfully applied value comes from file 9
+     * (depth 9 < MAX_INCLUDE_DEPTH=10), which sets DEBUG_MODE 9.
+     * File 0's own "DEBUG_MODE 0" line runs AFTER the INCLUDE returns, so the
+     * final value is 0 (file 0 wins because it appears after the INCLUDE). */
+    ASSERT_EQ_INT(cfg.debugLevel, 0, "depth-limited INCLUDE chain completes without crash");
+
+    for (int i = 0; i < CHAIN_LEN; i++)
+        unlink(paths[i]);
+#undef CHAIN_LEN
+    TEST_PASS();
+}
+
 /* =========================================================================
  * ───────────────────────────── MAIN RUNNER ────────────────────────────────
  * ========================================================================= */
@@ -1951,6 +2185,12 @@ static const TestFn tests[] = {
     test_jvsInputFromString_unknown,
     test_jvsPlayerFromString_known,
     test_jvsPlayerFromString_unknown,
+    /* New bounds-check tests (PR bug-fixes) */
+    test_setSwitch_negative_player,
+    test_setAnalogue_negative_channel,
+    test_setGun_negative_channel,
+    test_setRotary_negative_channel,
+    test_incrementCoin_cap_at_16383,
     /* Config parsing */
     test_getDefaultConfig,
     test_parseConfig_valid_file,
@@ -1959,6 +2199,7 @@ static const TestFn tests[] = {
     test_parseConfig_deadzone_clamping,
     test_parseConfig_wii_ir_scale_clamping,
     test_parseConfig_include,
+    test_parseConfig_include_depth_limit,
     test_parseIO_namco_FCA1,
     test_parseIO_file_not_found,
     test_parseIO_capcom_naomi,
@@ -1971,6 +2212,7 @@ static const TestFn tests[] = {
     test_readPacket_escape_bytes,
     test_readPacket_escape_escape_byte,
     test_readPacket_sync_resets_parser,
+    test_readPacket_checksum_reset_on_sync,
     test_readPacket_timeout,
     test_writePacket_basic,
     test_writePacket_length_not_modified,
@@ -2006,6 +2248,8 @@ static const TestFn tests[] = {
     test_processPacket_connection_timeout,
     test_processPacket_namco_specific,
     test_processPacket_namco_specific_program_date,
+    test_processPacket_namco_specific_dip_switch,
+    test_processPacket_namco_specific_04,
 };
 
 int main(void)
