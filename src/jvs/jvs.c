@@ -22,6 +22,16 @@ static unsigned long packetCounter = 0;
 static time_t lastPacketTime = 0;
 static int connectionLostLogged = 0;
 
+/* Helper macro: verify there are at least (n) bytes of free space in the
+ * output packet buffer before writing.  Returns JVS_STATUS_ERROR if not. */
+#define CHECK_OUTPUT_SPACE(n) \
+	do { \
+		if (outputPacket.length + (n) > JVS_MAX_PACKET_SIZE) { \
+			debug(0, "Error: Output packet buffer full, dropping response byte(s)\n"); \
+			return JVS_STATUS_ERROR; \
+		} \
+	} while (0)
+
 /**
  * Get the name of a JVS command
  *
@@ -262,7 +272,8 @@ JVSStatus processPacket(JVSIO *jvsIO)
 	}
 
 	/* Handle re-transmission requests */
-	if (inputPacket.data[0] == CMD_RETRANSMIT)
+	/* CMD_RETRANSMIT: only valid if at least one data byte is present */
+	if (inputPacket.length >= 2 && inputPacket.data[0] == CMD_RETRANSMIT)
 		return writePacket(&outputPacket);
 
 	/* Setup the output packet */
@@ -312,6 +323,7 @@ JVSStatus processPacket(JVSIO *jvsIO)
 
 			ioToAssign->deviceID = inputPacket.data[index + 1];
 			debug(1, "CMD_ASSIGN_ADDR - Assigning address 0x%02X\n", ioToAssign->deviceID);
+			CHECK_OUTPUT_SPACE(1);
 			outputPacket.data[outputPacket.length++] = REPORT_SUCCESS;
 
 			/* Raise the sense line only after all devices in the chain have been assigned */
@@ -361,6 +373,7 @@ JVSStatus processPacket(JVSIO *jvsIO)
 		case CMD_COMMAND_VERSION:
 		{
 			debug(1, "CMD_COMMAND_VERSION - Returning version 0x%02X\n", jvsIO->capabilities.commandVersion);
+			CHECK_OUTPUT_SPACE(2);
 			outputPacket.data[outputPacket.length] = REPORT_SUCCESS;
 			outputPacket.data[outputPacket.length + 1] = jvsIO->capabilities.commandVersion;
 			outputPacket.length += 2;
@@ -371,6 +384,7 @@ JVSStatus processPacket(JVSIO *jvsIO)
 		case CMD_JVS_VERSION:
 		{
 			debug(1, "CMD_JVS_VERSION - Returning version 0x%02X\n", jvsIO->capabilities.jvsVersion);
+			CHECK_OUTPUT_SPACE(2);
 			outputPacket.data[outputPacket.length] = REPORT_SUCCESS;
 			outputPacket.data[outputPacket.length + 1] = jvsIO->capabilities.jvsVersion;
 			outputPacket.length += 2;
@@ -381,6 +395,7 @@ JVSStatus processPacket(JVSIO *jvsIO)
 		case CMD_COMMS_VERSION:
 		{
 			debug(1, "CMD_COMMS_VERSION - Returning version 0x%02X\n", jvsIO->capabilities.commsVersion);
+			CHECK_OUTPUT_SPACE(2);
 			outputPacket.data[outputPacket.length] = REPORT_SUCCESS;
 			outputPacket.data[outputPacket.length + 1] = jvsIO->capabilities.commsVersion;
 			outputPacket.length += 2;
@@ -444,6 +459,7 @@ JVSStatus processPacket(JVSIO *jvsIO)
 			size = 2;
 			int numberCoinSlots = inputPacket.data[index + 1];
 			debug(1, "CMD_READ_COINS - Reading %d coin slot(s)\n", numberCoinSlots);
+			CHECK_OUTPUT_SPACE(1);
 			outputPacket.data[outputPacket.length++] = REPORT_SUCCESS;
 
 			if (numberCoinSlots > JVS_MAX_STATE_SIZE)
@@ -473,6 +489,7 @@ JVSStatus processPacket(JVSIO *jvsIO)
 			int numberChannels = inputPacket.data[index + 1];
 			debug(1, "CMD_READ_ANALOGS - Reading %d analog channel(s)\n", numberChannels);
 
+			CHECK_OUTPUT_SPACE(1);
 			outputPacket.data[outputPacket.length++] = REPORT_SUCCESS;
 
 			if (numberChannels > JVS_MAX_STATE_SIZE)
@@ -503,6 +520,7 @@ JVSStatus processPacket(JVSIO *jvsIO)
 			int numberChannels = inputPacket.data[index + 1];
 			debug(1, "CMD_READ_ROTARY - Reading %d rotary channel(s)\n", numberChannels);
 
+			CHECK_OUTPUT_SPACE(1);
 			outputPacket.data[outputPacket.length++] = REPORT_SUCCESS;
 
 			if (numberChannels > JVS_MAX_STATE_SIZE)
@@ -545,6 +563,7 @@ JVSStatus processPacket(JVSIO *jvsIO)
 			size = 2;
 			int numberBytes = inputPacket.data[index + 1];
 			debug(1, "CMD_READ_GPI - Reading %d byte(s) of GPI data\n", numberBytes);
+			CHECK_OUTPUT_SPACE(1);
 			outputPacket.data[outputPacket.length++] = REPORT_SUCCESS;
 			for (int i = 0; i < numberBytes; i++)
 			{
@@ -581,6 +600,7 @@ JVSStatus processPacket(JVSIO *jvsIO)
 		{
 			debug(1, "CMD_SET_PAYOUT - Setting payout value\n");
 			size = 4;
+			CHECK_OUTPUT_SPACE(1);
 			outputPacket.data[outputPacket.length++] = REPORT_SUCCESS;
 		}
 		break;
@@ -590,6 +610,7 @@ JVSStatus processPacket(JVSIO *jvsIO)
 			int numBytes = inputPacket.data[index + 1];
 			debug(1, "CMD_WRITE_GPO - Writing %d byte(s) to GPO\n", numBytes);
 			size = 2 + numBytes;
+			CHECK_OUTPUT_SPACE(1);
 			outputPacket.data[outputPacket.length] = REPORT_SUCCESS;
 			outputPacket.length += 1;
 		}
@@ -600,6 +621,7 @@ JVSStatus processPacket(JVSIO *jvsIO)
 			debug(1, "CMD_WRITE_GPO_BYTE - Byte %d = 0x%02X\n", 
 				inputPacket.data[index + 1], inputPacket.data[index + 2]);
 			size = 3;
+			CHECK_OUTPUT_SPACE(1);
 			outputPacket.data[outputPacket.length++] = REPORT_SUCCESS;
 		}
 		break;
@@ -609,6 +631,7 @@ JVSStatus processPacket(JVSIO *jvsIO)
 			debug(1, "CMD_WRITE_GPO_BIT - Byte %d, Bit %d\n", 
 				inputPacket.data[index + 1], inputPacket.data[index + 2]);
 			size = 3;
+			CHECK_OUTPUT_SPACE(1);
 			outputPacket.data[outputPacket.length++] = REPORT_SUCCESS;
 		}
 		break;
@@ -618,6 +641,7 @@ JVSStatus processPacket(JVSIO *jvsIO)
 			int numChannels = inputPacket.data[index + 1];
 			debug(1, "CMD_WRITE_ANALOG - Writing %d analog channel(s)\n", numChannels);
 			size = numChannels * 2 + 2;
+			CHECK_OUTPUT_SPACE(1);
 			outputPacket.data[outputPacket.length++] = REPORT_SUCCESS;
 		}
 		break;
@@ -626,6 +650,7 @@ JVSStatus processPacket(JVSIO *jvsIO)
 		{
 			debug(1, "CMD_SUBTRACT_PAYOUT - Subtracting payout\n");
 			size = 3;
+			CHECK_OUTPUT_SPACE(1);
 			outputPacket.data[outputPacket.length++] = REPORT_SUCCESS;
 		}
 		break;
@@ -645,6 +670,7 @@ JVSStatus processPacket(JVSIO *jvsIO)
 				return JVS_STATUS_ERROR;
 			}
 
+			CHECK_OUTPUT_SPACE(1);
 			outputPacket.data[outputPacket.length++] = REPORT_SUCCESS;
 
 			/* Prevent overflow of coins */
@@ -658,6 +684,7 @@ JVSStatus processPacket(JVSIO *jvsIO)
 		{
 			debug(1, "CMD_WRITE_DISPLAY - Writing display data\n");
 			size = (inputPacket.data[index + 1] * 2) + 2;
+			CHECK_OUTPUT_SPACE(1);
 			outputPacket.data[outputPacket.length++] = REPORT_SUCCESS;
 		}
 		break;
@@ -677,6 +704,7 @@ JVSStatus processPacket(JVSIO *jvsIO)
 				return JVS_STATUS_ERROR;
 			}
 
+			CHECK_OUTPUT_SPACE(1);
 			outputPacket.data[outputPacket.length++] = REPORT_SUCCESS;
 
 			/* Prevent underflow of coins */
@@ -690,6 +718,7 @@ JVSStatus processPacket(JVSIO *jvsIO)
 		{
 			debug(1, "CMD_CONVEY_ID - Receiving main board ID\n");
 			size = 1;
+			CHECK_OUTPUT_SPACE(1);
 			outputPacket.data[outputPacket.length++] = REPORT_SUCCESS;
 			char idData[100];
 			int i;
@@ -717,6 +746,7 @@ JVSStatus processPacket(JVSIO *jvsIO)
 			int numberGuns = inputPacket.data[index + 1];
 			debug(1, "CMD_READ_LIGHTGUN - Reading %d gun(s)\n", numberGuns);
 
+			CHECK_OUTPUT_SPACE(1);
 			outputPacket.data[outputPacket.length++] = REPORT_SUCCESS;
 
 			/* Each gun occupies two consecutive state slots (X then Y), so the
@@ -755,6 +785,7 @@ JVSStatus processPacket(JVSIO *jvsIO)
 		{
 			debug(1, "CMD_NAMCO_SPECIFIC - Processing Namco command\n");
 
+			CHECK_OUTPUT_SPACE(1);
 			outputPacket.data[outputPacket.length++] = REPORT_SUCCESS;
 
 			size = 2;
@@ -820,6 +851,7 @@ JVSStatus processPacket(JVSIO *jvsIO)
 			case 0x18:
 			{
 				size += 4;
+				CHECK_OUTPUT_SPACE(1);
 				outputPacket.data[outputPacket.length++] = 0xFF;
 			}
 			break;

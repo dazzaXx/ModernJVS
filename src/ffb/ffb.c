@@ -37,7 +37,7 @@ void *ffbThread(void *_args)
 {
     FFBState *args = (FFBState *)_args;
 
-    debug(0, "Hello from the thread %d\n", args->serial);
+    debug(1, "FFB thread started (serial fd: %d)\n", args->serial);
 
     return 0;
 }
