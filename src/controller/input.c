@@ -187,9 +187,13 @@ static void *wiiDeviceThread(void *_args)
                      * them left-to-right, then use the vector between them to rotate the
                      * midpoint back to a canonical horizontal orientation, compensating
                      * for any physical tilt of the Wiimote. The result is a normalised
-                     * (0.0–1.0) screen coordinate centred on the IR bar. */
-                    double valuex = 512 + cos(atan2(twoY - oneY, twoX - oneX) * -1) * (((oneX - twoX) / 2 + twoX) - 512) - sin(atan2(twoY - oneY, twoX - oneX) * -1) * (((oneY - twoY) / 2 + twoY) - 384);
-                    double valuey = 384 + sin(atan2(twoY - oneY, twoX - oneX) * -1) * (((oneX - twoX) / 2 + twoX) - 512) + cos(atan2(twoY - oneY, twoX - oneX) * -1) * (((oneY - twoY) / 2 + twoY) - 384);
+                     * (0.0–1.0) screen coordinate centred on the IR bar.
+                     * Cache the angle to avoid computing atan2 twice per event. */
+                    double angle = atan2(twoY - oneY, twoX - oneX) * -1;
+                    double midX = (oneX - twoX) / 2.0 + twoX;
+                    double midY = (oneY - twoY) / 2.0 + twoY;
+                    double valuex = 512 + cos(angle) * (midX - 512) - sin(angle) * (midY - 384);
+                    double valuey = 384 + sin(angle) * (midX - 512) + cos(angle) * (midY - 384);
 
                     double finalX = (((double)valuex / (double)1023) * 1.0);
                     double finalY = 1.0f - ((double)valuey / (double)1023);
@@ -240,7 +244,6 @@ static void *wiiDeviceThread(void *_args)
                 }
                 continue;
             }
-            break;
             }
         }
     }
@@ -275,14 +278,14 @@ static void *deviceThread(void *_args)
 
     memset(absoluteBitmask, 0, sizeof(absoluteBitmask));
     if (ioctl(fd, EVIOCGBIT(EV_ABS, sizeof(absoluteBitmask)), absoluteBitmask) < 0)
-        perror("Error: Failed to get bit mask for analogue values");
+        debug(0, "Error: Failed to get bit mask for analogue values: %s\n", strerror(errno));
 
     for (int axisIndex = 0; axisIndex < ABS_MAX; ++axisIndex)
     {
         if (test_bit(axisIndex, absoluteBitmask))
         {
             if (ioctl(fd, EVIOCGABS(axisIndex), &absoluteFeatures))
-                perror("Error: Failed to get device analogue limits");
+                debug(0, "Error: Failed to get device analogue limits: %s\n", strerror(errno));
 
             args->inputs.absMax[axisIndex] = (double)absoluteFeatures.maximum;
             args->inputs.absMin[axisIndex] = (double)absoluteFeatures.minimum;
@@ -679,39 +682,49 @@ static int processMappings(InputMappings *inputMappings, OutputMappings *outputM
             continue;
         }
 
+        /* Guard against an invalid event code returned by evDevFromString() on a
+         * malformed device mapping file — accessing abs/key/rel at a negative index
+         * or an index beyond MAX_EV_ITEMS would be out-of-bounds (undefined behaviour). */
+        int code = inputMappings->mappings[i].code;
+        if (code < 0 || code >= MAX_EV_ITEMS)
+        {
+            debug(0, "Error: Event code %d out of range for mapping, skipping\n", code);
+            continue;
+        }
+
         if (inputMappings->mappings[i].type == HAT)
         {
-            evInputs->abs[inputMappings->mappings[i].code] = tempMapping;
-            evInputs->abs[inputMappings->mappings[i].code].type = HAT;
-            evInputs->absEnabled[inputMappings->mappings[i].code] = 1;
+            evInputs->abs[code] = tempMapping;
+            evInputs->abs[code].type = HAT;
+            evInputs->absEnabled[code] = 1;
         }
 
         if (inputMappings->mappings[i].type == ANALOGUE && tempMapping.type == ANALOGUE)
         {
-            evInputs->abs[inputMappings->mappings[i].code] = tempMapping;
-            evInputs->abs[inputMappings->mappings[i].code].type = ANALOGUE;
-            evInputs->absEnabled[inputMappings->mappings[i].code] = 1;
-            evInputs->absMultiplier[inputMappings->mappings[i].code] = multiplier;
+            evInputs->abs[code] = tempMapping;
+            evInputs->abs[code].type = ANALOGUE;
+            evInputs->absEnabled[code] = 1;
+            evInputs->absMultiplier[code] = multiplier;
         }
         else if (inputMappings->mappings[i].type == ROTARY && tempMapping.type == ROTARY)
         {
-            evInputs->rel[inputMappings->mappings[i].code] = tempMapping;
-            evInputs->rel[inputMappings->mappings[i].code].type = ROTARY;
-            evInputs->relEnabled[inputMappings->mappings[i].code] = 1;
-            evInputs->relMultiplier[inputMappings->mappings[i].code] = multiplier;
+            evInputs->rel[code] = tempMapping;
+            evInputs->rel[code].type = ROTARY;
+            evInputs->relEnabled[code] = 1;
+            evInputs->relMultiplier[code] = multiplier;
         }
         else if (inputMappings->mappings[i].type == SWITCH || tempMapping.type == SWITCH)
         {
-            evInputs->key[inputMappings->mappings[i].code] = tempMapping;
-            evInputs->abs[inputMappings->mappings[i].code].type = SWITCH;
-            evInputs->absEnabled[inputMappings->mappings[i].code] = 1;
+            evInputs->key[code] = tempMapping;
+            evInputs->abs[code].type = SWITCH;
+            evInputs->absEnabled[code] = 1;
         }
 
         if (inputMappings->mappings[i].type == CARD)
         {
-            evInputs->key[inputMappings->mappings[i].code] = tempMapping;
-            evInputs->abs[inputMappings->mappings[i].code].type = (InputType)COIN;
-            evInputs->absEnabled[inputMappings->mappings[i].code] = 1;
+            evInputs->key[code] = tempMapping;
+            evInputs->abs[code].type = (InputType)COIN;
+            evInputs->absEnabled[code] = 1;
         }
     }
     return 1;
