@@ -149,6 +149,11 @@ static int writeFeature(JVSPacket *packet, char capability, char arg0, char arg1
  */
 static void writeFeatures(JVSPacket *packet, JVSCapabilities *capabilities)
 {
+	if (packet->length + 1 > JVS_MAX_PACKET_SIZE)
+	{
+		debug(0, "Error: Packet buffer overflow in writeFeatures (REPORT_SUCCESS)\n");
+		return;
+	}
 	packet->data[packet->length] = REPORT_SUCCESS;
 	packet->length += 1;
 
@@ -197,6 +202,11 @@ static void writeFeatures(JVSPacket *packet, JVSCapabilities *capabilities)
 	if (capabilities->backup)
 		writeFeature(packet, CAP_BACKUP, 0x00, 0x00, 0x00);
 
+	if (packet->length + 1 > JVS_MAX_PACKET_SIZE)
+	{
+		debug(0, "Error: Packet buffer overflow in writeFeatures (CAP_END)\n");
+		return;
+	}
 	packet->data[packet->length] = CAP_END;
 	packet->length += 1;
 }
@@ -400,6 +410,12 @@ JVSStatus processPacket(JVSIO *jvsIO)
 			outputPacket.data[outputPacket.length] = REPORT_SUCCESS;
 			outputPacket.data[outputPacket.length + 1] = jvsIO->state.inputSwitch[0];
 			outputPacket.length += 2;
+			/* Clamp switch-byte count to 2: our inputSwitch register is 16 bits wide.
+			 * More than 2 bytes would require a right-shift of (8 - j*8) with j>=2,
+			 * i.e. a negative shift amount, which is undefined behaviour in C99. */
+			int switchBytes = inputPacket.data[index + 2];
+			if (switchBytes > 2)
+				switchBytes = 2;
 			for (int i = 0; i < inputPacket.data[index + 1]; i++)
 			{
 				// Bounds check to prevent inputSwitch array overflow
@@ -408,7 +424,7 @@ JVSStatus processPacket(JVSIO *jvsIO)
 					debug(0, "Error: Player index out of bounds in CMD_READ_SWITCHES\n");
 					return JVS_STATUS_ERROR;
 				}
-				for (int j = 0; j < inputPacket.data[index + 2]; j++)
+				for (int j = 0; j < switchBytes; j++)
 				{
 					// Bounds check to prevent buffer overflow
 					// Check before writing to ensure we have space for the next byte

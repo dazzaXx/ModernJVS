@@ -214,7 +214,10 @@ int readBytes(unsigned char *buffer, int amount)
   if (!FD_ISSET(serialIO, &fd_serial))
     return -1;
 
-  return read(serialIO, buffer, amount);
+  int result = read(serialIO, buffer, amount);
+  /* read() returning 0 means EOF (device disconnected); treat as timeout so
+   * readPacket() does not spin in an infinite loop calling select/read. */
+  return (result == 0) ? -1 : result;
 }
 
 int writeBytes(unsigned char *buffer, int amount)
@@ -398,10 +401,6 @@ int setGPIODirection(int pin, int dir)
 
 int writeGPIO(int pin, int value)
 {
-  struct gpiod_chip *chip = open_gpio_chip();
-  if (!chip)
-    return 0;
-  
   // Release existing request if we're changing pins or if it's not configured as OUTPUT
   if (line_request && (current_pin != pin || current_direction != OUT))
   {
@@ -410,15 +409,20 @@ int writeGPIO(int pin, int value)
     current_pin = -1;
     current_direction = -1;
   }
-  
+
   // If we already have an output request for this pin, just update the value
+  // without needing to open the chip at all.
   if (line_request && current_pin == pin && current_direction == OUT)
   {
     enum gpiod_line_value gpio_value = (value == LOW) ? GPIOD_LINE_VALUE_INACTIVE : GPIOD_LINE_VALUE_ACTIVE;
     int ret = gpiod_line_request_set_value(line_request, pin, gpio_value);
-    gpiod_chip_close(chip);
     return (ret == 0) ? 1 : 0;
   }
+
+  // No suitable request exists yet — open the chip to create one.
+  struct gpiod_chip *chip = open_gpio_chip();
+  if (!chip)
+    return 0;
   
   struct gpiod_line_settings *settings = gpiod_line_settings_new();
   if (!settings)
