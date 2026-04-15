@@ -190,10 +190,10 @@ static void *wiiDeviceThread(void *_args)
                      * (0.0–1.0) screen coordinate centred on the IR bar.
                      * Cache the angle to avoid computing atan2 twice per event. */
                     double angle = atan2(twoY - oneY, twoX - oneX) * -1;
-                    double midX = (oneX - twoX) / 2.0 + twoX;
-                    double midY = (oneY - twoY) / 2.0 + twoY;
-                    double valuex = 512 + cos(angle) * (midX - 512) - sin(angle) * (midY - 384);
-                    double valuey = 384 + sin(angle) * (midX - 512) + cos(angle) * (midY - 384);
+                    double irMidpointX = (oneX - twoX) / 2.0 + twoX;
+                    double irMidpointY = (oneY - twoY) / 2.0 + twoY;
+                    double valuex = 512 + cos(angle) * (irMidpointX - 512) - sin(angle) * (irMidpointY - 384);
+                    double valuey = 384 + sin(angle) * (irMidpointX - 512) + cos(angle) * (irMidpointY - 384);
 
                     double finalX = (((double)valuex / (double)1023) * 1.0);
                     double finalY = 1.0f - ((double)valuey / (double)1023);
