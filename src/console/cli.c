@@ -444,7 +444,7 @@ JVSCLIStatus parseArguments(int argc, char **argv, char *map)
         return editFile(argv[2]);
     }
 
-    // If none of these where found, the argument is unknown.
+    // If none of these were found, the argument is unknown.
     debug(0, "Unknown argument %s\n", argv[1]);
     return JVS_CLI_STATUS_ERROR;
 }

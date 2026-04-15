@@ -4,7 +4,7 @@
 
 #include <time.h>
 
-/* The in and out packets used to read and write to and from*/
+/* Packet structures for the current incoming command and the outgoing response */
 JVSPacket inputPacket, outputPacket;
 
 /* The in and out buffer used to read and write to and from */
@@ -261,7 +261,8 @@ JVSStatus processPacket(JVSIO *jvsIO)
 
 	int index = 0;
 
-	/* Set the entire packet success line */
+	/* Write the STATUS_SUCCESS byte required at the start of every JVS response;
+	 * individual per-command results follow as REPORT_SUCCESS bytes below */
 	outputPacket.data[outputPacket.length++] = STATUS_SUCCESS;
 
 	while (index < inputPacket.length - 1)
@@ -786,7 +787,7 @@ JVSStatus processPacket(JVSIO *jvsIO)
 			}
 			break;
 
-			// Unsure
+			// Purpose of sub-command 0x04 is undocumented; returns 0xFF, 0xFF as a safe default
 			case 0x04:
 			{
 				if (outputPacket.length + 2 > JVS_MAX_PACKET_SIZE)

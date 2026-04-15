@@ -97,7 +97,7 @@ static JVSConfigStatus parseConfigInternal(char *path, JVSConfig *config, int de
         if (!command)
             continue;
 
-        /* This will get overwritten! Need to do defaults somewhere else */
+        /* Recursively parse an included config file, inheriting all settings parsed so far */
         if (strcmp(command, "INCLUDE") == 0)
         {
             char *token = getNextToken(NULL, " ", &saveptr);

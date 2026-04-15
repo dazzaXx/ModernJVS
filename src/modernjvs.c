@@ -17,7 +17,7 @@
 #include "ffb/ffb.h"
 #include "version.h"
 
-/* Time between reinit in ms */
+/* Delay between controller reinit cycles, in microseconds (200 ms) */
 #define TIME_REINIT (200 * 1000)
 
 /* Runtime state file: records the current testButtonActive value (0 or 1)
@@ -90,7 +90,7 @@ int main(int argc, char **argv)
         return EXIT_FAILURE;
     }
 
-    /* Init the connection to the Naomi */
+    /* Open the RS485 serial device and configure the sense line GPIO */
     if (!initDevice(config.devicePath, config.senseLineType, config.senseLinePin))
     {
         debug(0, "Critical: Failed to init the RS485 device at %s, you must be root.\n", config.devicePath);
@@ -112,7 +112,7 @@ int main(int argc, char **argv)
     JVSInputStatus lastInputState = JVS_INPUT_STATUS_SUCCESS;
     while (running != -1)
     {
-        /* Init the watchdog to check inputs */
+        /* Start the watchdog thread that monitors /dev/input for hot-plug events */
         debug(1, "Init watchdog\n");
         running = 1;
         setThreadsRunning(1);
@@ -299,7 +299,7 @@ int main(int argc, char **argv)
     /* Remove the runtime state file now that the daemon is stopping. */
     unlink(TESTMODE_STATE_PATH);
 
-    /* Close the file pointer */
+    /* Disconnect from the RS485 serial device and release GPIO resources */
     if (!disconnectJVS())
     {
         debug(0, "Critical: Could not disconnect from serial\n");
@@ -314,7 +314,7 @@ void cleanup(void)
     /* Stop threads managed by ThreadManager */
     stopAllThreads();
 
-    /* Take a short break on reinit to reduce load */
+    /* Throttle the reinit loop to avoid busy-spinning when no controllers are present */
     usleep(TIME_REINIT);
 }
 
