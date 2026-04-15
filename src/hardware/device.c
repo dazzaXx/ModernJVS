@@ -261,7 +261,7 @@ int setSerialAttributes(int fd, int myBaud)
 
   ioctl(fd, TIOCMSET, &status);
 
-  usleep(100 * 1000); // 10mS
+  usleep(100 * 1000); // 100ms
 
   struct serial_struct serial_settings;
 

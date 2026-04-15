@@ -68,8 +68,12 @@ JVSConfigStatus getDefaultConfig(JVSConfig *config)
     return JVS_CONFIG_STATUS_SUCCESS;
 }
 
+/* Maximum INCLUDE nesting depth to prevent infinite recursion on self-referential files */
+#define MAX_INCLUDE_DEPTH 10
+
 JVSConfigStatus parseConfig(char *path, JVSConfig *config)
 {
+    static int includeDepth = 0;
     FILE *file;
     char buffer[MAX_LINE_LENGTH];
     char *saveptr = NULL;
@@ -92,8 +96,16 @@ JVSConfigStatus parseConfig(char *path, JVSConfig *config)
         if (strcmp(command, "INCLUDE") == 0)
         {
             char *token = getNextToken(NULL, " ", &saveptr);
-            if (token)
+            if (token && includeDepth < MAX_INCLUDE_DEPTH)
+            {
+                includeDepth++;
                 parseConfig(token, config);
+                includeDepth--;
+            }
+            else if (token)
+            {
+                debug(0, "Error: Maximum INCLUDE depth (%d) exceeded, skipping '%s'\n", MAX_INCLUDE_DEPTH, token);
+            }
         }
         else if (strcmp(command, "SENSE_LINE_TYPE") == 0)
         {
@@ -203,6 +215,7 @@ JVSConfigStatus parseConfig(char *path, JVSConfig *config)
 
 JVSConfigStatus parseInputMapping(char *path, InputMappings *inputMappings)
 {
+    static int includeDepth = 0;
     FILE *file;
     char buffer[MAX_LINE_LENGTH];
     char *saveptr = NULL;
@@ -216,6 +229,7 @@ JVSConfigStatus parseInputMapping(char *path, InputMappings *inputMappings)
         return JVS_CONFIG_STATUS_FILE_NOT_FOUND;
 
     inputMappings->player = DEFAULT_PLAYER;
+    inputMappings->length = 0;
 
     while (fgets(buffer, MAX_LINE_LENGTH, file))
     {
@@ -231,12 +245,18 @@ JVSConfigStatus parseInputMapping(char *path, InputMappings *inputMappings)
         if (strcmp(command, "INCLUDE") == 0)
         {
             char *token = getNextToken(NULL, " ", &saveptr);
-            if (token)
+            if (token && includeDepth < MAX_INCLUDE_DEPTH)
             {
-                InputMappings tempInputMappings;
+                InputMappings tempInputMappings = {0};
+                includeDepth++;
                 JVSConfigStatus status = parseInputMapping(token, &tempInputMappings);
+                includeDepth--;
                 if (status == JVS_CONFIG_STATUS_SUCCESS)
                     memcpy(inputMappings, &tempInputMappings, sizeof(InputMappings));
+            }
+            else if (token)
+            {
+                debug(0, "Error: Maximum INCLUDE depth (%d) exceeded, skipping '%s'\n", MAX_INCLUDE_DEPTH, token);
             }
         }
         else if (strcmp(command, "PLAYER") == 0)
@@ -400,6 +420,7 @@ JVSConfigStatus parseInputMapping(char *path, InputMappings *inputMappings)
 
 JVSConfigStatus parseOutputMapping(char *path, OutputMappings *outputMappings, char *configPath, char *secondConfigPath)
 {
+    static int includeDepth = 0;
     FILE *file;
     char buffer[MAX_LINE_LENGTH];
     char *saveptr = NULL;
@@ -411,6 +432,8 @@ JVSConfigStatus parseOutputMapping(char *path, OutputMappings *outputMappings, c
 
     if ((file = fopen(gamePath, "r")) == NULL)
         return JVS_CONFIG_STATUS_FILE_NOT_FOUND;
+
+    outputMappings->length = 0;
 
     while (fgets(buffer, MAX_LINE_LENGTH, file))
     {
@@ -447,12 +470,18 @@ JVSConfigStatus parseOutputMapping(char *path, OutputMappings *outputMappings, c
         if (strcmp(command, "INCLUDE") == 0)
         {
             char *token = getNextToken(NULL, " ", &saveptr);
-            if (token)
+            if (token && includeDepth < MAX_INCLUDE_DEPTH)
             {
-                OutputMappings tempOutputMappings;
+                OutputMappings tempOutputMappings = {0};
+                includeDepth++;
                 JVSConfigStatus status = parseOutputMapping(token, &tempOutputMappings, configPath, secondConfigPath);
+                includeDepth--;
                 if (status == JVS_CONFIG_STATUS_SUCCESS)
                     memcpy(outputMappings, &tempOutputMappings, sizeof(OutputMappings));
+            }
+            else if (token)
+            {
+                debug(0, "Error: Maximum INCLUDE depth (%d) exceeded, skipping '%s'\n", MAX_INCLUDE_DEPTH, token);
             }
         }
         else if (strcmp(command, "EMULATE") == 0)
