@@ -675,6 +675,7 @@ static void test_incrementCoin_cap_at_16383(void)
 
     /* Increment well past the 16383 cap */
     incrementCoin(&io, PLAYER_1, 16000);
+    ASSERT_EQ_INT(io.state.coinCount[0], 16000, "normal accumulation before cap");
     incrementCoin(&io, PLAYER_1, 16000);
     ASSERT_EQ_INT(io.state.coinCount[0], 16383, "coin count capped at 16383");
 
@@ -1142,6 +1143,7 @@ static void test_readPacket_checksum_reset_on_sync(void)
     stream[slen++] = 0xAA;  /* one data byte – leaves stream incomplete */
 
     /* Immediately follow with the well-formed packet */
+    ASSERT(slen + valid_len <= (int)sizeof(stream), "stream buffer sufficient");
     memcpy(stream + slen, valid_wire, valid_len);
     slen += valid_len;
 
@@ -2132,8 +2134,11 @@ static void test_parseConfig_include_depth_limit(void)
         ASSERT(f != NULL, "create chain file");
         if (i < CHAIN_LEN - 1)
             fprintf(f, "INCLUDE %s\n", paths[i + 1]);
-        /* Every file sets DEBUG_MODE to its depth index */
-        fprintf(f, "DEBUG_MODE %d\n", i);
+        /* Every file sets DEBUG_MODE to its depth index, except file 11
+         * which uses a sentinel value (999) that must NOT appear in cfg
+         * because it lives beyond MAX_INCLUDE_DEPTH=10. */
+        int val = (i == CHAIN_LEN - 1) ? 999 : i;
+        fprintf(f, "DEBUG_MODE %d\n", val);
         fclose(f);
     }
 
@@ -2148,6 +2153,8 @@ static void test_parseConfig_include_depth_limit(void)
      * File 0's own "DEBUG_MODE 0" line runs AFTER the INCLUDE returns, so the
      * final value is 0 (file 0 wins because it appears after the INCLUDE). */
     ASSERT_EQ_INT(cfg.debugLevel, 0, "depth-limited INCLUDE chain completes without crash");
+    /* Verify the sentinel value from file 11 was NOT applied */
+    ASSERT(cfg.debugLevel != 999, "file beyond depth limit must not be applied");
 
     for (int i = 0; i < CHAIN_LEN; i++)
         unlink(paths[i]);
