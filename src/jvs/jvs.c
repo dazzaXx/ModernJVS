@@ -413,9 +413,9 @@ JVSStatus processPacket(JVSIO *jvsIO)
 			/* Clamp switch-byte count to 2: our inputSwitch register is 16 bits wide.
 			 * More than 2 bytes would require a right-shift of (8 - j*8) with j>=2,
 			 * i.e. a negative shift amount, which is undefined behaviour in C99. */
-			int switchBytes = inputPacket.data[index + 2];
-			if (switchBytes > 2)
-				switchBytes = 2;
+			int playerSwitchBytes = inputPacket.data[index + 2];
+			if (playerSwitchBytes > 2)
+				playerSwitchBytes = 2;
 			for (int i = 0; i < inputPacket.data[index + 1]; i++)
 			{
 				// Bounds check to prevent inputSwitch array overflow
@@ -424,7 +424,7 @@ JVSStatus processPacket(JVSIO *jvsIO)
 					debug(0, "Error: Player index out of bounds in CMD_READ_SWITCHES\n");
 					return JVS_STATUS_ERROR;
 				}
-				for (int j = 0; j < switchBytes; j++)
+				for (int j = 0; j < playerSwitchBytes; j++)
 				{
 					// Bounds check to prevent buffer overflow
 					// Check before writing to ensure we have space for the next byte
