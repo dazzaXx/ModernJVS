@@ -917,7 +917,10 @@ JVSStatus readPacket(JVSPacket *packet)
 				int remaining = bytesAvailable - index - 1;
 				if (remaining > 0)
 					memmove(inputBuffer, inputBuffer + index + 1, remaining);
-				bytesAvailable = remaining;
+				/* `remaining` is always >= 0 here (loop invariant: index < bytesAvailable),
+				 * but clamp defensively to prevent any future refactor from setting a
+				 * negative bytesAvailable and passing a bogus offset to readBytes. */
+				bytesAvailable = remaining > 0 ? remaining : 0;
 				index = 0;
 				continue;
 			}
