@@ -481,10 +481,6 @@ int writeGPIO(int pin, int value)
 
 int readGPIO(int pin)
 {
-  struct gpiod_chip *chip = open_gpio_chip();
-  if (!chip)
-    return -1;
-  
   // Release existing request if we're changing pins
   if (line_request && current_pin != pin)
   {
@@ -493,73 +489,79 @@ int readGPIO(int pin)
     current_pin = -1;
     current_direction = -1;
   }
-  
-  // If we don't have a request or it's not configured as input, create/recreate it
-  if (!line_request || current_direction != IN)
+
+  // If we already have a cached INPUT request for this pin, use it directly
+  // without opening the chip (the line_request handle is independent of the chip).
+  if (line_request && current_direction == IN)
   {
-    if (line_request)
-    {
-      gpiod_line_request_release(line_request);
-      line_request = NULL;
-    }
-    
-    struct gpiod_line_settings *settings = gpiod_line_settings_new();
-    if (!settings)
-    {
-      gpiod_chip_close(chip);
-      return -1;
-    }
-    
-    gpiod_line_settings_set_direction(settings, GPIOD_LINE_DIRECTION_INPUT);
-    
-    struct gpiod_line_config *config = gpiod_line_config_new();
-    if (!config)
-    {
-      gpiod_line_settings_free(settings);
-      gpiod_chip_close(chip);
-      return -1;
-    }
-    
-    unsigned int offset = (unsigned int)pin;
-    int ret = gpiod_line_config_add_line_settings(config, &offset, 1, settings);
-    if (ret)
-    {
-      gpiod_line_config_free(config);
-      gpiod_line_settings_free(settings);
-      gpiod_chip_close(chip);
-      return -1;
-    }
-    
-    struct gpiod_request_config *req_config = gpiod_request_config_new();
-    if (!req_config)
-    {
-      gpiod_line_config_free(config);
-      gpiod_line_settings_free(settings);
-      gpiod_chip_close(chip);
-      return -1;
-    }
-    
-    gpiod_request_config_set_consumer(req_config, GPIO_CONSUMER_NAME);
-    
-    line_request = gpiod_chip_request_lines(chip, req_config, config);
-    
-    gpiod_request_config_free(req_config);
-    gpiod_line_config_free(config);
-    gpiod_line_settings_free(settings);
-    
-    if (!line_request)
-    {
-      gpiod_chip_close(chip);
-      return -1;
-    }
-    
-    current_pin = pin;
-    current_direction = IN;
+    enum gpiod_line_value value = gpiod_line_request_get_value(line_request, pin);
+    return (value == GPIOD_LINE_VALUE_ACTIVE) ? 1 : 0;
+  }
+
+  // No suitable request exists yet — open the chip to create one.
+  struct gpiod_chip *chip = open_gpio_chip();
+  if (!chip)
+    return -1;
+
+  // Release any existing request that is not configured as input
+  if (line_request)
+  {
+    gpiod_line_request_release(line_request);
+    line_request = NULL;
+  }
+
+  struct gpiod_line_settings *settings = gpiod_line_settings_new();
+  if (!settings)
+  {
+    gpiod_chip_close(chip);
+    return -1;
   }
   
-  enum gpiod_line_value value = gpiod_line_request_get_value(line_request, pin);
+  gpiod_line_settings_set_direction(settings, GPIOD_LINE_DIRECTION_INPUT);
   
+  struct gpiod_line_config *config = gpiod_line_config_new();
+  if (!config)
+  {
+    gpiod_line_settings_free(settings);
+    gpiod_chip_close(chip);
+    return -1;
+  }
+  
+  unsigned int offset = (unsigned int)pin;
+  int ret = gpiod_line_config_add_line_settings(config, &offset, 1, settings);
+  if (ret)
+  {
+    gpiod_line_config_free(config);
+    gpiod_line_settings_free(settings);
+    gpiod_chip_close(chip);
+    return -1;
+  }
+  
+  struct gpiod_request_config *req_config = gpiod_request_config_new();
+  if (!req_config)
+  {
+    gpiod_line_config_free(config);
+    gpiod_line_settings_free(settings);
+    gpiod_chip_close(chip);
+    return -1;
+  }
+  
+  gpiod_request_config_set_consumer(req_config, GPIO_CONSUMER_NAME);
+  
+  line_request = gpiod_chip_request_lines(chip, req_config, config);
+  
+  gpiod_request_config_free(req_config);
+  gpiod_line_config_free(config);
+  gpiod_line_settings_free(settings);
   gpiod_chip_close(chip);
+
+  if (!line_request)
+    return -1;
+
+  current_pin = pin;
+  current_direction = IN;
+
+  enum gpiod_line_value value = gpiod_line_request_get_value(line_request, pin);
   
   return (value == GPIOD_LINE_VALUE_ACTIVE) ? 1 : 0;
 }

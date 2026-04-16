@@ -1015,12 +1015,14 @@ JVSStatus writePacket(JVSPacket *packet)
 	/* Increment the length to include the checksum byte in the wire-format
 	 * length field, then restore it afterwards so that the packet struct
 	 * stays consistent (important for CMD_RETRANSMIT which re-calls this
-	 * function with the same outputPacket without rebuilding it). */
+	 * function with the same outputPacket without rebuilding it).
+	 * Use a local int to avoid unsigned char wrap when length == 255. */
 	unsigned char savedLength = packet->length;
-	packet->length++;
+	int wireLength = (int)packet->length + 1;
+	packet->length = (unsigned char)wireLength;
 
 	/* Write out entire packet */
-	for (int i = 0; i < packet->length + 1; i++)
+	for (int i = 0; i < wireLength + 1; i++)
 	{
 		if (packetPointer[i] == SYNC || packetPointer[i] == ESCAPE)
 		{
