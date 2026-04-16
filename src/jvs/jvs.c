@@ -92,12 +92,22 @@ static const char *getCommandName(unsigned char cmd)
  */
 int initJVS(JVSIO *jvsIO)
 {
-	/* Calculate the alignments for analogue and gun channels, default is left */
-	if (!jvsIO->capabilities.rightAlignBits)
+	/* Calculate the alignments for analogue and gun channels for every IO in
+	 * the chain.  Previously only the primary IO was initialised here, leaving
+	 * the chained IO with analogueRestBits/gunXRestBits/gunYRestBits == 0 (from
+	 * zero-initialisation in main), which caused analogue and lightgun data to
+	 * be sent un-shifted (effectively right-aligned) for the second device
+	 * instead of the correct left-aligned format. */
+	JVSIO *io = jvsIO;
+	while (io != NULL)
 	{
-		jvsIO->analogueRestBits = 16 - jvsIO->capabilities.analogueInBits;
-		jvsIO->gunXRestBits = 16 - jvsIO->capabilities.gunXBits;
-		jvsIO->gunYRestBits = 16 - jvsIO->capabilities.gunYBits;
+		if (!io->capabilities.rightAlignBits)
+		{
+			io->analogueRestBits = 16 - io->capabilities.analogueInBits;
+			io->gunXRestBits = 16 - io->capabilities.gunXBits;
+			io->gunYRestBits = 16 - io->capabilities.gunYBits;
+		}
+		io = io->chainedIO;
 	}
 
 	/* Float the sense line ready for connection */
