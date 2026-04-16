@@ -110,7 +110,7 @@ static void *wiiDeviceThread(void *_args)
     int fd = open(args->devicePath, O_RDONLY);
     if (fd < 0)
     {
-        debug(0, "Warning: Failed to open Wii Remote device.\n");
+        debug(0, "Warning: Failed to open Wii Remote device '%s': %s\n", args->devicePath, strerror(errno));
         free(args);
         args = NULL;
         return 0;
@@ -377,7 +377,8 @@ static void *deviceThread(void *_args)
             case EV_KEY:
             {
                 JVSIO *io = args->jvsIO;
-                if (args->inputs.key[event.code].secondaryIO)
+                if (args->inputs.key[event.code].secondaryIO &&
+                    args->jvsIO->chainedIO != NULL)
                 {
                     io = args->jvsIO->chainedIO;
                 }

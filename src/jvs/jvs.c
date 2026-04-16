@@ -910,7 +910,15 @@ JVSStatus readPacket(JVSPacket *packet)
 				phase = 0;
 				dataIndex = 0;
 				checksum = 0x00;
-				index++;
+				/* Compact: discard everything up to and including this SYNC byte so
+				 * that framing noise cannot exhaust the 255-byte inputBuffer.  Any
+				 * bytes already read after the SYNC are shifted to the front so they
+				 * are not lost. */
+				int remaining = bytesAvailable - index - 1;
+				if (remaining > 0)
+					memmove(inputBuffer, inputBuffer + index + 1, remaining);
+				bytesAvailable = remaining;
+				index = 0;
 				continue;
 			}
 
