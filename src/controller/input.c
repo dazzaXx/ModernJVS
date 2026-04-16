@@ -381,6 +381,10 @@ static void *deviceThread(void *_args)
 
             case EV_KEY:
             {
+                /* Guard against out-of-range kernel key codes */
+                if (event.code >= MAX_EV_ITEMS)
+                    continue;
+
                 JVSIO *io = args->jvsIO;
                 if (args->inputs.key[event.code].secondaryIO &&
                     args->jvsIO->chainedIO != NULL)
@@ -426,6 +430,10 @@ static void *deviceThread(void *_args)
 
             case EV_REL:
             {
+                /* Guard against out-of-range kernel rel codes */
+                if (event.code >= MAX_EV_ITEMS)
+                    continue;
+
                 JVSIO *io = args->jvsIO;
 
                 if (!args->inputs.relEnabled[event.code])
@@ -443,6 +451,12 @@ static void *deviceThread(void *_args)
 
             case EV_ABS:
             {
+                /* Guard: event.code is a kernel ABS axis code (≤ ABS_MAX ≈ 63 on
+                 * most kernels) so this is unlikely to fire in practice, but protects
+                 * the abs/key array accesses below from any out-of-range code. */
+                if (event.code >= MAX_EV_ITEMS)
+                    continue;
+
                 /* Handle HAT switch (D-pad) events: the axis min value maps to the
                  * primary output button and the axis max value maps to the secondary
                  * output button; any value in between clears both buttons. */
