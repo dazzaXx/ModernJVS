@@ -264,7 +264,7 @@ static void *deviceThread(void *_args)
     int fd = open(args->devicePath, O_RDONLY);
     if (fd < 0)
     {
-        debug(0, "Critical: Failed to open device file descriptor %d \n", fd);
+        debug(0, "Critical: Failed to open device '%s': %s\n", args->devicePath, strerror(errno));
         free(args);
         args = NULL;
         return 0;
@@ -445,10 +445,16 @@ static void *deviceThread(void *_args)
 
                     if (event.value == args->inputs.absMin[event.code])
                     {
+                        /* Activate primary direction and clear secondary to prevent
+                         * both directions appearing pressed on a direct min→max
+                         * transition (no centre dwell). */
                         setSwitch(args->jvsIO, args->inputs.abs[event.code].jvsPlayer, args->inputs.abs[event.code].output, 1);
+                        setSwitch(args->jvsIO, args->inputs.abs[event.code].jvsPlayer, args->inputs.abs[event.code].outputSecondary, 0);
                     }
                     else if (event.value == args->inputs.absMax[event.code])
                     {
+                        /* Activate secondary direction and clear primary. */
+                        setSwitch(args->jvsIO, args->inputs.abs[event.code].jvsPlayer, args->inputs.abs[event.code].output, 0);
                         setSwitch(args->jvsIO, args->inputs.abs[event.code].jvsPlayer, args->inputs.abs[event.code].outputSecondary, 1);
                     }
                     else
@@ -860,18 +866,17 @@ JVSInputStatus getInputs(DeviceList *deviceList)
 
         // Get the physical location string
         ioctl(device, EVIOCGPHYS(sizeof(dev->physicalLocation)), dev->physicalLocation);
-        for (size_t j = 0; j < strlen(dev->physicalLocation); j++)
-        {
-            if (dev->physicalLocation[j] == '/')
-            {
-                dev->physicalLocation[j] = 0;
-                break;
-            }
-        }
+        /* Truncate at the first '/' to keep only the bus-address component
+         * (e.g. "usb-0000:01:00.0-1" → "usb-0000:01:00.0-1/input0" → "usb-0000:01:00.0-1").
+         * strchr is O(n) vs the previous O(n²) strlen-in-loop approach. */
+        char *physSlash = strchr(dev->physicalLocation, '/');
+        if (physSlash)
+            *physSlash = '\0';
 
         // Normalize the full device name to lowercase, replacing spaces, slashes,
         // and parentheses with dashes to produce a filename-safe device mapping name
-        for (size_t j = 0; j < strlen(dev->fullName); j++)
+        size_t fullNameLen = strlen(dev->fullName);
+        for (size_t j = 0; j < fullNameLen; j++)
         {
             dev->name[j] = tolower(dev->fullName[j]);
             if (dev->name[j] == ' ' ||
