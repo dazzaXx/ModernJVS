@@ -47,7 +47,7 @@ int setSwitch(JVSIO *io, JVSPlayer player, JVSInput switchNumber, int value)
 
 int incrementCoin(JVSIO *io, JVSPlayer player, int amount)
 {
-	if (player == SYSTEM)
+	if ((int)player <= 0)
 		return 0;
 
 	// Bounds check to prevent array overflow
