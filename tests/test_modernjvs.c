@@ -20,6 +20,7 @@
 #include <fcntl.h>
 #include <sys/socket.h>
 #include <sys/select.h>
+#include <sys/stat.h>
 #include <errno.h>
 #include <math.h>
 #include <time.h>
@@ -2162,6 +2163,192 @@ static void test_parseConfig_include_depth_limit(void)
     TEST_PASS();
 }
 
+/*
+ * writePacket must correctly emit all data bytes for a large (but non-trivial)
+ * packet.  This exercises the int wireLength fix that prevents an unsigned-char
+ * overflow when packet->length == 255 (which the old code incremented directly,
+ * wrapping to 0 and causing the wire-format loop to emit only 1 byte).
+ *
+ * With length = 10 the wire frame must be:
+ *   SYNC(1) + dest(1) + wire_len(1) + 9 data bytes(9) + checksum(1) = 13 bytes
+ * and packet->length must equal 10 after the call (unchanged by callee).
+ */
+static void test_writePacket_large_length_no_wrap(void)
+{
+    TEST_BEGIN(test_writePacket_large_length_no_wrap);
+
+    int fds[2];
+    ASSERT(pipe(fds) == 0, "pipe");
+    serialIO = fds[1];
+
+    JVSPacket pkt;
+    pkt.destination = BUS_MASTER;
+    pkt.length      = 10;
+    /* 9 identifiable data bytes (length - 1, since length counts checksum too) */
+    for (int i = 0; i < 9; i++)
+        pkt.data[i] = (unsigned char)(0x10 + i);
+
+    unsigned char saved_length = pkt.length;
+    JVSStatus s = writePacket(&pkt);
+    ASSERT(s == JVS_STATUS_SUCCESS, "writePacket SUCCESS");
+    ASSERT_EQ_INT(pkt.length, (int)saved_length, "packet->length not modified after writePacket");
+
+    unsigned char buf[128];
+    int n = (int)read(fds[0], buf, sizeof(buf));
+    /* Minimum: SYNC(1) + dest(1) + wire_len_field(1) + 9 data bytes + checksum(1) = 13.
+     * More if any byte is 0xE0 or 0xD0 and needs escaping. */
+    ASSERT(n >= 13, "correct minimum number of bytes written");
+    ASSERT_EQ_INT(buf[0], 0xE0, "SYNC byte");
+    ASSERT_EQ_INT(buf[1], BUS_MASTER, "destination byte");
+    /* Wire length field = saved_length + 1 = 11 */
+    ASSERT_EQ_INT(buf[2], (int)(saved_length + 1), "wire length field = packet->length + 1");
+
+    close(fds[0]);
+    close(fds[1]);
+    serialIO = -1;
+    TEST_PASS();
+}
+
+/*
+ * INCLUDE in a device mapping file must *merge* the included mappings into the
+ * current set rather than replacing them.  A mapping declared before the INCLUDE
+ * line must survive alongside the mappings brought in by the include.
+ *
+ * The bug (now fixed): parseInputMappingInternal used memcpy to replace the
+ * entire InputMappings struct with the included file's contents, silently
+ * discarding any mappings already parsed in the outer file.
+ *
+ * Test layout:
+ *   mjtest-incl-base-dev:    BTN_EAST  → CONTROLLER_BUTTON_B
+ *   mjtest-incl-overlay-dev: BTN_SOUTH → CONTROLLER_BUTTON_A
+ *                            INCLUDE mjtest-incl-base-dev
+ *
+ * Expected: mappings.length >= 2, both BUTTON_A and BUTTON_B present.
+ */
+static void test_parseInputMapping_include_merges(void)
+{
+    TEST_BEGIN(test_parseInputMapping_include_merges);
+
+    /* Create the directory hierarchy required by parseInputMapping */
+    if (mkdir("/etc/modernjvs", 0755) == -1 && errno != EEXIST)
+    {
+        printf("    SKIP: cannot create /etc/modernjvs (%s)\n", strerror(errno));
+        TEST_PASS();
+        return;
+    }
+    if (mkdir("/etc/modernjvs/devices", 0755) == -1 && errno != EEXIST)
+    {
+        printf("    SKIP: cannot create /etc/modernjvs/devices (%s)\n", strerror(errno));
+        TEST_PASS();
+        return;
+    }
+
+    const char *base_path    = "/etc/modernjvs/devices/mjtest-incl-base-dev";
+    const char *overlay_path = "/etc/modernjvs/devices/mjtest-incl-overlay-dev";
+
+    FILE *f = fopen(base_path, "w");
+    ASSERT(f != NULL, "create base device file");
+    fprintf(f, "BTN_EAST CONTROLLER_BUTTON_B\n");
+    fclose(f);
+
+    f = fopen(overlay_path, "w");
+    ASSERT(f != NULL, "create overlay device file");
+    /* CONTROLLER_BUTTON_A mapping comes BEFORE the INCLUDE – this is the
+     * case that the old memcpy-replace code silently dropped. */
+    fprintf(f, "BTN_SOUTH CONTROLLER_BUTTON_A\nINCLUDE mjtest-incl-base-dev\n");
+    fclose(f);
+
+    InputMappings mappings;
+    memset(&mappings, 0, sizeof(mappings));
+    JVSConfigStatus s = parseInputMapping("mjtest-incl-overlay-dev", &mappings);
+    ASSERT(s == JVS_CONFIG_STATUS_SUCCESS, "parseInputMapping SUCCESS");
+
+    /* Both the pre-INCLUDE mapping (BUTTON_A) and the included mapping
+     * (BUTTON_B) must be present after the merge. */
+    ASSERT(mappings.length >= 2, "both mappings present after INCLUDE merge");
+
+    int found_a = 0, found_b = 0;
+    for (int i = 0; i < mappings.length; i++)
+    {
+        if (mappings.mappings[i].input == CONTROLLER_BUTTON_A) found_a = 1;
+        if (mappings.mappings[i].input == CONTROLLER_BUTTON_B) found_b = 1;
+    }
+    ASSERT(found_a, "CONTROLLER_BUTTON_A (before INCLUDE) preserved by merge");
+    ASSERT(found_b, "CONTROLLER_BUTTON_B (from INCLUDE) present after merge");
+
+    unlink(base_path);
+    unlink(overlay_path);
+    TEST_PASS();
+}
+
+/*
+ * INCLUDE in a game output-mapping file must *merge* the included mappings into
+ * the current set rather than replacing them.
+ *
+ * The same memcpy-replace bug existed in parseOutputMappingInternal.
+ *
+ * Test layout:
+ *   mjtest-incl-base-game:    CONTROLLER_BUTTON_B CONTROLLER_1 BUTTON_2 PLAYER_1
+ *   mjtest-incl-overlay-game: CONTROLLER_BUTTON_A CONTROLLER_1 BUTTON_1 PLAYER_1
+ *                             INCLUDE mjtest-incl-base-game
+ *
+ * Expected: mappings.length >= 2, both BUTTON_A and BUTTON_B present.
+ */
+static void test_parseOutputMapping_include_merges(void)
+{
+    TEST_BEGIN(test_parseOutputMapping_include_merges);
+
+    if (mkdir("/etc/modernjvs", 0755) == -1 && errno != EEXIST)
+    {
+        printf("    SKIP: cannot create /etc/modernjvs (%s)\n", strerror(errno));
+        TEST_PASS();
+        return;
+    }
+    if (mkdir("/etc/modernjvs/games", 0755) == -1 && errno != EEXIST)
+    {
+        printf("    SKIP: cannot create /etc/modernjvs/games (%s)\n", strerror(errno));
+        TEST_PASS();
+        return;
+    }
+
+    const char *base_path    = "/etc/modernjvs/games/mjtest-incl-base-game";
+    const char *overlay_path = "/etc/modernjvs/games/mjtest-incl-overlay-game";
+
+    FILE *f = fopen(base_path, "w");
+    ASSERT(f != NULL, "create base game file");
+    fprintf(f, "CONTROLLER_BUTTON_B CONTROLLER_1 BUTTON_2 PLAYER_1\n");
+    fclose(f);
+
+    f = fopen(overlay_path, "w");
+    ASSERT(f != NULL, "create overlay game file");
+    /* CONTROLLER_BUTTON_A mapping comes BEFORE the INCLUDE. */
+    fprintf(f, "CONTROLLER_BUTTON_A CONTROLLER_1 BUTTON_1 PLAYER_1\nINCLUDE mjtest-incl-base-game\n");
+    fclose(f);
+
+    OutputMappings mappings;
+    memset(&mappings, 0, sizeof(mappings));
+    char configPath[MAX_PATH_LENGTH]       = "";
+    char secondConfigPath[MAX_PATH_LENGTH] = "";
+    JVSConfigStatus s = parseOutputMapping("mjtest-incl-overlay-game", &mappings,
+                                           configPath, secondConfigPath);
+    ASSERT(s == JVS_CONFIG_STATUS_SUCCESS, "parseOutputMapping SUCCESS");
+
+    ASSERT(mappings.length >= 2, "both mappings present after INCLUDE merge");
+
+    int found_a = 0, found_b = 0;
+    for (int i = 0; i < mappings.length; i++)
+    {
+        if (mappings.mappings[i].input == CONTROLLER_BUTTON_A) found_a = 1;
+        if (mappings.mappings[i].input == CONTROLLER_BUTTON_B) found_b = 1;
+    }
+    ASSERT(found_a, "CONTROLLER_BUTTON_A (before INCLUDE) preserved by merge");
+    ASSERT(found_b, "CONTROLLER_BUTTON_B (from INCLUDE) present after merge");
+
+    unlink(base_path);
+    unlink(overlay_path);
+    TEST_PASS();
+}
+
 /* =========================================================================
  * ───────────────────────────── MAIN RUNNER ────────────────────────────────
  * ========================================================================= */
@@ -2207,6 +2394,8 @@ static const TestFn tests[] = {
     test_parseConfig_wii_ir_scale_clamping,
     test_parseConfig_include,
     test_parseConfig_include_depth_limit,
+    test_parseInputMapping_include_merges,
+    test_parseOutputMapping_include_merges,
     test_parseIO_namco_FCA1,
     test_parseIO_file_not_found,
     test_parseIO_capcom_naomi,
@@ -2225,6 +2414,7 @@ static const TestFn tests[] = {
     test_writePacket_length_not_modified,
     test_writePacket_below_min_length,
     test_writePacket_escape_in_data,
+    test_writePacket_large_length_no_wrap,
     /* processPacket integration */
     test_processPacket_cmd_reset,
     test_processPacket_cmd_assign_addr,
