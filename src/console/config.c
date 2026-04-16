@@ -254,7 +254,27 @@ static JVSConfigStatus parseInputMappingInternal(char *path, InputMappings *inpu
                 InputMappings tempInputMappings = {0};
                 JVSConfigStatus status = parseInputMappingInternal(token, &tempInputMappings, depth + 1);
                 if (status == JVS_CONFIG_STATUS_SUCCESS)
-                    memcpy(inputMappings, &tempInputMappings, sizeof(InputMappings));
+                {
+                    /* Merge: append included mappings to any already parsed in
+                     * this file rather than replacing them.  Mappings defined
+                     * before INCLUDE are preserved; the included file's player
+                     * number is only inherited when the current file hasn't set
+                     * one yet. */
+                    int spaceLeft = MAX_MAPPING - inputMappings->length;
+                    int toAdd = tempInputMappings.length < spaceLeft ? tempInputMappings.length : spaceLeft;
+                    if (toAdd < tempInputMappings.length)
+                        debug(0, "Warning: Mapping array full, %d input entr%s from '%s' dropped\n",
+                              tempInputMappings.length - toAdd,
+                              (tempInputMappings.length - toAdd == 1) ? "y" : "ies",
+                              token);
+                    memcpy(&inputMappings->mappings[inputMappings->length],
+                           tempInputMappings.mappings,
+                           toAdd * sizeof(InputMapping));
+                    inputMappings->length += toAdd;
+                    if (inputMappings->player == DEFAULT_PLAYER &&
+                        tempInputMappings.player != DEFAULT_PLAYER)
+                        inputMappings->player = tempInputMappings.player;
+                }
             }
             else if (token)
             {
@@ -482,7 +502,21 @@ static JVSConfigStatus parseOutputMappingInternal(char *path, OutputMappings *ou
                 OutputMappings tempOutputMappings = {0};
                 JVSConfigStatus status = parseOutputMappingInternal(token, &tempOutputMappings, configPath, secondConfigPath, depth + 1);
                 if (status == JVS_CONFIG_STATUS_SUCCESS)
-                    memcpy(outputMappings, &tempOutputMappings, sizeof(OutputMappings));
+                {
+                    /* Merge: append included mappings to any already parsed in
+                     * this file rather than replacing them. */
+                    int spaceLeft = MAX_MAPPING - outputMappings->length;
+                    int toAdd = tempOutputMappings.length < spaceLeft ? tempOutputMappings.length : spaceLeft;
+                    if (toAdd < tempOutputMappings.length)
+                        debug(0, "Warning: Mapping array full, %d output entr%s from '%s' dropped\n",
+                              tempOutputMappings.length - toAdd,
+                              (tempOutputMappings.length - toAdd == 1) ? "y" : "ies",
+                              token);
+                    memcpy(&outputMappings->mappings[outputMappings->length],
+                           tempOutputMappings.mappings,
+                           toAdd * sizeof(OutputMapping));
+                    outputMappings->length += toAdd;
+                }
             }
             else if (token)
             {
