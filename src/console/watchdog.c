@@ -26,9 +26,9 @@ static void *watchdogThread(void *_args)
         /* Break the 1-second poll period into 100 ms intervals so that
          * stopAllThreads() can wake this thread within ~100 ms instead
          * of waiting up to a full second for sleep() to return. */
+        const struct timespec ts = {0, 100 * 1000 * 1000L}; /* 100 ms */
         for (int tick = 0; tick < 10 && getThreadsRunning(); tick++)
         {
-            struct timespec ts = {0, 100 * 1000 * 1000L}; /* 100 ms */
             nanosleep(&ts, NULL);
         }
 
