@@ -347,6 +347,20 @@ JVSStatus processPacket(JVSIO *jvsIO)
 		}
 		break;
 
+		/* Sent by some boards to switch the comms mode (e.g. baud rate or
+		 * RS232 vs RS485).  We always acknowledge with REPORT_SUCCESS without
+		 * actually changing anything — the board will simply continue in its
+		 * current mode, which is the correct behaviour for an emulator.
+		 * size=2 because the command byte is followed by one mode argument. */
+		case CMD_SET_COMMS_MODE:
+		{
+			size = 2;
+			debug(1, "CMD_SET_COMMS_MODE - Mode 0x%02X (acknowledged)\n", inputPacket.data[index + 1]);
+			CHECK_OUTPUT_SPACE(&outputPacket, 1);
+			outputPacket.data[outputPacket.length++] = REPORT_SUCCESS;
+		}
+		break;
+
 		/* Ask for the name of the IO board */
 		case CMD_REQUEST_ID:
 		{

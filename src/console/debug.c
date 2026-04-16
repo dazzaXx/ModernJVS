@@ -50,7 +50,7 @@ void debugPacket(int level, JVSPacket *packet)
     printf("DESTINATION: %d\n", packet->destination);
     printf("LENGTH: %d\n", packet->length);
     printf("DATA: ");
-    for (int i = 0; i < packet->length; i++)
+    for (int i = 0; i < packet->length - 1; i++)
     {
         printf("0x%02hhX ", packet->data[i]);
     }
