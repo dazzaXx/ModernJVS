@@ -888,6 +888,11 @@ JVSInputStatus getInputs(DeviceList *deviceList)
                 dev->name[j] = '-';
             }
         }
+        /* Null-terminate the normalized name.  dev->name was pre-filled with
+         * "unknown" via strncpy, so if fullName is shorter than "unknown" (7
+         * chars) the trailing characters (e.g. "own") would remain, producing
+         * a corrupted name like "padnown" for a device called "Pad". */
+        dev->name[fullNameLen] = '\0';
 
         // Assign the correct names for the aimtracks
         if (strcmp(dev->name, AIMTRAK_DEVICE_NAME) == 0)
