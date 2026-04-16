@@ -975,6 +975,15 @@ JVSStatus readPacket(JVSPacket *packet)
 			case 1: // If we have not yet got the length
 				packet->length = inputBuffer[index];
 				checksum = (checksum + packet->length) & 0xFF;
+				/* A JVS length of 0 is always malformed: the length field counts
+				 * the bytes that follow it including the checksum itself, so the
+				 * minimum valid value is 1.  If we accepted 0, the expression
+				 * (packet->length - 1) below would wrap to -1 (int promotion of
+				 * unsigned char 0 minus 1) and the checksum guard would never
+				 * trigger, causing every subsequent byte to be written to
+				 * packet->data[dataIndex++] without bound — a stack overflow. */
+				if (packet->length == 0)
+					return JVS_STATUS_ERROR_CHECKSUM;
 				phase++;
 				break;
 			case 2: // If there is still data to read
@@ -985,6 +994,13 @@ JVSStatus readPacket(JVSPacket *packet)
 					finished = 1;
 					break;
 				}
+				/* Defensive bounds check: packet->data is JVS_MAX_PACKET_SIZE bytes.
+				 * With valid length values (1..255) the maximum dataIndex at write
+				 * time is length-2 <= 253, well within range.  This guard protects
+				 * against any future refactoring that could relax the length==0
+				 * check above. */
+				if (dataIndex >= JVS_MAX_PACKET_SIZE)
+					return JVS_STATUS_ERROR;
 				packet->data[dataIndex++] = inputBuffer[index];
 				checksum = (checksum + inputBuffer[index]) & 0xFF;
 				break;
