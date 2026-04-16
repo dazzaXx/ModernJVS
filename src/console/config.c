@@ -99,7 +99,7 @@ static JVSConfigStatus parseConfigInternal(char *path, JVSConfig *config, int de
             continue;
 
         char *command = getNextToken(buffer, TOKEN_SEPARATOR, &saveptr);
-        if (!command)
+        if (!command || command[0] == '#' || command[0] == '\0')
             continue;
 
         /* Recursively parse an included config file, inheriting all settings parsed so far */
@@ -248,7 +248,7 @@ static JVSConfigStatus parseInputMappingInternal(char *path, InputMappings *inpu
             continue;
 
         char *command = getNextToken(buffer, TOKEN_SEPARATOR, &saveptr);
-        if (!command)
+        if (!command || command[0] == '#' || command[0] == '\0')
             continue;
 
         if (strcmp(command, "INCLUDE") == 0)
@@ -475,7 +475,7 @@ static JVSConfigStatus parseOutputMappingInternal(char *path, OutputMappings *ou
             continue;
 
         char *command = getNextToken(buffer, TOKEN_SEPARATOR, &saveptr);
-        if (!command)
+        if (!command || command[0] == '#' || command[0] == '\0')
             continue;
         int analogueToDigital = 0;
         if (strcmp(command, "DIGITAL") == 0)
@@ -666,7 +666,7 @@ JVSConfigStatus parseIO(char *path, JVSCapabilities *capabilities)
             continue;
 
         char *command = getNextToken(buffer, TOKEN_SEPARATOR, &saveptr);
-        if (!command)
+        if (!command || command[0] == '#' || command[0] == '\0')
             continue;
 
         if (strcmp(command, "DISPLAY_NAME") == 0)
