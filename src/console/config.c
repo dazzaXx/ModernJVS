@@ -7,6 +7,11 @@
 #include "jvs/io.h"
 #include "console/debug.h"
 
+/* Delimiter set used by getNextToken: split on spaces and tabs so that
+ * config files written with tab indentation parse identically to
+ * space-separated ones. */
+#define TOKEN_SEPARATOR " \t"
+
 static char *getNextToken(char *buffer, char *separator, char **saveptr)
 {
     char *token = strtok_r(buffer, separator, saveptr);
@@ -93,14 +98,14 @@ static JVSConfigStatus parseConfigInternal(char *path, JVSConfig *config, int de
         if (buffer[0] == '#' || buffer[0] == 0 || buffer[0] == ' ' || buffer[0] == '\r' || buffer[0] == '\n')
             continue;
 
-        char *command = getNextToken(buffer, " ", &saveptr);
+        char *command = getNextToken(buffer, TOKEN_SEPARATOR, &saveptr);
         if (!command)
             continue;
 
         /* Recursively parse an included config file, inheriting all settings parsed so far */
         if (strcmp(command, "INCLUDE") == 0)
         {
-            char *token = getNextToken(NULL, " ", &saveptr);
+            char *token = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
             if (token && depth < MAX_INCLUDE_DEPTH)
                 parseConfigInternal(token, config, depth + 1);
             else if (token)
@@ -108,13 +113,13 @@ static JVSConfigStatus parseConfigInternal(char *path, JVSConfig *config, int de
         }
         else if (strcmp(command, "SENSE_LINE_TYPE") == 0)
         {
-            char *token = getNextToken(NULL, " ", &saveptr);
+            char *token = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
             if (token)
                 config->senseLineType = atoi(token);
         }
         else if (strcmp(command, "EMULATE") == 0)
         {
-            char *token = getNextToken(NULL, " ", &saveptr);
+            char *token = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
             if (token)
             {
                 strncpy(config->capabilitiesPath, token, MAX_PATH_LENGTH - 1);
@@ -123,7 +128,7 @@ static JVSConfigStatus parseConfigInternal(char *path, JVSConfig *config, int de
         }
         else if (strcmp(command, "EMULATE_SECOND") == 0)
         {
-            char *token = getNextToken(NULL, " ", &saveptr);
+            char *token = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
             if (token)
             {
                 strncpy(config->secondCapabilitiesPath, token, MAX_PATH_LENGTH - 1);
@@ -132,13 +137,13 @@ static JVSConfigStatus parseConfigInternal(char *path, JVSConfig *config, int de
         }
         else if (strcmp(command, "SENSE_LINE_PIN") == 0)
         {
-            char *token = getNextToken(NULL, " ", &saveptr);
+            char *token = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
             if (token)
                 config->senseLinePin = atoi(token);
         }
         else if (strcmp(command, "DEFAULT_GAME") == 0)
         {
-            char *token = getNextToken(NULL, " ", &saveptr);
+            char *token = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
             if (token)
             {
                 strncpy(config->defaultGamePath, token, MAX_PATH_LENGTH - 1);
@@ -147,13 +152,13 @@ static JVSConfigStatus parseConfigInternal(char *path, JVSConfig *config, int de
         }
         else if (strcmp(command, "DEBUG_MODE") == 0)
         {
-            char *token = getNextToken(NULL, " ", &saveptr);
+            char *token = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
             if (token)
                 config->debugLevel = atoi(token);
         }
         else if (strcmp(command, "DEVICE_PATH") == 0)
         {
-            char *token = getNextToken(NULL, " ", &saveptr);
+            char *token = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
             if (token)
             {
                 strncpy(config->devicePath, token, MAX_PATH_LENGTH - 1);
@@ -162,37 +167,37 @@ static JVSConfigStatus parseConfigInternal(char *path, JVSConfig *config, int de
         }
         else if (strcmp(command, "AUTO_CONTROLLER_DETECTION") == 0)
         {
-            char *token = getNextToken(NULL, " ", &saveptr);
+            char *token = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
             if (token)
                 config->autoControllerDetection = atoi(token);
         }
         else if (strcmp(command, "ANALOG_DEADZONE_PLAYER_1") == 0)
         {
-            char *token = getNextToken(NULL, " ", &saveptr);
+            char *token = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
             if (token)
                 config->analogDeadzonePlayer1 = clampDeadzone(atof(token));
         }
         else if (strcmp(command, "ANALOG_DEADZONE_PLAYER_2") == 0)
         {
-            char *token = getNextToken(NULL, " ", &saveptr);
+            char *token = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
             if (token)
                 config->analogDeadzonePlayer2 = clampDeadzone(atof(token));
         }
         else if (strcmp(command, "ANALOG_DEADZONE_PLAYER_3") == 0)
         {
-            char *token = getNextToken(NULL, " ", &saveptr);
+            char *token = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
             if (token)
                 config->analogDeadzonePlayer3 = clampDeadzone(atof(token));
         }
         else if (strcmp(command, "ANALOG_DEADZONE_PLAYER_4") == 0)
         {
-            char *token = getNextToken(NULL, " ", &saveptr);
+            char *token = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
             if (token)
                 config->analogDeadzonePlayer4 = clampDeadzone(atof(token));
         }
         else if (strcmp(command, "WII_IR_SCALE") == 0)
         {
-            char *token = getNextToken(NULL, " ", &saveptr);
+            char *token = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
             if (token)
             {
                 double val = atof(token);
@@ -242,13 +247,13 @@ static JVSConfigStatus parseInputMappingInternal(char *path, InputMappings *inpu
         if (buffer[0] == '#' || buffer[0] == 0 || buffer[0] == ' ' || buffer[0] == '\r' || buffer[0] == '\n')
             continue;
 
-        char *command = getNextToken(buffer, " ", &saveptr);
+        char *command = getNextToken(buffer, TOKEN_SEPARATOR, &saveptr);
         if (!command)
             continue;
 
         if (strcmp(command, "INCLUDE") == 0)
         {
-            char *token = getNextToken(NULL, " ", &saveptr);
+            char *token = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
             if (token && depth < MAX_INCLUDE_DEPTH)
             {
                 InputMappings tempInputMappings = {0};
@@ -283,7 +288,7 @@ static JVSConfigStatus parseInputMappingInternal(char *path, InputMappings *inpu
         }
         else if (strcmp(command, "PLAYER") == 0)
         {
-            char *token = getNextToken(NULL, " ", &saveptr);
+            char *token = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
             if (token)
             {
                 int player = atoi(token);
@@ -292,7 +297,7 @@ static JVSConfigStatus parseInputMappingInternal(char *path, InputMappings *inpu
         }
         else if (command[0] == 'K' || command[0] == 'B' || command[0] == 'C')
         {
-            char *token = getNextToken(NULL, " ", &saveptr);
+            char *token = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
             if (token)
             {
                 if (!checkMappingLimit(inputMappings->length, file, "input"))
@@ -312,7 +317,7 @@ static JVSConfigStatus parseInputMappingInternal(char *path, InputMappings *inpu
         }
         else if (command[0] == 'A')
         {
-            char *firstArgument = getNextToken(NULL, " ", &saveptr);
+            char *firstArgument = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
             if (!firstArgument)
                 continue;
             InputMapping mapping;
@@ -320,7 +325,7 @@ static JVSConfigStatus parseInputMappingInternal(char *path, InputMappings *inpu
             if (strlen(firstArgument) > 11 && firstArgument[11] == 'B')
             {
                 // This suggests we are doing it as a hat!
-                char *token = getNextToken(NULL, " ", &saveptr);
+                char *token = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
                 if (!token)
                     continue;
                 InputMapping hatMapping = {
@@ -343,7 +348,7 @@ static JVSConfigStatus parseInputMappingInternal(char *path, InputMappings *inpu
                 };
 
                 /* Check to see if we should reverse */
-                char *extra = getNextToken(NULL, " ", &saveptr);
+                char *extra = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
                 while (extra != NULL)
                 {
                     if (strcmp(extra, "REVERSE") == 0)
@@ -352,11 +357,11 @@ static JVSConfigStatus parseInputMappingInternal(char *path, InputMappings *inpu
                     }
                     else if (strcmp(extra, "SENSITIVITY") == 0)
                     {
-                        char *token = getNextToken(NULL, " ", &saveptr);
+                        char *token = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
                         if (token)
                             analogueMapping.multiplier = atof(token);
                     }
-                    extra = getNextToken(NULL, " ", &saveptr);
+                    extra = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
                 }
 
                 mapping = analogueMapping;
@@ -370,7 +375,7 @@ static JVSConfigStatus parseInputMappingInternal(char *path, InputMappings *inpu
         }
         else if (command[0] == 'R')
         {
-            char *firstArgument = getNextToken(NULL, " ", &saveptr);
+            char *firstArgument = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
             if (!firstArgument)
                 continue;
             InputMapping mapping;
@@ -385,7 +390,7 @@ static JVSConfigStatus parseInputMappingInternal(char *path, InputMappings *inpu
             };
 
             /* Check to see if we should reverse */
-            char *extra = getNextToken(NULL, " ", &saveptr);
+            char *extra = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
             while (extra != NULL)
             {
                 if (strcmp(extra, "REVERSE") == 0)
@@ -394,11 +399,11 @@ static JVSConfigStatus parseInputMappingInternal(char *path, InputMappings *inpu
                 }
                 else if (strcmp(extra, "SENSITIVITY") == 0)
                 {
-                    char *token = getNextToken(NULL, " ", &saveptr);
+                    char *token = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
                     if (token)
                         analogueMapping.multiplier = atof(token);
                 }
-                extra = getNextToken(NULL, " ", &saveptr);
+                extra = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
             }
 
             mapping = analogueMapping;
@@ -411,7 +416,7 @@ static JVSConfigStatus parseInputMappingInternal(char *path, InputMappings *inpu
         }
         else if (command[0] == 'M')
         {
-            char *token = getNextToken(NULL, " ", &saveptr);
+            char *token = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
             if (token)
             {
                 if (!checkMappingLimit(inputMappings->length, file, "input"))
@@ -469,7 +474,7 @@ static JVSConfigStatus parseOutputMappingInternal(char *path, OutputMappings *ou
         if (buffer[0] == '#' || buffer[0] == 0 || buffer[0] == ' ' || buffer[0] == '\r' || buffer[0] == '\n')
             continue;
 
-        char *command = getNextToken(buffer, " ", &saveptr);
+        char *command = getNextToken(buffer, TOKEN_SEPARATOR, &saveptr);
         if (!command)
             continue;
         int analogueToDigital = 0;
@@ -479,7 +484,7 @@ static JVSConfigStatus parseOutputMappingInternal(char *path, OutputMappings *ou
             // DIGITAL is the first token for these, coming before the
             // axis name; if we found DIGITAL, we need to read the next
             // token for the actual axis.
-            command = getNextToken(NULL, " ", &saveptr);
+            command = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
             if (!command)
                 continue;
         }
@@ -489,14 +494,14 @@ static JVSConfigStatus parseOutputMappingInternal(char *path, OutputMappings *ou
         if (strcmp(command, "SECONDARY") == 0)
         {
             secondaryIO = 1;
-            command = getNextToken(NULL, " ", &saveptr);
+            command = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
             if (!command)
                 continue;
         }
 
         if (strcmp(command, "INCLUDE") == 0)
         {
-            char *token = getNextToken(NULL, " ", &saveptr);
+            char *token = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
             if (token && depth < MAX_INCLUDE_DEPTH)
             {
                 OutputMappings tempOutputMappings = {0};
@@ -525,7 +530,7 @@ static JVSConfigStatus parseOutputMappingInternal(char *path, OutputMappings *ou
         }
         else if (strcmp(command, "EMULATE") == 0)
         {
-            char *token = getNextToken(NULL, " ", &saveptr);
+            char *token = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
             if (token)
             {
                 strncpy(configPath, token, MAX_PATH_LENGTH - 1);
@@ -534,7 +539,7 @@ static JVSConfigStatus parseOutputMappingInternal(char *path, OutputMappings *ou
         }
         else if (strcmp(command, "EMULATE_SECOND") == 0)
         {
-            char *token = getNextToken(NULL, " ", &saveptr);
+            char *token = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
             if (token)
             {
                 strncpy(secondConfigPath, token, MAX_PATH_LENGTH - 1);
@@ -543,9 +548,9 @@ static JVSConfigStatus parseOutputMappingInternal(char *path, OutputMappings *ou
         }
         else if ((strlen(command) > 11 && command[11] == 'B') || analogueToDigital)
         {
-            char *token1 = getNextToken(NULL, " ", &saveptr);
-            char *token2 = getNextToken(NULL, " ", &saveptr);
-            char *token3 = getNextToken(NULL, " ", &saveptr);
+            char *token1 = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
+            char *token2 = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
+            char *token3 = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
             if (!token1 || !token2 || !token3)
                 continue;
             ControllerPlayer controllerPlayer = controllerPlayerFromString(token1);
@@ -559,7 +564,7 @@ static JVSConfigStatus parseOutputMappingInternal(char *path, OutputMappings *ou
                 .secondaryIO = secondaryIO};
 
             /* Check to see if we have a secondary output */
-            char *secondaryOutput = getNextToken(NULL, " ", &saveptr);
+            char *secondaryOutput = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
             if (secondaryOutput != NULL)
             {
                 mapping.outputSecondary = jvsInputFromString(secondaryOutput);
@@ -573,8 +578,8 @@ static JVSConfigStatus parseOutputMappingInternal(char *path, OutputMappings *ou
         }
         else if (strlen(command) > 11 && command[11] == 'A')
         {
-            char *token1 = getNextToken(NULL, " ", &saveptr);
-            char *token2 = getNextToken(NULL, " ", &saveptr);
+            char *token1 = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
+            char *token2 = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
             if (!token1 || !token2)
                 continue;
             OutputMapping mapping = {
@@ -585,7 +590,7 @@ static JVSConfigStatus parseOutputMappingInternal(char *path, OutputMappings *ou
                 .secondaryIO = secondaryIO};
 
             /* Check to see if we should reverse */
-            char *reverse = getNextToken(NULL, " ", &saveptr);
+            char *reverse = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
             if (reverse != NULL && strcmp(reverse, "REVERSE") == 0)
             {
                 mapping.reverse = 1;
@@ -599,8 +604,8 @@ static JVSConfigStatus parseOutputMappingInternal(char *path, OutputMappings *ou
         }
         else if (strlen(command) > 11 && command[11] == 'R')
         {
-            char *token1 = getNextToken(NULL, " ", &saveptr);
-            char *token2 = getNextToken(NULL, " ", &saveptr);
+            char *token1 = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
+            char *token2 = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
             if (!token1 || !token2)
                 continue;
             OutputMapping mapping = {
@@ -611,7 +616,7 @@ static JVSConfigStatus parseOutputMappingInternal(char *path, OutputMappings *ou
                 .secondaryIO = secondaryIO};
 
             /* Check to see if we should reverse */
-            char *reverse = getNextToken(NULL, " ", &saveptr);
+            char *reverse = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
             if (reverse != NULL && strcmp(reverse, "REVERSE") == 0)
             {
                 mapping.reverse = 1;
@@ -660,7 +665,7 @@ JVSConfigStatus parseIO(char *path, JVSCapabilities *capabilities)
         if (buffer[0] == '#' || buffer[0] == 0 || buffer[0] == ' ' || buffer[0] == '\r' || buffer[0] == '\n')
             continue;
 
-        char *command = getNextToken(buffer, " ", &saveptr);
+        char *command = getNextToken(buffer, TOKEN_SEPARATOR, &saveptr);
         if (!command)
             continue;
 
@@ -684,140 +689,140 @@ JVSConfigStatus parseIO(char *path, JVSCapabilities *capabilities)
         }
         else if (strcmp(command, "COMMAND_VERSION") == 0)
         {
-            char *token = getNextToken(NULL, " ", &saveptr);
+            char *token = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
             if (token)
                 capabilities->commandVersion = atoi(token);
         }
         else if (strcmp(command, "JVS_VERSION") == 0)
         {
-            char *token = getNextToken(NULL, " ", &saveptr);
+            char *token = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
             if (token)
                 capabilities->jvsVersion = atoi(token);
         }
         else if (strcmp(command, "COMMS_VERSION") == 0)
         {
-            char *token = getNextToken(NULL, " ", &saveptr);
+            char *token = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
             if (token)
                 capabilities->commsVersion = atoi(token);
         }
 
         else if (strcmp(command, "PLAYERS") == 0)
         {
-            char *token = getNextToken(NULL, " ", &saveptr);
+            char *token = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
             if (token)
                 capabilities->players = atoi(token);
         }
         else if (strcmp(command, "SWITCHES") == 0)
         {
-            char *token = getNextToken(NULL, " ", &saveptr);
+            char *token = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
             if (token)
                 capabilities->switches = atoi(token);
         }
         else if (strcmp(command, "COINS") == 0)
         {
-            char *token = getNextToken(NULL, " ", &saveptr);
+            char *token = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
             if (token)
                 capabilities->coins = atoi(token);
         }
         else if (strcmp(command, "ANALOGUE_IN_CHANNELS") == 0)
         {
-            char *token = getNextToken(NULL, " ", &saveptr);
+            char *token = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
             if (token)
                 capabilities->analogueInChannels = atoi(token);
         }
         else if (strcmp(command, "ANALOGUE_IN_BITS") == 0)
         {
-            char *token = getNextToken(NULL, " ", &saveptr);
+            char *token = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
             if (token)
                 capabilities->analogueInBits = atoi(token);
         }
         else if (strcmp(command, "ROTARY_CHANNELS") == 0)
         {
-            char *token = getNextToken(NULL, " ", &saveptr);
+            char *token = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
             if (token)
                 capabilities->rotaryChannels = atoi(token);
         }
         else if (strcmp(command, "KEYPAD") == 0)
         {
-            char *token = getNextToken(NULL, " ", &saveptr);
+            char *token = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
             if (token)
                 capabilities->keypad = atoi(token);
         }
         else if (strcmp(command, "GUN_CHANNELS") == 0)
         {
-            char *token = getNextToken(NULL, " ", &saveptr);
+            char *token = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
             if (token)
                 capabilities->gunChannels = atoi(token);
         }
         else if (strcmp(command, "GUN_X_BITS") == 0)
         {
-            char *token = getNextToken(NULL, " ", &saveptr);
+            char *token = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
             if (token)
                 capabilities->gunXBits = atoi(token);
         }
         else if (strcmp(command, "GUN_Y_BITS") == 0)
         {
-            char *token = getNextToken(NULL, " ", &saveptr);
+            char *token = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
             if (token)
                 capabilities->gunYBits = atoi(token);
         }
         else if (strcmp(command, "GENERAL_PURPOSE_INPUTS") == 0)
         {
-            char *token = getNextToken(NULL, " ", &saveptr);
+            char *token = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
             if (token)
                 capabilities->generalPurposeInputs = atoi(token);
         }
         else if (strcmp(command, "CARD") == 0)
         {
-            char *token = getNextToken(NULL, " ", &saveptr);
+            char *token = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
             if (token)
                 capabilities->card = atoi(token);
         }
         else if (strcmp(command, "HOPPER") == 0)
         {
-            char *token = getNextToken(NULL, " ", &saveptr);
+            char *token = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
             if (token)
                 capabilities->hopper = atoi(token);
         }
         else if (strcmp(command, "GENERAL_PURPOSE_OUTPUTS") == 0)
         {
-            char *token = getNextToken(NULL, " ", &saveptr);
+            char *token = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
             if (token)
                 capabilities->generalPurposeOutputs = atoi(token);
         }
         else if (strcmp(command, "ANALOGUE_OUT_CHANNELS") == 0)
         {
-            char *token = getNextToken(NULL, " ", &saveptr);
+            char *token = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
             if (token)
                 capabilities->analogueOutChannels = atoi(token);
         }
         else if (strcmp(command, "DISPLAY_OUT_ROWS") == 0)
         {
-            char *token = getNextToken(NULL, " ", &saveptr);
+            char *token = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
             if (token)
                 capabilities->displayOutRows = atoi(token);
         }
         else if (strcmp(command, "DISPLAY_OUT_COLUMNS") == 0)
         {
-            char *token = getNextToken(NULL, " ", &saveptr);
+            char *token = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
             if (token)
                 capabilities->displayOutColumns = atoi(token);
         }
         else if (strcmp(command, "DISPLAY_OUT_ENCODINGS") == 0)
         {
-            char *token = getNextToken(NULL, " ", &saveptr);
+            char *token = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
             if (token)
                 capabilities->displayOutEncodings = atoi(token);
         }
         else if (strcmp(command, "BACKUP") == 0)
         {
-            char *token = getNextToken(NULL, " ", &saveptr);
+            char *token = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
             if (token)
                 capabilities->backup = atoi(token);
         }
         else if (strcmp(command, "RIGHT_ALIGN_BITS") == 0)
         {
-            char *token = getNextToken(NULL, " ", &saveptr);
+            char *token = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
             if (token)
                 capabilities->rightAlignBits = atoi(token);
         }
