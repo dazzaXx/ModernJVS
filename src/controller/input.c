@@ -348,9 +348,14 @@ static void *deviceThread(void *_args)
             /* Apply reverse logic if configured */
             double finalValue = args->inputs.abs[axisIndex].reverse ? 1 - scaled : scaled;
 
-            /* Initialize the JVS state with the current hardware position */
-            setAnalogue(args->jvsIO, args->inputs.abs[axisIndex].output, finalValue);
-            setGun(args->jvsIO, args->inputs.abs[axisIndex].output, finalValue);
+            /* Initialize the JVS state with the current hardware position.
+             * Route to the chained IO when secondaryIO is set, matching the
+             * same pattern used in the EV_KEY / EV_REL event handlers. */
+            JVSIO *initIO = args->jvsIO;
+            if (args->inputs.abs[axisIndex].secondaryIO && args->jvsIO->chainedIO != NULL)
+                initIO = args->jvsIO->chainedIO;
+            setAnalogue(initIO, args->inputs.abs[axisIndex].output, finalValue);
+            setGun(initIO, args->inputs.abs[axisIndex].output, finalValue);
         }
     }
 
@@ -443,25 +448,28 @@ static void *deviceThread(void *_args)
                  * output button; any value in between clears both buttons. */
                 if (args->inputs.abs[event.code].type == HAT)
                 {
+                    JVSIO *io = args->jvsIO;
+                    if (args->inputs.abs[event.code].secondaryIO && args->jvsIO->chainedIO != NULL)
+                        io = args->jvsIO->chainedIO;
 
                     if (event.value == args->inputs.absMin[event.code])
                     {
                         /* Activate primary direction and clear secondary to prevent
                          * both directions appearing pressed on a direct min→max
                          * transition (no centre dwell). */
-                        setSwitch(args->jvsIO, args->inputs.abs[event.code].jvsPlayer, args->inputs.abs[event.code].output, 1);
-                        setSwitch(args->jvsIO, args->inputs.abs[event.code].jvsPlayer, args->inputs.abs[event.code].outputSecondary, 0);
+                        setSwitch(io, args->inputs.abs[event.code].jvsPlayer, args->inputs.abs[event.code].output, 1);
+                        setSwitch(io, args->inputs.abs[event.code].jvsPlayer, args->inputs.abs[event.code].outputSecondary, 0);
                     }
                     else if (event.value == args->inputs.absMax[event.code])
                     {
                         /* Activate secondary direction and clear primary. */
-                        setSwitch(args->jvsIO, args->inputs.abs[event.code].jvsPlayer, args->inputs.abs[event.code].output, 0);
-                        setSwitch(args->jvsIO, args->inputs.abs[event.code].jvsPlayer, args->inputs.abs[event.code].outputSecondary, 1);
+                        setSwitch(io, args->inputs.abs[event.code].jvsPlayer, args->inputs.abs[event.code].output, 0);
+                        setSwitch(io, args->inputs.abs[event.code].jvsPlayer, args->inputs.abs[event.code].outputSecondary, 1);
                     }
                     else
                     {
-                        setSwitch(args->jvsIO, args->inputs.abs[event.code].jvsPlayer, args->inputs.abs[event.code].output, 0);
-                        setSwitch(args->jvsIO, args->inputs.abs[event.code].jvsPlayer, args->inputs.abs[event.code].outputSecondary, 0);
+                        setSwitch(io, args->inputs.abs[event.code].jvsPlayer, args->inputs.abs[event.code].output, 0);
+                        setSwitch(io, args->inputs.abs[event.code].jvsPlayer, args->inputs.abs[event.code].outputSecondary, 0);
                     }
                     continue;
                 }
@@ -470,22 +478,26 @@ static void *deviceThread(void *_args)
                 // for example the triggers on a gamepad.
                 if (args->inputs.abs[event.code].type == SWITCH)
                 {
+                    JVSIO *io = args->jvsIO;
+                    if (args->inputs.key[event.code].secondaryIO && args->jvsIO->chainedIO != NULL)
+                        io = args->jvsIO->chainedIO;
+
                     // Allows mapping an axis button to a coin
                     if (args->inputs.key[event.code].output == COIN)
                     {
                         if (event.value == args->inputs.absMax[event.code])
                         {
-                            incrementCoin(args->jvsIO, args->inputs.key[event.code].jvsPlayer, 1);
+                            incrementCoin(io, args->inputs.key[event.code].jvsPlayer, 1);
                         }
                         continue;
                     }
                     else if (event.value == args->inputs.absMin[event.code])
                     {
-                        setSwitch(args->jvsIO, args->inputs.key[event.code].jvsPlayer, args->inputs.key[event.code].output, 0);
+                        setSwitch(io, args->inputs.key[event.code].jvsPlayer, args->inputs.key[event.code].output, 0);
                     }
                     else
                     {
-                        setSwitch(args->jvsIO, args->inputs.key[event.code].jvsPlayer, args->inputs.key[event.code].output, 1);
+                        setSwitch(io, args->inputs.key[event.code].jvsPlayer, args->inputs.key[event.code].output, 1);
                     }
                     continue;
                 }
@@ -526,8 +538,13 @@ static void *deviceThread(void *_args)
                         }
                     }
 
-                    setAnalogue(args->jvsIO, args->inputs.abs[event.code].output, args->inputs.abs[event.code].reverse ? 1 - scaled : scaled);
-                    setGun(args->jvsIO, args->inputs.abs[event.code].output, args->inputs.abs[event.code].reverse ? 1 - scaled : scaled);
+                    /* Route to the chained IO when secondaryIO is set, matching the
+                     * same pattern used by the EV_KEY and EV_REL handlers above. */
+                    JVSIO *io = args->jvsIO;
+                    if (args->inputs.abs[event.code].secondaryIO && args->jvsIO->chainedIO != NULL)
+                        io = args->jvsIO->chainedIO;
+                    setAnalogue(io, args->inputs.abs[event.code].output, args->inputs.abs[event.code].reverse ? 1 - scaled : scaled);
+                    setGun(io, args->inputs.abs[event.code].output, args->inputs.abs[event.code].reverse ? 1 - scaled : scaled);
                 }
             }
             break;
