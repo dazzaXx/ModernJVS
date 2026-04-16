@@ -6,12 +6,8 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <time.h>
-#include <unistd.h>
 
 #include "controller/input.h"
-
-// Poll devices every one second
-#define TIME_POLL_DEVICES 1
 
 typedef struct
 {
@@ -27,6 +23,18 @@ static void *watchdogThread(void *_args)
 
     while (getThreadsRunning())
     {
+        /* Break the 1-second poll period into 100 ms intervals so that
+         * stopAllThreads() can wake this thread within ~100 ms instead
+         * of waiting up to a full second for sleep() to return. */
+        for (int tick = 0; tick < 10 && getThreadsRunning(); tick++)
+        {
+            struct timespec ts = {0, 100 * 1000 * 1000L}; /* 100 ms */
+            nanosleep(&ts, NULL);
+        }
+
+        if (!getThreadsRunning())
+            break;
+
         // Check if device count has changed or if we can't enumerate devices:
         // - currentDeviceCount == -1: error accessing /dev/input → restart
         // - currentDeviceCount != originalDevicesCount: device added/removed → restart
@@ -53,7 +61,6 @@ static void *watchdogThread(void *_args)
             *args->running = 0;
             break;
         }
-        sleep(TIME_POLL_DEVICES);
     }
 
     if (_args != NULL)

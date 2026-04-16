@@ -683,8 +683,11 @@ JVSStatus processPacket(JVSIO *jvsIO)
 
 		case CMD_WRITE_DISPLAY:
 		{
-			debug(1, "CMD_WRITE_DISPLAY - Writing display data\n");
-			size = (inputPacket.data[index + 1] * 2) + 2;
+			int cols = inputPacket.data[index + 1];
+			int rows = inputPacket.data[index + 2];
+			debug(1, "CMD_WRITE_DISPLAY - Writing %d×%d display data\n", cols, rows);
+			/* JVS spec: cmd(1) + cols(1) + rows(1) + encoding(1) + data(cols×rows) */
+			size = 4 + cols * rows;
 			CHECK_OUTPUT_SPACE(&outputPacket, 1);
 			outputPacket.data[outputPacket.length++] = REPORT_SUCCESS;
 		}
