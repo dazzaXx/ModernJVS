@@ -891,8 +891,11 @@ JVSInputStatus getInputs(DeviceList *deviceList)
         /* Null-terminate the normalized name.  dev->name was pre-filled with
          * "unknown" via strncpy, so if fullName is shorter than "unknown" (7
          * chars) the trailing characters (e.g. "own") would remain, producing
-         * a corrupted name like "padnown" for a device called "Pad". */
-        dev->name[fullNameLen] = '\0';
+         * a corrupted name like "padnown" for a device called "Pad".
+         * fullNameLen is at most MAX_PATH-1 (strncpy guarantees this), so
+         * dev->name[fullNameLen] is always within the MAX_PATH-byte buffer. */
+        if (fullNameLen < (size_t)MAX_PATH)
+            dev->name[fullNameLen] = '\0';
 
         // Assign the correct names for the aimtracks
         if (strcmp(dev->name, AIMTRAK_DEVICE_NAME) == 0)
