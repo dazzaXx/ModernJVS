@@ -432,7 +432,7 @@ static void *deviceThread(void *_args)
                 if (args->inputs.key[event.code].output == BUTTON_TEST &&
                     args->inputs.key[event.code].jvsPlayer == SYSTEM)
                 {
-                    if (event.value != 0 && args->jvsIO->deviceID != -1)
+                    if (event.value != 0 && __atomic_load_n(&args->jvsIO->deviceID, __ATOMIC_ACQUIRE) != -1)
                         /* Atomic toggle — safe when multiple controller threads
                          * or the SIGUSR1 signal handler may toggle concurrently. */
                         __sync_fetch_and_xor(&testButtonActive, 1);

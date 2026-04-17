@@ -1,0 +1,9 @@
+/home/runner/work/ModernJVS/ModernJVS/CMakeFiles/modernjvs.dir
+/home/runner/work/ModernJVS/ModernJVS/CMakeFiles/package.dir
+/home/runner/work/ModernJVS/ModernJVS/CMakeFiles/package_source.dir
+/home/runner/work/ModernJVS/ModernJVS/CMakeFiles/edit_cache.dir
+/home/runner/work/ModernJVS/ModernJVS/CMakeFiles/rebuild_cache.dir
+/home/runner/work/ModernJVS/ModernJVS/CMakeFiles/list_install_components.dir
+/home/runner/work/ModernJVS/ModernJVS/CMakeFiles/install.dir
+/home/runner/work/ModernJVS/ModernJVS/CMakeFiles/install/local.dir
+/home/runner/work/ModernJVS/ModernJVS/CMakeFiles/install/strip.dir

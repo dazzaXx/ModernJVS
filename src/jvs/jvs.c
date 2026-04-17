@@ -320,11 +320,11 @@ JVSStatus processPacket(JVSIO *jvsIO)
 			debug(1, "CMD_RESET - Resetting all devices\n");
 			size = 2;
 			JVSIO *tmpIO = jvsIO;
-			tmpIO->deviceID = -1;
+			__atomic_store_n(&tmpIO->deviceID, -1, __ATOMIC_RELEASE);
 			while (tmpIO->chainedIO != NULL)
 			{
 				tmpIO = tmpIO->chainedIO;
-				tmpIO->deviceID = -1;
+				__atomic_store_n(&tmpIO->deviceID, -1, __ATOMIC_RELEASE);
 			}
 			setSenseLine(0);
 			/* Clear connection-tracking so the timeout/lost logic starts
@@ -361,8 +361,9 @@ JVSStatus processPacket(JVSIO *jvsIO)
 			 * the command but do not overwrite any existing address. */
 			if (ioToAssign->deviceID == -1)
 			{
-				ioToAssign->deviceID = inputPacket.data[index + 1];
-				debug(1, "CMD_ASSIGN_ADDR - Assigning address 0x%02X\n", ioToAssign->deviceID);
+				int newID = inputPacket.data[index + 1];
+				__atomic_store_n(&ioToAssign->deviceID, newID, __ATOMIC_RELEASE);
+				debug(1, "CMD_ASSIGN_ADDR - Assigning address 0x%02X\n", newID);
 			}
 			else
 			{
