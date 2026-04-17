@@ -1337,10 +1337,40 @@ static void test_writePacket_escape_in_data(void)
     TEST_PASS();
 }
 
-/* =========================================================================
- * ──────────────────── processPacket INTEGRATION TESTS ─────────────────────
- * (uses socketpair so both read and write go through serialIO)
- * ========================================================================= */
+/*
+ * writePacket must return JVS_STATUS_ERROR and not produce any wire output
+ * when packet->length == JVS_MAX_PACKET_SIZE (255).  Adding 1 for the JVS
+ * wire-format checksum would overflow the 1-byte length field (256 truncates
+ * to 0), sending an unparseable packet to the arcade machine.
+ */
+static void test_writePacket_max_length_guard(void)
+{
+    TEST_BEGIN(test_writePacket_max_length_guard);
+
+    int fds[2];
+    ASSERT(pipe(fds) == 0, "pipe");
+    serialIO = fds[1];
+
+    JVSPacket pkt;
+    pkt.destination = BUS_MASTER;
+    pkt.length      = JVS_MAX_PACKET_SIZE;  /* 255 — wireLength would wrap to 0 */
+    memset(pkt.data, 0x01, sizeof(pkt.data));
+
+    JVSStatus s = writePacket(&pkt);
+    ASSERT(s == JVS_STATUS_ERROR, "writePacket with length==MAX must return ERROR");
+    ASSERT_EQ_INT(pkt.length, JVS_MAX_PACKET_SIZE, "packet->length must not be modified");
+
+    /* No bytes should have been written to the wire */
+    fcntl(fds[0], F_SETFL, O_NONBLOCK);
+    unsigned char buf[64];
+    int n = (int)read(fds[0], buf, sizeof(buf));
+    ASSERT(n <= 0, "no bytes written when length overflow guard fires");
+
+    close(fds[0]);
+    close(fds[1]);
+    serialIO = -1;
+    TEST_PASS();
+}
 
 /** Send a JVS command packet from the arcade side and call processPacket(). */
 static JVSStatus run_processPacket(JVSIO *io, int arcade_fd,
@@ -2555,6 +2585,7 @@ static const TestFn tests[] = {
     test_writePacket_below_min_length,
     test_writePacket_escape_in_data,
     test_writePacket_large_length_no_wrap,
+    test_writePacket_max_length_guard,
     /* processPacket integration */
     test_processPacket_cmd_reset,
     test_processPacket_cmd_reset_chained_io,

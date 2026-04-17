@@ -1080,6 +1080,17 @@ JVSStatus writePacket(JVSPacket *packet)
 	if (packet->length < 2)
 		return JVS_STATUS_SUCCESS;
 
+	/* The JVS wire-format length field is a single byte whose value includes
+	 * the checksum byte.  Adding 1 to packet->length must therefore remain ≤
+	 * 255, i.e. packet->length ≤ 254.  If this invariant is violated the
+	 * wire length byte would silently wrap to 0, producing a corrupt packet
+	 * that the arcade machine cannot parse. */
+	if (packet->length >= JVS_MAX_PACKET_SIZE)
+	{
+		debug(0, "Error: Output packet length %d exceeds wire format maximum, dropping\n", packet->length);
+		return JVS_STATUS_ERROR;
+	}
+
 	/* Get pointer to raw data in packet */
 	unsigned char *packetPointer = (unsigned char *)packet;
 
@@ -1092,7 +1103,8 @@ JVSStatus writePacket(JVSPacket *packet)
 	 * length field, then restore it afterwards so that the packet struct
 	 * stays consistent (important for CMD_RETRANSMIT which re-calls this
 	 * function with the same outputPacket without rebuilding it).
-	 * Use a local int to avoid unsigned char wrap when length == 255. */
+	 * packet->length < JVS_MAX_PACKET_SIZE (255) is guaranteed by the check
+	 * above, so wireLength ≤ 255 and the cast to unsigned char is lossless. */
 	unsigned char savedLength = packet->length;
 	int wireLength = (int)packet->length + 1;
 	packet->length = (unsigned char)wireLength;

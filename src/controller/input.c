@@ -910,7 +910,7 @@ JVSInputStatus getInputs(DeviceList *deviceList)
         size_t fullNameLen = strlen(dev->fullName);
         for (size_t j = 0; j < fullNameLen; j++)
         {
-            dev->name[j] = tolower(dev->fullName[j]);
+            dev->name[j] = (char)tolower((unsigned char)dev->fullName[j]);
             if (dev->name[j] == ' ' ||
                 dev->name[j] == '/' ||
                 dev->name[j] == '(' ||
