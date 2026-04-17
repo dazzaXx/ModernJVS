@@ -34,21 +34,34 @@ volatile int testButtonActive = 0;
  * debug() calls vprintf/fflush which are not async-signal-safe. */
 static volatile sig_atomic_t stopRequested = 0;
 
+/* Temporary file written beside the final destination so rename() is atomic */
+#define TESTMODE_STATE_PATH_TMP "/run/modernjvs/testmode.tmp"
+
 static void writeTestModeState(int active)
 {
-    FILE *f = fopen(TESTMODE_STATE_PATH, "w");
-    if (!f)
+    /* Write to a temporary file first, then atomically rename into place.
+     * This ensures a WebUI reader polling the file never sees a torn (empty)
+     * state between the open-truncate and the data write. */
+    int fd = open(TESTMODE_STATE_PATH_TMP, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (fd < 0)
     {
-        debug(1, "Warning: Could not write test mode state file: %s\n", TESTMODE_STATE_PATH);
+        debug(1, "Warning: Could not write test mode state file: %s\n", TESTMODE_STATE_PATH_TMP);
         return;
     }
-    fprintf(f, "%d", active);
-    fclose(f);
+    char buf[2];
+    buf[0] = active ? '1' : '0';
+    buf[1] = '\0';
+    if (write(fd, buf, 1) < 0)
+        debug(1, "Warning: Could not write test mode state value\n");
+    close(fd);
+    if (rename(TESTMODE_STATE_PATH_TMP, TESTMODE_STATE_PATH) != 0)
+        debug(1, "Warning: Could not rename test mode state file: %s\n", strerror(errno));
 }
 
 int main(int argc, char **argv)
 {
     signal(SIGINT, handleSignal);
+    signal(SIGTERM, handleSignal);
     signal(SIGUSR1, handleSignal);
 
     /* Read the initial config */
@@ -116,6 +129,15 @@ int main(int argc, char **argv)
     JVSInputStatus lastInputState = JVS_INPUT_STATUS_SUCCESS;
     while (running != -1)
     {
+        /* The watchdog thread writes 0 to `running` concurrently with the SIGTERM
+         * handler writing -1.  If the watchdog's 0 is the last write, the outer
+         * while condition (running != -1) passes and the unconditional assignment
+         * below would overwrite the shutdown signal.  Guard against this by
+         * checking the async-signal-safe `stopRequested` flag before touching
+         * `running` so that a pending shutdown is never discarded. */
+        if (stopRequested)
+            break;
+
         /* Start the watchdog thread that monitors /dev/input for hot-plug events */
         debug(1, "Init watchdog\n");
         running = 1;
@@ -254,6 +276,10 @@ int main(int argc, char **argv)
              * Without this flush, readPacket() may start mid-packet and
              * report a spurious checksum error on the first iteration. */
             flushDevice();
+            /* Clear any partial-packet parse state so the persistent rx*
+             * variables in readPacket() do not replay stale inputBuffer
+             * bytes from before the flush. */
+            resetPacketParser();
         }
 
         /* Process packets forever */
@@ -264,12 +290,15 @@ int main(int argc, char **argv)
             processingStatus = processPacket(&io);
 
             /* Apply software test-button state.
-             * Snapshot the volatile once so both the comparison and the
-             * setSwitch call operate on the same consistent value.
+             * Snapshot the volatile using an acquire load so that any
+             * writes to testButtonActive by controller threads (which use
+             * __sync_fetch_and_xor, implying release semantics) are visible
+             * before the comparison and setSwitch call.  Both the comparison
+             * and the setSwitch call then operate on the same consistent value.
              * When active, re-assert on every iteration so that a controller
              * button mapped to BUTTON_TEST cannot override the software latch
              * via its key-up event. */
-            int activeSnapshot = testButtonActive;
+            int activeSnapshot = __atomic_load_n(&testButtonActive, __ATOMIC_ACQUIRE);
             if (activeSnapshot != lastTestButtonActive)
             {
                 lastTestButtonActive = activeSnapshot;
@@ -307,6 +336,7 @@ int main(int argc, char **argv)
 
     /* Remove the runtime state file now that the daemon is stopping. */
     unlink(TESTMODE_STATE_PATH);
+    unlink(TESTMODE_STATE_PATH_TMP);
 
     /* Disconnect from the RS485 serial device and release GPIO resources */
     if (!disconnectJVS())
@@ -329,7 +359,7 @@ void cleanup(void)
 
 void handleSignal(int signal)
 {
-    if (signal == SIGINT)
+    if (signal == SIGINT || signal == SIGTERM)
     {
         /* Set flag so main() prints the shutdown message — debug()/printf
          * are not async-signal-safe and must not be called here. */

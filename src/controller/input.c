@@ -143,6 +143,14 @@ static void *wiiDeviceThread(void *_args)
         return NULL;
     }
 
+    int flags = fcntl(fd, F_GETFL, 0);
+    if (flags < 0)
+    {
+        debug(1, "Warning: fcntl(F_GETFL) failed for '%s': %s — defaulting to O_NONBLOCK only\n", args->devicePath, strerror(errno));
+        flags = 0;
+    }
+    fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+
     struct input_event event;
     fd_set file_descriptor;
     struct timeval tv;
@@ -168,7 +176,27 @@ static void *wiiDeviceThread(void *_args)
         if (select(fd + 1, &file_descriptor, NULL, NULL, &tv) < 1)
             continue;
 
-        if (read(fd, &event, sizeof(event)) == sizeof(event))
+        ssize_t bytesRead = read(fd, &event, sizeof(event));
+        if (bytesRead == 0)
+        {
+            /* EOF: the device node was removed (hot-unplug).  Exit the thread
+             * cleanly so the watchdog's device-count poll triggers a controlled
+             * reinitialisation instead of spinning at 100% CPU. */
+            debug(1, "Warning: Wii device '%s' disconnected (EOF), exiting thread\n", args->devicePath);
+            break;
+        }
+        if (bytesRead < 0)
+        {
+            /* EAGAIN/EINTR are transient and should not cause the thread to exit.
+             * Any other negative return means the fd is permanently unusable. */
+            if (errno != EAGAIN && errno != EINTR)
+            {
+                debug(1, "Warning: Wii device '%s' read error (%s), exiting thread\n", args->devicePath, strerror(errno));
+                break;
+            }
+            continue;
+        }
+        if (bytesRead == (ssize_t)sizeof(event))
         {
             switch (event.type)
             {
@@ -392,7 +420,27 @@ static void *deviceThread(void *_args)
         if (select(fd + 1, &file_descriptor, NULL, NULL, &tv) < 1)
             continue;
 
-        if (read(fd, &event, sizeof(event)) == sizeof(event))
+        ssize_t bytesRead = read(fd, &event, sizeof(event));
+        if (bytesRead == 0)
+        {
+            /* EOF: the device node was removed (hot-unplug).  Exit the thread
+             * cleanly so the watchdog's device-count poll triggers a controlled
+             * reinitialisation instead of spinning at 100% CPU. */
+            debug(1, "Warning: Device '%s' disconnected (EOF), exiting thread\n", args->devicePath);
+            break;
+        }
+        if (bytesRead < 0)
+        {
+            /* EAGAIN/EINTR are transient and should not cause the thread to exit.
+             * Any other negative return means the fd is permanently unusable. */
+            if (errno != EAGAIN && errno != EINTR)
+            {
+                debug(1, "Warning: Device '%s' read error (%s), exiting thread\n", args->devicePath, strerror(errno));
+                break;
+            }
+            continue;
+        }
+        if (bytesRead == (ssize_t)sizeof(event))
         {
             switch (event.type)
             {
@@ -432,7 +480,7 @@ static void *deviceThread(void *_args)
                 if (args->inputs.key[event.code].output == BUTTON_TEST &&
                     args->inputs.key[event.code].jvsPlayer == SYSTEM)
                 {
-                    if (event.value != 0 && args->jvsIO->deviceID != -1)
+                    if (event.value != 0 && __atomic_load_n(&args->jvsIO->deviceID, __ATOMIC_ACQUIRE) != -1)
                         /* Atomic toggle — safe when multiple controller threads
                          * or the SIGUSR1 signal handler may toggle concurrently. */
                         __sync_fetch_and_xor(&testButtonActive, 1);
@@ -462,8 +510,7 @@ static void *deviceThread(void *_args)
 
                 int reverse = args->inputs.rel[event.code].reverse;
 
-                int oldRotaryValue = getRotary(io, args->inputs.rel[event.code].output);
-                setRotary(io, args->inputs.rel[event.code].output, oldRotaryValue + (reverse ? event.value * -1 : event.value));
+                incrementRotary(io, args->inputs.rel[event.code].output, reverse ? event.value * -1 : event.value);
             }
             break;
 
