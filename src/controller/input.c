@@ -53,7 +53,9 @@ static double applyDeadzone(double scaled, double deadzone)
     double magnitude = fabs(centered);
 
     if (magnitude < deadzone)
+    {
         return ANALOG_CENTER_VALUE;
+    }
 
     if (MAX_ANALOG_DEADZONE - deadzone > MIN_DIVISION_THRESHOLD)
     {
@@ -138,7 +140,6 @@ static void *wiiDeviceThread(void *_args)
     {
         debug(0, "Warning: Failed to open Wii Remote device '%s': %s\n", args->devicePath, strerror(errno));
         free(args);
-        args = NULL;
         return 0;
     }
 
@@ -278,7 +279,6 @@ static void *wiiDeviceThread(void *_args)
 
     close(fd);
     free(args);
-    args = NULL;
 
     return 0;
 }
@@ -292,7 +292,6 @@ static void *deviceThread(void *_args)
     {
         debug(0, "Critical: Failed to open device '%s': %s\n", args->devicePath, strerror(errno));
         free(args);
-        args = NULL;
         return 0;
     }
 
@@ -585,7 +584,6 @@ static void *deviceThread(void *_args)
 
     close(fd);
     free(args);
-    args = NULL;
 
     return 0;
 }
