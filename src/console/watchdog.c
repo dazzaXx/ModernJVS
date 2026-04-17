@@ -63,11 +63,7 @@ static void *watchdogThread(void *_args)
         }
     }
 
-    if (_args != NULL)
-    {
-        free(_args);
-        _args = NULL;
-    }
+    free(_args);
 
     return 0;
 }

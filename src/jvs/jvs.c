@@ -316,6 +316,11 @@ JVSStatus processPacket(JVSIO *jvsIO)
 				tmpIO->deviceID = -1;
 			}
 			setSenseLine(0);
+			/* Clear connection-tracking so the timeout/lost logic starts
+			 * fresh after the reset rather than firing immediately on the
+			 * next inactivity window. */
+			lastPacketTime = 0;
+			connectionLostLogged = 0;
 			debug(0, "JVS: Connection reset\n");
 		}
 		break;

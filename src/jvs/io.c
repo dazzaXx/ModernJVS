@@ -6,16 +6,27 @@
 
 int initIO(JVSIO *io)
 {
-	for (int player = 0; player < (io->capabilities.players + 1); player++)
+	/* Clamp loop bounds to the state array size to prevent out-of-bounds writes
+	 * if an IO config file specifies capability counts larger than JVS_MAX_STATE_SIZE. */
+	int maxPlayers  = io->capabilities.players + 1;
+	if (maxPlayers  > JVS_MAX_STATE_SIZE) maxPlayers  = JVS_MAX_STATE_SIZE;
+	int maxAnalogue = io->capabilities.analogueInChannels;
+	if (maxAnalogue > JVS_MAX_STATE_SIZE) maxAnalogue = JVS_MAX_STATE_SIZE;
+	int maxRotary   = io->capabilities.rotaryChannels;
+	if (maxRotary   > JVS_MAX_STATE_SIZE) maxRotary   = JVS_MAX_STATE_SIZE;
+	int maxCoins    = io->capabilities.coins;
+	if (maxCoins    > JVS_MAX_STATE_SIZE) maxCoins    = JVS_MAX_STATE_SIZE;
+
+	for (int player = 0; player < maxPlayers; player++)
 		io->state.inputSwitch[player] = 0;
 
-	for (int analogueChannels = 0; analogueChannels < io->capabilities.analogueInChannels; analogueChannels++)
+	for (int analogueChannels = 0; analogueChannels < maxAnalogue; analogueChannels++)
 		io->state.analogueChannel[analogueChannels] = 0;
 
-	for (int rotaryChannels = 0; rotaryChannels < io->capabilities.rotaryChannels; rotaryChannels++)
+	for (int rotaryChannels = 0; rotaryChannels < maxRotary; rotaryChannels++)
 		io->state.rotaryChannel[rotaryChannels] = 0;
 
-	for (int player = 0; player < io->capabilities.coins; player++)
+	for (int player = 0; player < maxCoins; player++)
 		io->state.coinCount[player] = 0;
 
 	io->analogueMax = pow(2, io->capabilities.analogueInBits) - 1;

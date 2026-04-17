@@ -41,12 +41,11 @@ static double clampDeadzone(double deadzone)
 }
 
 /* Helper function to check if adding a new mapping would exceed the maximum limit */
-static int checkMappingLimit(int currentLength, FILE *file, const char *mappingType)
+static int checkMappingLimit(int currentLength, const char *mappingType)
 {
     if (currentLength >= MAX_MAPPING)
     {
         debug(0, "Error: Maximum number of %s mappings (%d) exceeded\n", mappingType, MAX_MAPPING);
-        fclose(file);
         return 0; /* Failed - limit exceeded */
     }
     return 1; /* Success - can add mapping */
@@ -300,8 +299,11 @@ static JVSConfigStatus parseInputMappingInternal(char *path, InputMappings *inpu
             char *token = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
             if (token)
             {
-                if (!checkMappingLimit(inputMappings->length, file, "input"))
+                if (!checkMappingLimit(inputMappings->length, "input"))
+                {
+                    fclose(file);
                     return JVS_CONFIG_STATUS_ERROR;
+                }
                 
                 int code = evDevFromString(command);
                 ControllerInput input = controllerInputFromString(token);
@@ -367,8 +369,11 @@ static JVSConfigStatus parseInputMappingInternal(char *path, InputMappings *inpu
                 mapping = analogueMapping;
             }
 
-            if (!checkMappingLimit(inputMappings->length, file, "input"))
+            if (!checkMappingLimit(inputMappings->length, "input"))
+            {
+                fclose(file);
                 return JVS_CONFIG_STATUS_ERROR;
+            }
             
             inputMappings->mappings[inputMappings->length] = mapping;
             inputMappings->length++;
@@ -408,8 +413,11 @@ static JVSConfigStatus parseInputMappingInternal(char *path, InputMappings *inpu
 
             mapping = analogueMapping;
 
-            if (!checkMappingLimit(inputMappings->length, file, "input"))
+            if (!checkMappingLimit(inputMappings->length, "input"))
+            {
+                fclose(file);
                 return JVS_CONFIG_STATUS_ERROR;
+            }
             
             inputMappings->mappings[inputMappings->length] = mapping;
             inputMappings->length++;
@@ -419,8 +427,11 @@ static JVSConfigStatus parseInputMappingInternal(char *path, InputMappings *inpu
             char *token = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
             if (token)
             {
-                if (!checkMappingLimit(inputMappings->length, file, "input"))
+                if (!checkMappingLimit(inputMappings->length, "input"))
+                {
+                    fclose(file);
                     return JVS_CONFIG_STATUS_ERROR;
+                }
                 
                 int code = evDevFromString(command);
                 ControllerInput input = controllerInputFromString(token);
@@ -570,8 +581,11 @@ static JVSConfigStatus parseOutputMappingInternal(char *path, OutputMappings *ou
                 mapping.outputSecondary = jvsInputFromString(secondaryOutput);
             }
 
-            if (!checkMappingLimit(outputMappings->length, file, "output"))
+            if (!checkMappingLimit(outputMappings->length, "output"))
+            {
+                fclose(file);
                 return JVS_CONFIG_STATUS_ERROR;
+            }
             
             outputMappings->mappings[outputMappings->length] = mapping;
             outputMappings->length++;
@@ -596,8 +610,11 @@ static JVSConfigStatus parseOutputMappingInternal(char *path, OutputMappings *ou
                 mapping.reverse = 1;
             }
 
-            if (!checkMappingLimit(outputMappings->length, file, "output"))
+            if (!checkMappingLimit(outputMappings->length, "output"))
+            {
+                fclose(file);
                 return JVS_CONFIG_STATUS_ERROR;
+            }
             
             outputMappings->mappings[outputMappings->length] = mapping;
             outputMappings->length++;
@@ -622,8 +639,11 @@ static JVSConfigStatus parseOutputMappingInternal(char *path, OutputMappings *ou
                 mapping.reverse = 1;
             }
 
-            if (!checkMappingLimit(outputMappings->length, file, "output"))
+            if (!checkMappingLimit(outputMappings->length, "output"))
+            {
+                fclose(file);
                 return JVS_CONFIG_STATUS_ERROR;
+            }
             
             outputMappings->mappings[outputMappings->length] = mapping;
             outputMappings->length++;
