@@ -82,8 +82,12 @@ int setAnalogue(JVSIO *io, JVSInput channel, double value)
 
 int setGun(JVSIO *io, JVSInput channel, double value)
 {
-	// Bounds check to prevent array overflow
-	if ((int)channel < 0 || channel >= io->capabilities.gunChannels * 2)
+	/* Bounds check: channel must be non-negative, within the declared gun
+	 * channel range, and within the fixed-size state array.  gunChannels is
+	 * an unsigned char (max 255) so gunChannels * 2 can reach 510, but
+	 * gunChannel[] is only JVS_MAX_STATE_SIZE elements wide. */
+	if ((int)channel < 0 || channel >= io->capabilities.gunChannels * 2 ||
+	    (int)channel >= JVS_MAX_STATE_SIZE)
 		return 0;
 
 	if (channel % 2 == 0)
