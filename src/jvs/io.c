@@ -61,8 +61,10 @@ int incrementCoin(JVSIO *io, JVSPlayer player, int amount)
 	if ((int)player <= 0)
 		return 0;
 
-	// Bounds check to prevent array overflow
-	if (player - 1 >= io->capabilities.coins)
+	/* coins is an unsigned char (max 255) but coinCount[] is only
+	 * JVS_MAX_STATE_SIZE elements wide — guard both limits. */
+	if (player - 1 >= io->capabilities.coins ||
+	    (int)(player - 1) >= JVS_MAX_STATE_SIZE)
 		return 0;
 
 	io->state.coinCount[player - 1] += amount;
@@ -74,7 +76,10 @@ int incrementCoin(JVSIO *io, JVSPlayer player, int amount)
 
 int setAnalogue(JVSIO *io, JVSInput channel, double value)
 {
-	if ((int)channel < 0 || channel >= io->capabilities.analogueInChannels)
+	/* analogueInChannels is an unsigned char (max 255) but analogueChannel[]
+	 * is only JVS_MAX_STATE_SIZE elements wide — guard both limits. */
+	if ((int)channel < 0 || channel >= io->capabilities.analogueInChannels ||
+	    (int)channel >= JVS_MAX_STATE_SIZE)
 		return 0;
 	io->state.analogueChannel[channel] = (int)((double)value * (double)io->analogueMax);
 	return 1;
@@ -103,7 +108,10 @@ int setGun(JVSIO *io, JVSInput channel, double value)
 
 int setRotary(JVSIO *io, JVSInput channel, int value)
 {
-	if ((int)channel < 0 || channel >= io->capabilities.rotaryChannels)
+	/* rotaryChannels is an unsigned char (max 255) but rotaryChannel[]
+	 * is only JVS_MAX_STATE_SIZE elements wide — guard both limits. */
+	if ((int)channel < 0 || channel >= io->capabilities.rotaryChannels ||
+	    (int)channel >= JVS_MAX_STATE_SIZE)
 		return 0;
 
 	io->state.rotaryChannel[channel] = value;
@@ -112,7 +120,8 @@ int setRotary(JVSIO *io, JVSInput channel, int value)
 
 int getRotary(JVSIO *io, JVSInput channel)
 {
-	if ((int)channel < 0 || channel >= io->capabilities.rotaryChannels)
+	if ((int)channel < 0 || channel >= io->capabilities.rotaryChannels ||
+	    (int)channel >= JVS_MAX_STATE_SIZE)
 		return 0;
 
 	return io->state.rotaryChannel[channel];
