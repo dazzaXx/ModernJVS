@@ -124,7 +124,7 @@ int initDevice(char *devicePath, int senseLineType, int senseLinePin)
   localSenseLinePin = senseLinePin;
 
   /* Setup the GPIO pins */
-  if (localSenseLineType && setupGPIO(localSenseLinePin) == -1)
+  if (localSenseLineType && !setupGPIO(localSenseLinePin))
     debug(0, "Sense line pin %d not available\n", senseLinePin);
 
   /* Setup the GPIO pins initial state */
@@ -613,7 +613,13 @@ int setGPIODirection(int pin, int dir)
   struct gpiod_line *line = gpiod_chip_get_line(chip, pin);
   if (!line)
     return 0;
-  
+
+  /* Release a prior request on this line before re-requesting it.
+   * Kernels ≥ 5.10 enforce exclusive GPIO ownership; calling
+   * gpiod_line_request_* on an already-requested line returns EBUSY. */
+  if (gpiod_line_is_requested(line))
+    gpiod_line_release(line);
+
   int result;
   if (dir == IN)
   {
@@ -636,6 +642,10 @@ int writeGPIO(int pin, int value)
   struct gpiod_line *line = gpiod_chip_get_line(chip, pin);
   if (!line)
     return 0;
+
+  /* Release before re-requesting to avoid EBUSY on kernel ≥ 5.10. */
+  if (gpiod_line_is_requested(line))
+    gpiod_line_release(line);
   
   // Request the line as output with the desired value
   int result = gpiod_line_request_output(line, GPIO_CONSUMER_NAME, value == LOW ? 0 : 1);
@@ -652,6 +662,10 @@ int readGPIO(int pin)
   struct gpiod_line *line = gpiod_chip_get_line(chip, pin);
   if (!line)
     return -1;
+
+  /* Release before re-requesting to avoid EBUSY on kernel ≥ 5.10. */
+  if (gpiod_line_is_requested(line))
+    gpiod_line_release(line);
   
   // Request the line as input
   if (gpiod_line_request_input(line, GPIO_CONSUMER_NAME) != 0)

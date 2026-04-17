@@ -27,7 +27,7 @@
 void cleanup(void);
 void handleSignal(int signal);
 
-volatile int running = 1;
+volatile sig_atomic_t running = 1;
 volatile int testButtonActive = 0;
 /* Set to 1 by the SIGINT handler to request the "stopping" message be printed
  * from main() rather than from within the signal handler itself, because

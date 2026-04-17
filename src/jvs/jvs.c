@@ -702,6 +702,11 @@ JVSStatus processPacket(JVSIO *jvsIO)
 		{
 			debug(1, "CMD_SET_PAYOUT - Setting payout value\n");
 			size = 4;
+			if (index + 3 >= (int)inputPacket.length - 1)
+			{
+				debug(0, "Error: CMD_SET_PAYOUT - packet too short\n");
+				break;
+			}
 			CHECK_OUTPUT_SPACE(&outputPacket, 1);
 			outputPacket.data[outputPacket.length++] = REPORT_SUCCESS;
 		}
@@ -786,6 +791,11 @@ JVSStatus processPacket(JVSIO *jvsIO)
 		{
 			debug(1, "CMD_SUBTRACT_PAYOUT - Subtracting payout\n");
 			size = 3;
+			if (index + 2 >= (int)inputPacket.length - 1)
+			{
+				debug(0, "Error: CMD_SUBTRACT_PAYOUT - packet too short\n");
+				break;
+			}
 			CHECK_OUTPUT_SPACE(&outputPacket, 1);
 			outputPacket.data[outputPacket.length++] = REPORT_SUCCESS;
 		}

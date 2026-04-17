@@ -22,8 +22,12 @@ void debug(int level, const char *format, ...)
     va_list args;
     va_start(args, format);
     vprintf(format, args);
-    fflush(stdout);
     va_end(args);
+    /* Flush immediately for always-shown messages (level 0) to ensure they
+     * appear before a potential crash.  Skip the syscall for debug-mode output
+     * (level >= 1) — flushing on every packet would visibly slow emulation. */
+    if (level == 0)
+        fflush(stdout);
 }
 
 int getDebugLevel(void)
