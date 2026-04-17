@@ -17,6 +17,43 @@ unsigned char outputBuffer[JVS_MAX_PACKET_SIZE * 2 + 8], inputBuffer[JVS_MAX_PAC
 /* Packet counter for debugging */
 static unsigned long packetCounter = 0;
 
+/* --------------------------------------------------------------------------
+ * Persistent packet-parser state
+ *
+ * These variables survive across readPacket() calls so that a mid-packet
+ * read() timeout (JVS_STATUS_ERROR_TIMEOUT) does not discard bytes that
+ * were already consumed from the kernel serial FIFO.  Without this, a
+ * partial packet arriving in two bursts separated by more than the 200 ms
+ * select() timeout would cause the second burst to be parsed from phase 0,
+ * producing spurious checksum errors and forcing an extra round-trip retry.
+ *
+ * resetPacketParser() must be called whenever the receive stream is
+ * deliberately discarded (e.g. after flushDevice()) to ensure stale bytes
+ * in inputBuffer are not treated as the beginning of a new packet.
+ * --------------------------------------------------------------------------*/
+static int           rxBytesAvailable = 0;
+static int           rxPhase          = 0;
+static int           rxDataIndex      = 0;
+static int           rxEscape         = 0;
+static unsigned char rxChecksum       = 0x00;
+
+/**
+ * Reset the JVS packet-parser state
+ *
+ * Discards any partial packet currently being assembled and clears the
+ * receive buffer.  Call this after flushing the serial receive buffer
+ * (flushDevice) so that stale bytes in inputBuffer are not treated as
+ * the start of the next packet.
+ */
+void resetPacketParser(void)
+{
+	rxBytesAvailable = 0;
+	rxPhase          = 0;
+	rxDataIndex      = 0;
+	rxEscape         = 0;
+	rxChecksum       = 0x00;
+}
+
 /* Connection inactivity timeout tracking */
 #define JVS_CONNECTION_TIMEOUT_SECONDS 5
 static time_t lastPacketTime = 0;
@@ -1119,110 +1156,136 @@ JVSStatus processPacket(JVSIO *jvsIO)
  */
 JVSStatus readPacket(JVSPacket *packet)
 {
-	int bytesAvailable = 0, escape = 0, phase = 0, index = 0, dataIndex = 0, finished = 0;
-	unsigned char checksum = 0x00;
+	/* index is intentionally local: it always starts at 0 because inputBuffer
+	 * is compacted (via memmove) before every return so that unprocessed bytes
+	 * are always at the front.  The persistent parse state lives in the static
+	 * rx* variables declared above. */
+	int index = 0, finished = 0;
 
 	while (!finished)
 	{
-		int bytesRead = readBytes(inputBuffer + bytesAvailable, JVS_MAX_PACKET_SIZE - bytesAvailable);
+		int bytesRead = readBytes(inputBuffer + rxBytesAvailable, JVS_MAX_PACKET_SIZE - rxBytesAvailable);
 
 		if (bytesRead < 0)
+		{
+			/* Preserve unprocessed bytes and current parse state for the
+			 * next call.  The inner loop always drains every available byte
+			 * (index == rxBytesAvailable when we reach here), but we compact
+			 * defensively in case a future refactor changes that invariant. */
+			int remaining = rxBytesAvailable - index;
+			if (remaining > 0 && index > 0)
+				memmove(inputBuffer, inputBuffer + index, remaining);
+			rxBytesAvailable = remaining > 0 ? remaining : 0;
 			return JVS_STATUS_ERROR_TIMEOUT;
+		}
 
-		bytesAvailable += bytesRead;
+		rxBytesAvailable += bytesRead;
 
-		while ((index < bytesAvailable) && !finished)
+		while ((index < rxBytesAvailable) && !finished)
 		{
 			/* If we encounter a SYNC start again */
-			if (!escape && (inputBuffer[index] == SYNC))
+			if (!rxEscape && (inputBuffer[index] == SYNC))
 			{
-				phase = 0;
-				dataIndex = 0;
-				checksum = 0x00;
+				rxPhase     = 0;
+				rxDataIndex = 0;
+				rxChecksum  = 0x00;
+				rxEscape    = 0;
 				/* Compact: discard everything up to and including this SYNC byte so
 				 * that framing noise cannot exhaust the 255-byte inputBuffer.  Any
 				 * bytes already read after the SYNC are shifted to the front so they
 				 * are not lost. */
-				int remaining = bytesAvailable - index - 1;
+				int remaining = rxBytesAvailable - index - 1;
 				if (remaining > 0)
 					memmove(inputBuffer, inputBuffer + index + 1, remaining);
-				/* `remaining` is always >= 0 here (loop invariant: index < bytesAvailable),
+				/* `remaining` is always >= 0 here (loop invariant: index < rxBytesAvailable),
 				 * but clamp defensively to prevent any future refactor from setting a
-				 * negative bytesAvailable and passing a bogus offset to readBytes. */
-				bytesAvailable = remaining > 0 ? remaining : 0;
+				 * negative rxBytesAvailable and passing a bogus offset to readBytes. */
+				rxBytesAvailable = remaining > 0 ? remaining : 0;
 				index = 0;
 				continue;
 			}
 
 			/* If we encounter an ESCAPE byte escape the next byte */
-			if (!escape && inputBuffer[index] == ESCAPE)
+			if (!rxEscape && inputBuffer[index] == ESCAPE)
 			{
-				escape = 1;
+				rxEscape = 1;
 				index++;
 				continue;
 			}
 
 			/* Escape next byte by adding 1 to it */
-			if (escape)
+			if (rxEscape)
 			{
 				inputBuffer[index]++;
-				escape = 0;
+				rxEscape = 0;
 			}
 
 			/* Deal with the main bulk of the data */
-			switch (phase)
+			switch (rxPhase)
 			{
 			case 0: // If we have not yet got the address
 				packet->destination = inputBuffer[index];
-				checksum = packet->destination & 0xFF;
-				phase++;
+				rxChecksum = packet->destination & 0xFF;
+				rxPhase++;
 				break;
 			case 1: // If we have not yet got the length
 				packet->length = inputBuffer[index];
-				checksum = (checksum + packet->length) & 0xFF;
+				rxChecksum = (rxChecksum + packet->length) & 0xFF;
 				/* A JVS length of 0 is always malformed: the length field counts
 				 * the bytes that follow it including the checksum itself, so the
 				 * minimum valid value is 1.  If we accepted 0, the expression
 				 * (packet->length - 1) below would wrap to -1 (int promotion of
 				 * unsigned char 0 minus 1) and the checksum guard would never
 				 * trigger, causing every subsequent byte to be written to
-				 * packet->data[dataIndex++] without bound — a stack overflow. */
+				 * packet->data[rxDataIndex++] without bound — a stack overflow. */
 				if (packet->length == 0)
+				{
+					resetPacketParser();
 					return JVS_STATUS_ERROR_CHECKSUM;
-				phase++;
+				}
+				rxPhase++;
 				break;
 			case 2: // If there is still data to read
-				if (dataIndex == (packet->length - 1))
+				if (rxDataIndex == (packet->length - 1))
 				{
-					if (checksum != inputBuffer[index])
+					if (rxChecksum != inputBuffer[index])
+					{
+						resetPacketParser();
 						return JVS_STATUS_ERROR_CHECKSUM;
+					}
 					finished = 1;
 					break;
 				}
 				/* Defensive bounds check: packet->data is JVS_MAX_PACKET_SIZE bytes.
-				 * With valid length values (1..255) the maximum dataIndex at write
+				 * With valid length values (1..255) the maximum rxDataIndex at write
 				 * time is length-2 <= 253, well within range.  This guard protects
 				 * against any future refactoring that could relax the length==0
 				 * check above. */
-				if (dataIndex >= JVS_MAX_PACKET_SIZE)
+				if (rxDataIndex >= JVS_MAX_PACKET_SIZE)
+				{
+					resetPacketParser();
 					return JVS_STATUS_ERROR;
-				packet->data[dataIndex++] = inputBuffer[index];
-				checksum = (checksum + inputBuffer[index]) & 0xFF;
+				}
+				packet->data[rxDataIndex++] = inputBuffer[index];
+				rxChecksum = (rxChecksum + inputBuffer[index]) & 0xFF;
 				break;
 			default:
+				resetPacketParser();
 				return JVS_STATUS_ERROR;
 			}
 			index++;
 		}
 	}
 
-	/* Only compute debug output if debug level is high enough */
+	/* Only compute debug output if debug level is high enough.  Do this
+	 * BEFORE compacting the buffer so that inputBuffer[0..index-1] still
+	 * holds the raw bytes of the packet we just received. */
 	if (getDebugLevel() >= 2)
 	{
 		debug(2, "\n=== INPUT PACKET #%lu ===\n", ++packetCounter);
 		debug(2, "  Destination: 0x%02X  Length: %d bytes\n", packet->destination, packet->length);
-		
-		/* Show potential commands in packet data 
+
+		/* Show potential commands in packet data
 		 * Note: Only the first byte is typically a command, subsequent bytes are usually
 		 * parameters/arguments. This shows what each byte COULD mean if interpreted as
 		 * a command, which helps identify actual command bytes vs arguments (UNKNOWN).
@@ -1240,10 +1303,23 @@ JVSStatus readPacket(JVSPacket *packet)
 				debug(2, "...");
 			debug(2, "\n");
 		}
-		
+
 		debug(2, "  Raw data: ");
 		debugBuffer(2, inputBuffer, index);
 	}
+
+	/* Compact any bytes belonging to the next packet to the front of
+	 * inputBuffer so they are available on the next readPacket() call. */
+	int remaining = rxBytesAvailable - index;
+	if (remaining > 0 && index > 0)
+		memmove(inputBuffer, inputBuffer + index, remaining);
+	rxBytesAvailable = remaining > 0 ? remaining : 0;
+
+	/* Reset parse state ready for the next packet */
+	rxPhase     = 0;
+	rxDataIndex = 0;
+	rxEscape    = 0;
+	rxChecksum  = 0x00;
 
 	return JVS_STATUS_SUCCESS;
 }

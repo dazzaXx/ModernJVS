@@ -113,6 +113,8 @@ int initJVS(JVSIO *jvsIO);
 
 int disconnectJVS(void);
 
+void resetPacketParser(void);
+
 JVSStatus processPacket(JVSIO *jvsIO);
 
 JVSStatus readPacket(JVSPacket *packet);

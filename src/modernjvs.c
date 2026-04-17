@@ -276,6 +276,10 @@ int main(int argc, char **argv)
              * Without this flush, readPacket() may start mid-packet and
              * report a spurious checksum error on the first iteration. */
             flushDevice();
+            /* Clear any partial-packet parse state so the persistent rx*
+             * variables in readPacket() do not replay stale inputBuffer
+             * bytes from before the flush. */
+            resetPacketParser();
         }
 
         /* Process packets forever */
