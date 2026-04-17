@@ -3,6 +3,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <pthread.h>
 
 #define JVS_MAX_STATE_SIZE 100
 #define MAX_JVS_NAME_SIZE 2048
@@ -180,6 +181,7 @@ typedef struct JVSIO
     int gunXMax;
     int gunYMax;
     JVSState state;
+    pthread_mutex_t state_mutex;
     JVSCapabilities capabilities;
     struct JVSIO *chainedIO;
 } JVSIO;
@@ -194,6 +196,7 @@ int setAnalogue(JVSIO *io, JVSInput channel, double value);
 int setGun(JVSIO *io, JVSInput channel, double value);
 int setRotary(JVSIO *io, JVSInput channel, int value);
 int getRotary(JVSIO *io, JVSInput channel);
+int incrementRotary(JVSIO *io, JVSInput channel, int delta);
 
 JVSInput jvsInputFromString(char *jvsInputString);
 JVSPlayer jvsPlayerFromString(char *jvsPlayerString);

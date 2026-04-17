@@ -11,8 +11,17 @@ static ThreadSharedData ThreadManagerData;
 ThreadStatus initThreadManager(void)
 {
     memset(&ThreadManagerData, 0, sizeof(ThreadManagerData));
-    pthread_mutex_init(&ThreadManagerData.mutex_manager, NULL);
-    pthread_rwlock_init(&ThreadManagerData.rwlock_threads, NULL);
+    if (pthread_mutex_init(&ThreadManagerData.mutex_manager, NULL) != 0)
+    {
+        debug(0, "Critical: Could not initialise thread manager mutex\n");
+        return THREAD_STATUS_ERROR;
+    }
+    if (pthread_rwlock_init(&ThreadManagerData.rwlock_threads, NULL) != 0)
+    {
+        pthread_mutex_destroy(&ThreadManagerData.mutex_manager);
+        debug(0, "Critical: Could not initialise thread manager rwlock\n");
+        return THREAD_STATUS_ERROR;
+    }
     return THREAD_STATUS_SUCCESS;
 }
 

@@ -57,6 +57,17 @@ build/
 _codeql_build_dir/
 _codeql_detected_source_root
 
+# CMake in-source build artifacts
+CMakeCache.txt
+CMakeFiles/
+CPackConfig.cmake
+CPackSourceConfig.cmake
+cmake_install.cmake
+version.h
+
+# Compiled binary
+modernjvs
+
 # Python cache
 __pycache__/
 *.pyc
