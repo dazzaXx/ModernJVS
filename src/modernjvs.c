@@ -49,7 +49,7 @@ static void writeTestModeState(int active)
         return;
     }
     char buf[2];
-    buf[0] = (char)('0' + active);
+    buf[0] = active ? '1' : '0';
     buf[1] = '\0';
     if (write(fd, buf, 1) < 0)
         debug(1, "Warning: Could not write test mode state value\n");
