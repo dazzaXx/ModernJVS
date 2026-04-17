@@ -286,14 +286,15 @@ int main(int argc, char **argv)
             processingStatus = processPacket(&io);
 
             /* Apply software test-button state.
-             * Snapshot the volatile using an atomic load so the compiler
-             * cannot split the read or cache-eliminate it.  Both the
-             * comparison and the setSwitch call then operate on the same
-             * consistent value.
+             * Snapshot the volatile using an acquire load so that any
+             * writes to testButtonActive by controller threads (which use
+             * __sync_fetch_and_xor, implying release semantics) are visible
+             * before the comparison and setSwitch call.  Both the comparison
+             * and the setSwitch call then operate on the same consistent value.
              * When active, re-assert on every iteration so that a controller
              * button mapped to BUTTON_TEST cannot override the software latch
              * via its key-up event. */
-            int activeSnapshot = __atomic_load_n(&testButtonActive, __ATOMIC_RELAXED);
+            int activeSnapshot = __atomic_load_n(&testButtonActive, __ATOMIC_ACQUIRE);
             if (activeSnapshot != lastTestButtonActive)
             {
                 lastTestButtonActive = activeSnapshot;
