@@ -830,7 +830,7 @@ static int compareSlotRegistryOrder(const void *a, const void *b)
 JVSInputStatus getInputs(DeviceList *deviceList)
 {
     memset(deviceList, 0, sizeof(DeviceList));
-    struct dirent **namelist;
+    struct dirent **namelist = NULL;
 
     int scannedCount = scandir(DEV_INPUT_EVENT, &namelist, isEventDevice, alphasort);
 

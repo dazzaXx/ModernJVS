@@ -388,6 +388,29 @@ static void test_setSwitch_out_of_range_player(void)
     TEST_PASS();
 }
 
+/*
+ * setSwitch must reject a player index >= JVS_MAX_STATE_SIZE even when
+ * capabilities.players is set to that same large value.  Without the
+ * JVS_MAX_STATE_SIZE guard the write to inputSwitch[player] would be
+ * out-of-bounds.
+ */
+static void test_setSwitch_oversized_player(void)
+{
+    TEST_BEGIN(test_setSwitch_oversized_player);
+
+    JVSIO io;
+    memset(&io, 0, sizeof(io));
+    /* Set capabilities.players to JVS_MAX_STATE_SIZE so the first guard
+     * (player > capabilities.players) would NOT catch the out-of-bounds
+     * access without the second JVS_MAX_STATE_SIZE guard. */
+    io.capabilities.players = JVS_MAX_STATE_SIZE;
+    initIO(&io);
+
+    int r = setSwitch(&io, (JVSPlayer)JVS_MAX_STATE_SIZE, BUTTON_1, 1);
+    ASSERT_EQ_INT(r, 0, "setSwitch with player == JVS_MAX_STATE_SIZE must return 0");
+    TEST_PASS();
+}
+
 static void test_setSwitch_all_buttons(void)
 {
     TEST_BEGIN(test_setSwitch_all_buttons);
@@ -2476,6 +2499,7 @@ static const TestFn tests[] = {
     test_setSwitch_player1,
     test_setSwitch_player2,
     test_setSwitch_out_of_range_player,
+    test_setSwitch_oversized_player,
     test_setSwitch_all_buttons,
     test_incrementCoin_basic,
     test_incrementCoin_system_rejected,
