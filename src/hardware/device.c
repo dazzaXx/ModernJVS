@@ -98,6 +98,11 @@ static struct gpiod_chip *open_gpio_chip(void)
 // libgpiod v1 API - cache the GPIO chip handle to avoid repeated open/close operations
 static struct gpiod_chip *cached_chip_v1 = NULL;
 static int cached_chip_number_v1 = -1;
+/* Cached line handle so write/read can skip release+re-request when the
+ * pin and direction haven't changed between calls. */
+static struct gpiod_line *cached_line_v1  = NULL;
+static int               cached_line_pin_v1 = -1;
+static int               cached_line_dir_v1 = -1; /* IN or OUT */
 #endif
 
 #define TIMEOUT_SELECT 200
@@ -117,7 +122,11 @@ int initDevice(char *devicePath, int senseLineType, int senseLinePin)
     return 0;
 
   /* Setup the serial connection */
-  setSerialAttributes(serialIO, B115200);
+  if (setSerialAttributes(serialIO, B115200) != 0)
+  {
+    close(serialIO);
+    return 0;
+  }
 
   /* Copy variables over from config */
   localSenseLineType = senseLineType;
@@ -183,13 +192,16 @@ int closeDevice(void)
   current_pin = -1;
   current_direction = -1;
 #else
-  // Clean up libgpiod v1 cached chip
+  // Clean up libgpiod v1 cached chip and line
   if (cached_chip_v1)
   {
     gpiod_chip_close(cached_chip_v1);
     cached_chip_v1 = NULL;
     cached_chip_number_v1 = -1;
   }
+  cached_line_v1     = NULL;
+  cached_line_pin_v1 = -1;
+  cached_line_dir_v1 = -1;
 #endif
   
   return close(serialIO) == 0;
@@ -593,6 +605,9 @@ static struct gpiod_chip *get_cached_chip_v1(void)
   return cached_chip_v1;
 }
 
+/* Cached v1 line state so write/read can skip re-request when the direction
+ * hasn't changed.  Declared at the top of this file alongside cached_chip_v1. */
+
 int setupGPIO(int pin)
 {
   struct gpiod_chip *chip = get_cached_chip_v1();
@@ -629,12 +644,28 @@ int setGPIODirection(int pin, int dir)
   {
     result = gpiod_line_request_output(line, GPIO_CONSUMER_NAME, 0);
   }
+
+  if (result == 0)
+  {
+    cached_line_v1     = line;
+    cached_line_pin_v1 = pin;
+    cached_line_dir_v1 = dir;
+  }
   
   return (result == 0) ? 1 : 0;
 }
 
 int writeGPIO(int pin, int value)
 {
+  /* Fast path: reuse cached output request to avoid chip open and line
+   * release/re-request on every call (which adds ~1 ms per operation on
+   * the sense-line pulse sequence and causes unnecessary kernel overhead). */
+  if (cached_line_v1 && cached_line_pin_v1 == pin && cached_line_dir_v1 == OUT)
+  {
+    int ret = gpiod_line_set_value(cached_line_v1, value == LOW ? 0 : 1);
+    return (ret == 0) ? 1 : 0;
+  }
+
   struct gpiod_chip *chip = get_cached_chip_v1();
   if (!chip)
     return 0;
@@ -649,12 +680,23 @@ int writeGPIO(int pin, int value)
   
   // Request the line as output with the desired value
   int result = gpiod_line_request_output(line, GPIO_CONSUMER_NAME, value == LOW ? 0 : 1);
+
+  if (result == 0)
+  {
+    cached_line_v1     = line;
+    cached_line_pin_v1 = pin;
+    cached_line_dir_v1 = OUT;
+  }
   
   return (result == 0) ? 1 : 0;
 }
 
 int readGPIO(int pin)
 {
+  /* Fast path: reuse cached input request. */
+  if (cached_line_v1 && cached_line_pin_v1 == pin && cached_line_dir_v1 == IN)
+    return gpiod_line_get_value(cached_line_v1);
+
   struct gpiod_chip *chip = get_cached_chip_v1();
   if (!chip)
     return -1;
@@ -670,10 +712,14 @@ int readGPIO(int pin)
   // Request the line as input
   if (gpiod_line_request_input(line, GPIO_CONSUMER_NAME) != 0)
     return -1;
-  
-  int value = gpiod_line_get_value(line);
-  
-  return value;
+
+  cached_line_v1     = line;
+  cached_line_pin_v1 = pin;
+  cached_line_dir_v1 = IN;
+
+  int val = gpiod_line_get_value(line);
+
+  return val;
 }
 
 #endif  // GPIOD_API_V2

@@ -462,8 +462,7 @@ static void *deviceThread(void *_args)
 
                 int reverse = args->inputs.rel[event.code].reverse;
 
-                int oldRotaryValue = getRotary(io, args->inputs.rel[event.code].output);
-                setRotary(io, args->inputs.rel[event.code].output, oldRotaryValue + (reverse ? event.value * -1 : event.value));
+                incrementRotary(io, args->inputs.rel[event.code].output, reverse ? event.value * -1 : event.value);
             }
             break;
 

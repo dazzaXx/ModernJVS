@@ -160,6 +160,30 @@ int getRotary(JVSIO *io, JVSInput channel)
 	return rotaryValue;
 }
 
+/**
+ * Atomically increment (or decrement) a rotary channel by delta.
+ *
+ * Performs the read-modify-write under the state mutex so that concurrent
+ * EV_REL events from multiple controller threads for the same channel are
+ * never lost.
+ *
+ * @param io      The JVSIO to modify.
+ * @param channel The rotary channel index.
+ * @param delta   Amount to add (negative values subtract).
+ * @returns 1 on success, 0 if the channel index is out of range.
+ */
+int incrementRotary(JVSIO *io, JVSInput channel, int delta)
+{
+	if ((int)channel < 0 || channel >= io->capabilities.rotaryChannels ||
+	    (int)channel >= JVS_MAX_STATE_SIZE)
+		return 0;
+
+	pthread_mutex_lock(&io->state_mutex);
+	io->state.rotaryChannel[channel] += delta;
+	pthread_mutex_unlock(&io->state_mutex);
+	return 1;
+}
+
 JVSInput jvsInputFromString(char *jvsInputString)
 {
 	for (long unsigned int i = 0; i < sizeof(jvsInputConversion) / sizeof(jvsInputConversion[0]); i++)
