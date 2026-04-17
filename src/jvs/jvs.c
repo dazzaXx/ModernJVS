@@ -322,6 +322,8 @@ JVSStatus processPacket(JVSIO *jvsIO)
 			lastPacketTime = 0;
 			connectionLostLogged = 0;
 			debug(0, "JVS: Connection reset\n");
+			/* CMD_RESET is a broadcast command: the JVS spec requires no response. */
+			return JVS_STATUS_SUCCESS;
 		}
 		break;
 
@@ -329,6 +331,11 @@ JVSStatus processPacket(JVSIO *jvsIO)
 		case CMD_ASSIGN_ADDR:
 		{
 			size = 2;
+			if (index + 1 >= (int)inputPacket.length - 1)
+			{
+				debug(0, "Error: CMD_ASSIGN_ADDR - packet too short\n");
+				break;
+			}
 
 			/* Find the first device in the chain that has not yet been assigned an address */
 			JVSIO *ioToAssign = jvsIO;
@@ -381,6 +388,11 @@ JVSStatus processPacket(JVSIO *jvsIO)
 		case CMD_SET_COMMS_MODE:
 		{
 			size = 2;
+			if (index + 1 >= (int)inputPacket.length - 1)
+			{
+				debug(0, "Error: CMD_SET_COMMS_MODE - packet too short\n");
+				break;
+			}
 			debug(1, "CMD_SET_COMMS_MODE - Mode 0x%02X (acknowledged)\n", inputPacket.data[index + 1]);
 			CHECK_OUTPUT_SPACE(&outputPacket, 1);
 			outputPacket.data[outputPacket.length++] = REPORT_SUCCESS;
@@ -455,6 +467,11 @@ JVSStatus processPacket(JVSIO *jvsIO)
 		case CMD_READ_SWITCHES:
 		{
 			size = 3;
+			if (index + 2 >= (int)inputPacket.length - 1)
+			{
+				debug(0, "Error: CMD_READ_SWITCHES - packet too short\n");
+				break;
+			}
 			debug(1, "CMD_READ_SWITCHES - Players: %d, Switches: %d\n", 
 				inputPacket.data[index + 1], inputPacket.data[index + 2]);
 			// Bounds check before writing the 2-byte header (REPORT_SUCCESS + system switch byte)
@@ -498,6 +515,11 @@ JVSStatus processPacket(JVSIO *jvsIO)
 		case CMD_READ_COINS:
 		{
 			size = 2;
+			if (index + 1 >= (int)inputPacket.length - 1)
+			{
+				debug(0, "Error: CMD_READ_COINS - packet too short\n");
+				break;
+			}
 			int numberCoinSlots = inputPacket.data[index + 1];
 			debug(1, "CMD_READ_COINS - Reading %d coin slot(s)\n", numberCoinSlots);
 			CHECK_OUTPUT_SPACE(&outputPacket, 1);
@@ -527,6 +549,11 @@ JVSStatus processPacket(JVSIO *jvsIO)
 		case CMD_READ_ANALOGS:
 		{
 			size = 2;
+			if (index + 1 >= (int)inputPacket.length - 1)
+			{
+				debug(0, "Error: CMD_READ_ANALOGS - packet too short\n");
+				break;
+			}
 			int numberChannels = inputPacket.data[index + 1];
 			debug(1, "CMD_READ_ANALOGS - Reading %d analog channel(s)\n", numberChannels);
 
@@ -558,6 +585,11 @@ JVSStatus processPacket(JVSIO *jvsIO)
 		case CMD_READ_ROTARY:
 		{
 			size = 2;
+			if (index + 1 >= (int)inputPacket.length - 1)
+			{
+				debug(0, "Error: CMD_READ_ROTARY - packet too short\n");
+				break;
+			}
 			int numberChannels = inputPacket.data[index + 1];
 			debug(1, "CMD_READ_ROTARY - Reading %d rotary channel(s)\n", numberChannels);
 
@@ -602,6 +634,11 @@ JVSStatus processPacket(JVSIO *jvsIO)
 		case CMD_READ_GPI:
 		{
 			size = 2;
+			if (index + 1 >= (int)inputPacket.length - 1)
+			{
+				debug(0, "Error: CMD_READ_GPI - packet too short\n");
+				break;
+			}
 			int numberBytes = inputPacket.data[index + 1];
 			debug(1, "CMD_READ_GPI - Reading %d byte(s) of GPI data\n", numberBytes);
 			CHECK_OUTPUT_SPACE(&outputPacket, 1);
@@ -621,19 +658,32 @@ JVSStatus processPacket(JVSIO *jvsIO)
 
 		case CMD_REMAINING_PAYOUT:
 		{
-			debug(1, "CMD_REMAINING_PAYOUT - Returning payout status\n");
 			size = 2;
-			if (outputPacket.length + 5 > JVS_MAX_PACKET_SIZE)
+			if (index + 1 >= (int)inputPacket.length - 1)
 			{
-				debug(0, "Error: Output packet size exceeded in CMD_REMAINING_PAYOUT\n");
+				debug(0, "Error: CMD_REMAINING_PAYOUT - packet too short\n");
+				break;
+			}
+			int numberSlots = inputPacket.data[index + 1];
+			debug(1, "CMD_REMAINING_PAYOUT - Reading %d slot(s)\n", numberSlots);
+			if (numberSlots > JVS_MAX_STATE_SIZE)
+			{
+				debug(0, "Error: Slot count %d exceeds maximum %d in CMD_REMAINING_PAYOUT\n", numberSlots, JVS_MAX_STATE_SIZE);
 				return JVS_STATUS_ERROR;
 			}
-			outputPacket.data[outputPacket.length] = REPORT_SUCCESS;
-			outputPacket.data[outputPacket.length + 1] = 0;
-			outputPacket.data[outputPacket.length + 2] = 0;
-			outputPacket.data[outputPacket.length + 3] = 0;
-			outputPacket.data[outputPacket.length + 4] = 0;
-			outputPacket.length += 5;
+			CHECK_OUTPUT_SPACE(&outputPacket, 1);
+			outputPacket.data[outputPacket.length++] = REPORT_SUCCESS;
+			for (int i = 0; i < numberSlots; i++)
+			{
+				if (outputPacket.length + 2 > JVS_MAX_PACKET_SIZE)
+				{
+					debug(0, "Error: Output packet size exceeded in CMD_REMAINING_PAYOUT\n");
+					return JVS_STATUS_ERROR;
+				}
+				outputPacket.data[outputPacket.length] = 0;
+				outputPacket.data[outputPacket.length + 1] = 0;
+				outputPacket.length += 2;
+			}
 		}
 		break;
 
@@ -648,6 +698,11 @@ JVSStatus processPacket(JVSIO *jvsIO)
 
 		case CMD_WRITE_GPO:
 		{
+			if (index + 1 >= (int)inputPacket.length - 1)
+			{
+				debug(0, "Error: CMD_WRITE_GPO - packet too short\n");
+				break;
+			}
 			int numBytes = inputPacket.data[index + 1];
 			debug(1, "CMD_WRITE_GPO - Writing %d byte(s) to GPO\n", numBytes);
 			size = 2 + numBytes;
@@ -659,9 +714,14 @@ JVSStatus processPacket(JVSIO *jvsIO)
 
 		case CMD_WRITE_GPO_BYTE:
 		{
+			size = 3;
+			if (index + 2 >= (int)inputPacket.length - 1)
+			{
+				debug(0, "Error: CMD_WRITE_GPO_BYTE - packet too short\n");
+				break;
+			}
 			debug(1, "CMD_WRITE_GPO_BYTE - Byte %d = 0x%02X\n", 
 				inputPacket.data[index + 1], inputPacket.data[index + 2]);
-			size = 3;
 			CHECK_OUTPUT_SPACE(&outputPacket, 1);
 			outputPacket.data[outputPacket.length++] = REPORT_SUCCESS;
 		}
@@ -669,9 +729,14 @@ JVSStatus processPacket(JVSIO *jvsIO)
 
 		case CMD_WRITE_GPO_BIT:
 		{
+			size = 3;
+			if (index + 2 >= (int)inputPacket.length - 1)
+			{
+				debug(0, "Error: CMD_WRITE_GPO_BIT - packet too short\n");
+				break;
+			}
 			debug(1, "CMD_WRITE_GPO_BIT - Byte %d, Bit %d\n", 
 				inputPacket.data[index + 1], inputPacket.data[index + 2]);
-			size = 3;
 			CHECK_OUTPUT_SPACE(&outputPacket, 1);
 			outputPacket.data[outputPacket.length++] = REPORT_SUCCESS;
 		}
@@ -679,6 +744,11 @@ JVSStatus processPacket(JVSIO *jvsIO)
 
 		case CMD_WRITE_ANALOG:
 		{
+			if (index + 1 >= (int)inputPacket.length - 1)
+			{
+				debug(0, "Error: CMD_WRITE_ANALOG - packet too short\n");
+				break;
+			}
 			int numChannels = inputPacket.data[index + 1];
 			debug(1, "CMD_WRITE_ANALOG - Writing %d analog channel(s)\n", numChannels);
 			size = numChannels * 2 + 2;
@@ -699,6 +769,11 @@ JVSStatus processPacket(JVSIO *jvsIO)
 		case CMD_WRITE_COINS:
 		{
 			size = 4;
+			if (index + 3 >= (int)inputPacket.length - 1)
+			{
+				debug(0, "Error: CMD_WRITE_COINS - packet too short\n");
+				break;
+			}
 			// - 1 because JVS is 1-indexed, but our array is 0-indexed
 			int slot_index = inputPacket.data[index + 1] - 1;
 			int coin_increment = ((int)(inputPacket.data[index + 3]) | ((int)(inputPacket.data[index + 2]) << 8));
@@ -723,6 +798,11 @@ JVSStatus processPacket(JVSIO *jvsIO)
 
 		case CMD_WRITE_DISPLAY:
 		{
+			if (index + 2 >= (int)inputPacket.length - 1)
+			{
+				debug(0, "Error: CMD_WRITE_DISPLAY - packet too short\n");
+				break;
+			}
 			int cols = inputPacket.data[index + 1];
 			int rows = inputPacket.data[index + 2];
 			debug(1, "CMD_WRITE_DISPLAY - Writing %d×%d display data\n", cols, rows);
@@ -736,6 +816,11 @@ JVSStatus processPacket(JVSIO *jvsIO)
 		case CMD_DECREASE_COINS:
 		{
 			size = 4;
+			if (index + 3 >= (int)inputPacket.length - 1)
+			{
+				debug(0, "Error: CMD_DECREASE_COINS - packet too short\n");
+				break;
+			}
 			// - 1 because JVS is 1-indexed, but our array is 0-indexed
 			int slot_index = inputPacket.data[index + 1] - 1;
 			int coin_decrement = ((int)(inputPacket.data[index + 3]) | ((int)(inputPacket.data[index + 2]) << 8));
@@ -786,6 +871,11 @@ JVSStatus processPacket(JVSIO *jvsIO)
 		case CMD_READ_LIGHTGUN:
 		{
 			size = 2;
+			if (index + 1 >= (int)inputPacket.length - 1)
+			{
+				debug(0, "Error: CMD_READ_LIGHTGUN - packet too short\n");
+				break;
+			}
 			/* inputPacket.data is unsigned char so numberGuns is always 0-255 */
 			int numberGuns = inputPacket.data[index + 1];
 			debug(1, "CMD_READ_LIGHTGUN - Reading %d gun(s)\n", numberGuns);
@@ -828,6 +918,12 @@ JVSStatus processPacket(JVSIO *jvsIO)
 		case CMD_NAMCO_SPECIFIC:
 		{
 			debug(1, "CMD_NAMCO_SPECIFIC - Processing Namco command\n");
+
+			if (index + 1 >= (int)inputPacket.length - 1)
+			{
+				debug(0, "Error: CMD_NAMCO_SPECIFIC - packet too short\n");
+				break;
+			}
 
 			CHECK_OUTPUT_SPACE(&outputPacket, 1);
 			outputPacket.data[outputPacket.length++] = REPORT_SUCCESS;
@@ -917,6 +1013,10 @@ JVSStatus processPacket(JVSIO *jvsIO)
 		default:
 		{
 			debug(0, "CMD_UNSUPPORTED - Unsupported command: 0x%02hhX\n", inputPacket.data[index]);
+			/* Per JVS spec: reply with STATUS_UNSUPPORTED and stop processing further commands */
+			outputPacket.data[0] = STATUS_UNSUPPORTED;
+			outputPacket.length = 1;
+			return writePacket(&outputPacket);
 		}
 		}
 		index += size;
@@ -1076,9 +1176,20 @@ JVSStatus readPacket(JVSPacket *packet)
  */
 JVSStatus writePacket(JVSPacket *packet)
 {
-	/* Don't return anything if there isn't anything to write! */
-	if (packet->length < 2)
+	/* Don't return anything if the packet has no data at all */
+	if (packet->length < 1)
 		return JVS_STATUS_SUCCESS;
+
+	/* The JVS wire-format length field is a single byte whose value includes
+	 * the checksum byte.  Adding 1 to packet->length must therefore remain ≤
+	 * 255, i.e. packet->length ≤ 254.  If this invariant is violated the
+	 * wire length byte would silently wrap to 0, producing a corrupt packet
+	 * that the arcade machine cannot parse. */
+	if (packet->length >= JVS_MAX_PACKET_SIZE)
+	{
+		debug(0, "Error: Output packet length %d exceeds wire format maximum, dropping\n", packet->length);
+		return JVS_STATUS_ERROR;
+	}
 
 	/* Get pointer to raw data in packet */
 	unsigned char *packetPointer = (unsigned char *)packet;
@@ -1092,7 +1203,8 @@ JVSStatus writePacket(JVSPacket *packet)
 	 * length field, then restore it afterwards so that the packet struct
 	 * stays consistent (important for CMD_RETRANSMIT which re-calls this
 	 * function with the same outputPacket without rebuilding it).
-	 * Use a local int to avoid unsigned char wrap when length == 255. */
+	 * packet->length < JVS_MAX_PACKET_SIZE (255) is guaranteed by the check
+	 * above, so wireLength ≤ 255 and the cast to unsigned char is lossless. */
 	unsigned char savedLength = packet->length;
 	int wireLength = (int)packet->length + 1;
 	packet->length = (unsigned char)wireLength;

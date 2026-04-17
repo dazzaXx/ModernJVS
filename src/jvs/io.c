@@ -38,7 +38,8 @@ int initIO(JVSIO *io)
 
 int setSwitch(JVSIO *io, JVSPlayer player, JVSInput switchNumber, int value)
 {
-	if ((int)player < 0 || player > io->capabilities.players)
+	if ((int)player < 0 || player > io->capabilities.players ||
+	    (int)player >= JVS_MAX_STATE_SIZE)
 	{
 		debug(0, "Error: That player %d does not exist.\n", player);
 		return 0;
