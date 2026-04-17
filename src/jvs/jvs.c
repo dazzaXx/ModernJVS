@@ -491,8 +491,16 @@ JVSStatus processPacket(JVSIO *jvsIO)
 				debug(0, "Error: Output packet size exceeded in CMD_READ_SWITCHES\n");
 				return JVS_STATUS_ERROR;
 			}
+
+			/* Snapshot the switch state to avoid holding the mutex over the output loop
+			 * (which contains early-return error paths). */
+			int switchSnapshot[JVS_MAX_STATE_SIZE];
+			pthread_mutex_lock(&jvsIO->state_mutex);
+			memcpy(switchSnapshot, jvsIO->state.inputSwitch, sizeof(switchSnapshot));
+			pthread_mutex_unlock(&jvsIO->state_mutex);
+
 			outputPacket.data[outputPacket.length] = REPORT_SUCCESS;
-			outputPacket.data[outputPacket.length + 1] = jvsIO->state.inputSwitch[0];
+			outputPacket.data[outputPacket.length + 1] = switchSnapshot[0];
 			outputPacket.length += 2;
 			/* Clamp switch-byte count to 2: our inputSwitch register is 16 bits wide.
 			 * More than 2 bytes would require a right-shift of (8 - j*8) with j>=2,
@@ -517,7 +525,7 @@ JVSStatus processPacket(JVSIO *jvsIO)
 						debug(0, "Error: Output packet size exceeded in CMD_READ_SWITCHES\n");
 						return JVS_STATUS_ERROR;
 					}
-					outputPacket.data[outputPacket.length++] = jvsIO->state.inputSwitch[i + 1] >> (8 - (j * 8));
+					outputPacket.data[outputPacket.length++] = switchSnapshot[i + 1] >> (8 - (j * 8));
 				}
 			}
 		}
@@ -541,6 +549,13 @@ JVSStatus processPacket(JVSIO *jvsIO)
 				debug(0, "Error: Coin slot count %d exceeds maximum %d in CMD_READ_COINS\n", numberCoinSlots, JVS_MAX_STATE_SIZE);
 				return JVS_STATUS_ERROR;
 			}
+
+			/* Snapshot the coin state to avoid holding the mutex over the output loop. */
+			int coinSnapshot[JVS_MAX_STATE_SIZE];
+			pthread_mutex_lock(&jvsIO->state_mutex);
+			memcpy(coinSnapshot, jvsIO->state.coinCount, sizeof(coinSnapshot));
+			pthread_mutex_unlock(&jvsIO->state_mutex);
+
 			for (int i = 0; i < numberCoinSlots; i++)
 			{
 				// Bounds check to prevent buffer overflow
@@ -550,8 +565,8 @@ JVSStatus processPacket(JVSIO *jvsIO)
 					return JVS_STATUS_ERROR;
 				}
 				// Send coin count as 2 bytes (high byte with 5-bit limit, then low byte)
-				outputPacket.data[outputPacket.length] = (jvsIO->state.coinCount[i] >> 8) & 0x1F;
-				outputPacket.data[outputPacket.length + 1] = jvsIO->state.coinCount[i] & 0xFF;
+				outputPacket.data[outputPacket.length] = (coinSnapshot[i] >> 8) & 0x1F;
+				outputPacket.data[outputPacket.length + 1] = coinSnapshot[i] & 0xFF;
 				outputPacket.length += 2;
 			}
 		}
@@ -576,6 +591,13 @@ JVSStatus processPacket(JVSIO *jvsIO)
 				debug(0, "Error: Analogue channel count %d exceeds maximum %d in CMD_READ_ANALOGS\n", numberChannels, JVS_MAX_STATE_SIZE);
 				return JVS_STATUS_ERROR;
 			}
+
+			/* Snapshot the analogue state to avoid holding the mutex over the output loop. */
+			int analogueSnapshot[JVS_MAX_STATE_SIZE];
+			pthread_mutex_lock(&jvsIO->state_mutex);
+			memcpy(analogueSnapshot, jvsIO->state.analogueChannel, sizeof(analogueSnapshot));
+			pthread_mutex_unlock(&jvsIO->state_mutex);
+
 			for (int i = 0; i < numberChannels; i++)
 			{
 				// Bounds check to prevent buffer overflow
@@ -585,7 +607,7 @@ JVSStatus processPacket(JVSIO *jvsIO)
 					return JVS_STATUS_ERROR;
 				}
 				/* By default left align the data */
-				int analogueData = jvsIO->state.analogueChannel[i] << jvsIO->analogueRestBits;
+				int analogueData = analogueSnapshot[i] << jvsIO->analogueRestBits;
 				outputPacket.data[outputPacket.length] = analogueData >> 8;
 				outputPacket.data[outputPacket.length + 1] = analogueData;
 				outputPacket.length += 2;
@@ -612,6 +634,13 @@ JVSStatus processPacket(JVSIO *jvsIO)
 				debug(0, "Error: Rotary channel count %d exceeds maximum %d in CMD_READ_ROTARY\n", numberChannels, JVS_MAX_STATE_SIZE);
 				return JVS_STATUS_ERROR;
 			}
+
+			/* Snapshot the rotary state to avoid holding the mutex over the output loop. */
+			int rotarySnapshot[JVS_MAX_STATE_SIZE];
+			pthread_mutex_lock(&jvsIO->state_mutex);
+			memcpy(rotarySnapshot, jvsIO->state.rotaryChannel, sizeof(rotarySnapshot));
+			pthread_mutex_unlock(&jvsIO->state_mutex);
+
 			for (int i = 0; i < numberChannels; i++)
 			{
 				// Bounds check to prevent buffer overflow
@@ -620,8 +649,8 @@ JVSStatus processPacket(JVSIO *jvsIO)
 					debug(0, "Error: Output packet size exceeded in CMD_READ_ROTARY\n");
 					return JVS_STATUS_ERROR;
 				}
-				outputPacket.data[outputPacket.length] = jvsIO->state.rotaryChannel[i] >> 8;
-				outputPacket.data[outputPacket.length + 1] = jvsIO->state.rotaryChannel[i] & 0xFF;
+				outputPacket.data[outputPacket.length] = rotarySnapshot[i] >> 8;
+				outputPacket.data[outputPacket.length + 1] = rotarySnapshot[i] & 0xFF;
 				outputPacket.length += 2;
 			}
 		}
@@ -825,9 +854,11 @@ JVSStatus processPacket(JVSIO *jvsIO)
 			outputPacket.data[outputPacket.length++] = REPORT_SUCCESS;
 
 			/* Prevent overflow of coins */
+			pthread_mutex_lock(&jvsIO->state_mutex);
 			if (coin_increment + jvsIO->state.coinCount[slot_index] > 16383)
 				coin_increment = 16383 - jvsIO->state.coinCount[slot_index];
 			jvsIO->state.coinCount[slot_index] += coin_increment;
+			pthread_mutex_unlock(&jvsIO->state_mutex);
 		}
 		break;
 
@@ -879,9 +910,11 @@ JVSStatus processPacket(JVSIO *jvsIO)
 			outputPacket.data[outputPacket.length++] = REPORT_SUCCESS;
 
 			/* Prevent underflow of coins */
+			pthread_mutex_lock(&jvsIO->state_mutex);
 			if (coin_decrement > jvsIO->state.coinCount[slot_index])
 				coin_decrement = jvsIO->state.coinCount[slot_index];
 			jvsIO->state.coinCount[slot_index] -= coin_decrement;
+			pthread_mutex_unlock(&jvsIO->state_mutex);
 		}
 		break;
 
@@ -932,6 +965,13 @@ JVSStatus processPacket(JVSIO *jvsIO)
 				debug(0, "Error: Gun count %d exceeds maximum %d in CMD_READ_LIGHTGUN\n", numberGuns, JVS_MAX_STATE_SIZE / 2);
 				return JVS_STATUS_ERROR;
 			}
+
+			/* Snapshot the gun channel state to avoid holding the mutex over the output loop. */
+			int gunSnapshot[JVS_MAX_STATE_SIZE];
+			pthread_mutex_lock(&jvsIO->state_mutex);
+			memcpy(gunSnapshot, jvsIO->state.gunChannel, sizeof(gunSnapshot));
+			pthread_mutex_unlock(&jvsIO->state_mutex);
+
 			for (int i = 0; i < numberGuns; i++)
 			{
 				if (outputPacket.length + 4 > JVS_MAX_PACKET_SIZE)
@@ -944,8 +984,8 @@ JVSStatus processPacket(JVSIO *jvsIO)
 				int xData = 0, yData = 0;
 				if (i < jvsIO->capabilities.gunChannels)
 				{
-					xData = jvsIO->state.gunChannel[i * 2] << jvsIO->gunXRestBits;
-					yData = jvsIO->state.gunChannel[i * 2 + 1] << jvsIO->gunYRestBits;
+					xData = gunSnapshot[i * 2] << jvsIO->gunXRestBits;
+					yData = gunSnapshot[i * 2 + 1] << jvsIO->gunYRestBits;
 				}
 				outputPacket.data[outputPacket.length] = xData >> 8;
 				outputPacket.data[outputPacket.length + 1] = xData;

@@ -46,6 +46,8 @@ int initIO(JVSIO *io)
 	if (io->capabilities.gunChannels > 0 && (io->gunXMax == 0 || io->gunYMax == 0))
 		debug(0, "Warning: gunXBits/gunYBits is 0 or >15 — lightgun output will be zeroed\n");
 
+	pthread_mutex_init(&io->state_mutex, NULL);
+
 	return 1;
 }
 
@@ -60,11 +62,15 @@ int setSwitch(JVSIO *io, JVSPlayer player, JVSInput switchNumber, int value)
 
 	if (value)
 	{
+		pthread_mutex_lock(&io->state_mutex);
 		io->state.inputSwitch[player] |= switchNumber;
+		pthread_mutex_unlock(&io->state_mutex);
 	}
 	else
 	{
+		pthread_mutex_lock(&io->state_mutex);
 		io->state.inputSwitch[player] &= ~switchNumber;
+		pthread_mutex_unlock(&io->state_mutex);
 	}
 
 	return 1;
@@ -81,10 +87,12 @@ int incrementCoin(JVSIO *io, JVSPlayer player, int amount)
 	    (int)(player - 1) >= JVS_MAX_STATE_SIZE)
 		return 0;
 
+	pthread_mutex_lock(&io->state_mutex);
 	io->state.coinCount[player - 1] += amount;
 	/* Cap at 16383 (max representable by the 13-bit JVS wire format) */
 	if (io->state.coinCount[player - 1] > 16383)
 		io->state.coinCount[player - 1] = 16383;
+	pthread_mutex_unlock(&io->state_mutex);
 	return 1;
 }
 
@@ -95,7 +103,9 @@ int setAnalogue(JVSIO *io, JVSInput channel, double value)
 	if ((int)channel < 0 || channel >= io->capabilities.analogueInChannels ||
 	    (int)channel >= JVS_MAX_STATE_SIZE)
 		return 0;
+	pthread_mutex_lock(&io->state_mutex);
 	io->state.analogueChannel[channel] = (int)((double)value * (double)io->analogueMax);
+	pthread_mutex_unlock(&io->state_mutex);
 	return 1;
 }
 
@@ -111,11 +121,15 @@ int setGun(JVSIO *io, JVSInput channel, double value)
 
 	if (channel % 2 == 0)
 	{
+		pthread_mutex_lock(&io->state_mutex);
 		io->state.gunChannel[channel] = (int)((double)value * (double)io->gunXMax);
+		pthread_mutex_unlock(&io->state_mutex);
 	}
 	else
 	{
+		pthread_mutex_lock(&io->state_mutex);
 		io->state.gunChannel[channel] = (int)((double)((double)1.0 - value) * (double)io->gunYMax);
+		pthread_mutex_unlock(&io->state_mutex);
 	}
 	return 1;
 }
@@ -128,7 +142,9 @@ int setRotary(JVSIO *io, JVSInput channel, int value)
 	    (int)channel >= JVS_MAX_STATE_SIZE)
 		return 0;
 
+	pthread_mutex_lock(&io->state_mutex);
 	io->state.rotaryChannel[channel] = value;
+	pthread_mutex_unlock(&io->state_mutex);
 	return 1;
 }
 
@@ -138,7 +154,10 @@ int getRotary(JVSIO *io, JVSInput channel)
 	    (int)channel >= JVS_MAX_STATE_SIZE)
 		return 0;
 
-	return io->state.rotaryChannel[channel];
+	pthread_mutex_lock(&io->state_mutex);
+	int rotaryValue = io->state.rotaryChannel[channel];
+	pthread_mutex_unlock(&io->state_mutex);
+	return rotaryValue;
 }
 
 JVSInput jvsInputFromString(char *jvsInputString)
