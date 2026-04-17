@@ -298,6 +298,8 @@ static void *deviceThread(void *_args)
     struct input_event event;
 
     int flags = fcntl(fd, F_GETFL, 0);
+    if (flags < 0)
+        flags = 0;
     fcntl(fd, F_SETFL, flags | O_NONBLOCK);
 
     uint8_t absoluteBitmask[ABS_MAX / 8 + 1];
@@ -882,15 +884,17 @@ JVSInputStatus getInputs(DeviceList *deviceList)
         dev->type = DEVICE_TYPE_UNKNOWN;
 
         // Get product vendor and ID information
-        struct input_id device_info;
-        ioctl(device, EVIOCGID, &device_info);
+        struct input_id device_info = {0};
+        if (ioctl(device, EVIOCGID, &device_info) < 0)
+            debug(1, "Warning: Failed to get device ID info for %s: %s\n", tempPath, strerror(errno));
         dev->vendorID = device_info.vendor;
         dev->productID = device_info.product;
         dev->version = device_info.version;
         dev->bus = device_info.bustype;
 
         // Get the physical location string
-        ioctl(device, EVIOCGPHYS(sizeof(dev->physicalLocation)), dev->physicalLocation);
+        if (ioctl(device, EVIOCGPHYS(sizeof(dev->physicalLocation)), dev->physicalLocation) < 0)
+            debug(1, "Warning: Failed to get physical location for %s: %s\n", tempPath, strerror(errno));
         /* Truncate at the first '/' to keep only the bus-address component
          * (e.g. "usb-0000:01:00.0-1" → "usb-0000:01:00.0-1/input0" → "usb-0000:01:00.0-1").
          * strchr is O(n) vs the previous O(n²) strlen-in-loop approach. */
