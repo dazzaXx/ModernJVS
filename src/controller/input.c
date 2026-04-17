@@ -307,67 +307,60 @@ static void *deviceThread(void *_args)
     if (ioctl(fd, EVIOCGBIT(EV_ABS, sizeof(absoluteBitmask)), absoluteBitmask) < 0)
         debug(0, "Error: Failed to get bit mask for analogue values: %s\n", strerror(errno));
 
+    /* Single pass over all ABS axes: populate absMax/absMin and, for axes that
+     * are mapped as ANALOGUE, seed the JVS state with the current hardware
+     * position so that games see correct values before the first input event. */
     for (int axisIndex = 0; axisIndex < ABS_MAX; ++axisIndex)
     {
-        if (test_bit(axisIndex, absoluteBitmask))
+        if (!test_bit(axisIndex, absoluteBitmask))
+            continue;
+
+        if (ioctl(fd, EVIOCGABS(axisIndex), &absoluteFeatures))
         {
-            if (ioctl(fd, EVIOCGABS(axisIndex), &absoluteFeatures))
-                debug(0, "Error: Failed to get device analogue limits: %s\n", strerror(errno));
-
-            args->inputs.absMax[axisIndex] = (double)absoluteFeatures.maximum;
-            args->inputs.absMin[axisIndex] = (double)absoluteFeatures.minimum;
+            debug(0, "Error: Failed to get device analogue limits: %s\n", strerror(errno));
+            continue;
         }
-    }
 
-    /* Initialize analog axis values to their current hardware position
-     * This includes analog sticks (X, Y) and triggers (Z, R, L, T) to ensure
-     * racing games and other applications see correct values before first input event */
-    for (int axisIndex = 0; axisIndex < ABS_MAX; ++axisIndex)
-    {
-        if (test_bit(axisIndex, absoluteBitmask) && args->inputs.absEnabled[axisIndex])
+        args->inputs.absMax[axisIndex] = (double)absoluteFeatures.maximum;
+        args->inputs.absMin[axisIndex] = (double)absoluteFeatures.minimum;
+
+        /* Only initialise ANALOGUE-type mapped axes (not HAT/SWITCH) */
+        if (!args->inputs.absEnabled[axisIndex] || args->inputs.abs[axisIndex].type != ANALOGUE)
+            continue;
+
+        int currentValue = absoluteFeatures.value;
+
+        /* Apply the same scaling calculation as in the event loop */
+        double axisRange = args->inputs.absMax[axisIndex] - args->inputs.absMin[axisIndex];
+        if (axisRange < MIN_DIVISION_THRESHOLD)
+            continue;
+        double scaled = ((double)((double)currentValue * (double)args->inputs.absMultiplier[axisIndex]) - args->inputs.absMin[axisIndex]) / axisRange;
+
+        /* Clamp to [0, 1] range */
+        scaled = scaled > 1 ? 1 : scaled;
+        scaled = scaled < 0 ? 0 : scaled;
+
+        /* Apply deadzone logic to analog sticks only (same as in event loop)
+         * Note: Triggers (Z, R, L, T) do not get deadzone applied */
+        if (args->analogDeadzone > 0 && args->analogDeadzone < MAX_ANALOG_DEADZONE &&
+            (args->player >= 1 && args->player <= 4) &&
+            (args->inputs.abs[axisIndex].input == CONTROLLER_ANALOGUE_X ||
+             args->inputs.abs[axisIndex].input == CONTROLLER_ANALOGUE_Y))
         {
-            /* Skip HAT and SWITCH types - only initialize ANALOGUE type axes (sticks and triggers) */
-            if (args->inputs.abs[axisIndex].type != ANALOGUE)
-                continue;
-
-            /* Read current axis value */
-            if (ioctl(fd, EVIOCGABS(axisIndex), &absoluteFeatures))
-                continue;
-
-            int currentValue = absoluteFeatures.value;
-
-            /* Apply the same scaling calculation as in the event loop */
-            double axisRange = args->inputs.absMax[axisIndex] - args->inputs.absMin[axisIndex];
-            if (axisRange < MIN_DIVISION_THRESHOLD)
-                continue;
-            double scaled = ((double)((double)currentValue * (double)args->inputs.absMultiplier[axisIndex]) - args->inputs.absMin[axisIndex]) / axisRange;
-
-            /* Clamp to [0, 1] range */
-            scaled = scaled > 1 ? 1 : scaled;
-            scaled = scaled < 0 ? 0 : scaled;
-
-            /* Apply deadzone logic to analog sticks only (same as in event loop)
-             * Note: Triggers (Z, R, L, T) do not get deadzone applied */
-            if (args->analogDeadzone > 0 && args->analogDeadzone < MAX_ANALOG_DEADZONE &&
-                (args->player >= 1 && args->player <= 4) &&
-                (args->inputs.abs[axisIndex].input == CONTROLLER_ANALOGUE_X ||
-                 args->inputs.abs[axisIndex].input == CONTROLLER_ANALOGUE_Y))
-            {
-                scaled = applyDeadzone(scaled, args->analogDeadzone);
-            }
-
-            /* Apply reverse logic if configured */
-            double finalValue = args->inputs.abs[axisIndex].reverse ? 1 - scaled : scaled;
-
-            /* Initialize the JVS state with the current hardware position.
-             * Route to the chained IO when secondaryIO is set, matching the
-             * same pattern used in the EV_KEY / EV_REL event handlers. */
-            JVSIO *initIO = args->jvsIO;
-            if (args->inputs.abs[axisIndex].secondaryIO && args->jvsIO->chainedIO != NULL)
-                initIO = args->jvsIO->chainedIO;
-            setAnalogue(initIO, args->inputs.abs[axisIndex].output, finalValue);
-            setGun(initIO, args->inputs.abs[axisIndex].output, finalValue);
+            scaled = applyDeadzone(scaled, args->analogDeadzone);
         }
+
+        /* Apply reverse logic if configured */
+        double finalValue = args->inputs.abs[axisIndex].reverse ? 1 - scaled : scaled;
+
+        /* Initialize the JVS state with the current hardware position.
+         * Route to the chained IO when secondaryIO is set, matching the
+         * same pattern used in the EV_KEY / EV_REL event handlers. */
+        JVSIO *initIO = args->jvsIO;
+        if (args->inputs.abs[axisIndex].secondaryIO && args->jvsIO->chainedIO != NULL)
+            initIO = args->jvsIO->chainedIO;
+        setAnalogue(initIO, args->inputs.abs[axisIndex].output, finalValue);
+        setGun(initIO, args->inputs.abs[axisIndex].output, finalValue);
     }
 
     fd_set file_descriptor;

@@ -331,6 +331,11 @@ JVSStatus processPacket(JVSIO *jvsIO)
 		case CMD_ASSIGN_ADDR:
 		{
 			size = 2;
+			if (index + 1 >= (int)inputPacket.length - 1)
+			{
+				debug(0, "Error: CMD_ASSIGN_ADDR - packet too short\n");
+				break;
+			}
 
 			/* Find the first device in the chain that has not yet been assigned an address */
 			JVSIO *ioToAssign = jvsIO;
@@ -383,6 +388,11 @@ JVSStatus processPacket(JVSIO *jvsIO)
 		case CMD_SET_COMMS_MODE:
 		{
 			size = 2;
+			if (index + 1 >= (int)inputPacket.length - 1)
+			{
+				debug(0, "Error: CMD_SET_COMMS_MODE - packet too short\n");
+				break;
+			}
 			debug(1, "CMD_SET_COMMS_MODE - Mode 0x%02X (acknowledged)\n", inputPacket.data[index + 1]);
 			CHECK_OUTPUT_SPACE(&outputPacket, 1);
 			outputPacket.data[outputPacket.length++] = REPORT_SUCCESS;
@@ -505,6 +515,11 @@ JVSStatus processPacket(JVSIO *jvsIO)
 		case CMD_READ_COINS:
 		{
 			size = 2;
+			if (index + 1 >= (int)inputPacket.length - 1)
+			{
+				debug(0, "Error: CMD_READ_COINS - packet too short\n");
+				break;
+			}
 			int numberCoinSlots = inputPacket.data[index + 1];
 			debug(1, "CMD_READ_COINS - Reading %d coin slot(s)\n", numberCoinSlots);
 			CHECK_OUTPUT_SPACE(&outputPacket, 1);
@@ -534,6 +549,11 @@ JVSStatus processPacket(JVSIO *jvsIO)
 		case CMD_READ_ANALOGS:
 		{
 			size = 2;
+			if (index + 1 >= (int)inputPacket.length - 1)
+			{
+				debug(0, "Error: CMD_READ_ANALOGS - packet too short\n");
+				break;
+			}
 			int numberChannels = inputPacket.data[index + 1];
 			debug(1, "CMD_READ_ANALOGS - Reading %d analog channel(s)\n", numberChannels);
 
@@ -565,6 +585,11 @@ JVSStatus processPacket(JVSIO *jvsIO)
 		case CMD_READ_ROTARY:
 		{
 			size = 2;
+			if (index + 1 >= (int)inputPacket.length - 1)
+			{
+				debug(0, "Error: CMD_READ_ROTARY - packet too short\n");
+				break;
+			}
 			int numberChannels = inputPacket.data[index + 1];
 			debug(1, "CMD_READ_ROTARY - Reading %d rotary channel(s)\n", numberChannels);
 
@@ -609,6 +634,11 @@ JVSStatus processPacket(JVSIO *jvsIO)
 		case CMD_READ_GPI:
 		{
 			size = 2;
+			if (index + 1 >= (int)inputPacket.length - 1)
+			{
+				debug(0, "Error: CMD_READ_GPI - packet too short\n");
+				break;
+			}
 			int numberBytes = inputPacket.data[index + 1];
 			debug(1, "CMD_READ_GPI - Reading %d byte(s) of GPI data\n", numberBytes);
 			CHECK_OUTPUT_SPACE(&outputPacket, 1);
@@ -629,6 +659,11 @@ JVSStatus processPacket(JVSIO *jvsIO)
 		case CMD_REMAINING_PAYOUT:
 		{
 			size = 2;
+			if (index + 1 >= (int)inputPacket.length - 1)
+			{
+				debug(0, "Error: CMD_REMAINING_PAYOUT - packet too short\n");
+				break;
+			}
 			int numberSlots = inputPacket.data[index + 1];
 			debug(1, "CMD_REMAINING_PAYOUT - Reading %d slot(s)\n", numberSlots);
 			if (numberSlots > JVS_MAX_STATE_SIZE)
@@ -663,6 +698,11 @@ JVSStatus processPacket(JVSIO *jvsIO)
 
 		case CMD_WRITE_GPO:
 		{
+			if (index + 1 >= (int)inputPacket.length - 1)
+			{
+				debug(0, "Error: CMD_WRITE_GPO - packet too short\n");
+				break;
+			}
 			int numBytes = inputPacket.data[index + 1];
 			debug(1, "CMD_WRITE_GPO - Writing %d byte(s) to GPO\n", numBytes);
 			size = 2 + numBytes;
@@ -704,6 +744,11 @@ JVSStatus processPacket(JVSIO *jvsIO)
 
 		case CMD_WRITE_ANALOG:
 		{
+			if (index + 1 >= (int)inputPacket.length - 1)
+			{
+				debug(0, "Error: CMD_WRITE_ANALOG - packet too short\n");
+				break;
+			}
 			int numChannels = inputPacket.data[index + 1];
 			debug(1, "CMD_WRITE_ANALOG - Writing %d analog channel(s)\n", numChannels);
 			size = numChannels * 2 + 2;
@@ -826,6 +871,11 @@ JVSStatus processPacket(JVSIO *jvsIO)
 		case CMD_READ_LIGHTGUN:
 		{
 			size = 2;
+			if (index + 1 >= (int)inputPacket.length - 1)
+			{
+				debug(0, "Error: CMD_READ_LIGHTGUN - packet too short\n");
+				break;
+			}
 			/* inputPacket.data is unsigned char so numberGuns is always 0-255 */
 			int numberGuns = inputPacket.data[index + 1];
 			debug(1, "CMD_READ_LIGHTGUN - Reading %d gun(s)\n", numberGuns);
@@ -868,6 +918,12 @@ JVSStatus processPacket(JVSIO *jvsIO)
 		case CMD_NAMCO_SPECIFIC:
 		{
 			debug(1, "CMD_NAMCO_SPECIFIC - Processing Namco command\n");
+
+			if (index + 1 >= (int)inputPacket.length - 1)
+			{
+				debug(0, "Error: CMD_NAMCO_SPECIFIC - packet too short\n");
+				break;
+			}
 
 			CHECK_OUTPUT_SPACE(&outputPacket, 1);
 			outputPacket.data[outputPacket.length++] = REPORT_SUCCESS;
