@@ -299,7 +299,10 @@ static void *deviceThread(void *_args)
 
     int flags = fcntl(fd, F_GETFL, 0);
     if (flags < 0)
+    {
+        debug(1, "Warning: fcntl(F_GETFL) failed for '%s': %s — defaulting to O_NONBLOCK only\n", args->devicePath, strerror(errno));
         flags = 0;
+    }
     fcntl(fd, F_SETFL, flags | O_NONBLOCK);
 
     uint8_t absoluteBitmask[ABS_MAX / 8 + 1];
@@ -818,8 +821,9 @@ int getNumberOfDevices(void)
 
 static int compareSlotRegistryOrder(const void *a, const void *b)
 {
-    return ((const SlotRegistryEntry *)a)->slotOrder -
-           ((const SlotRegistryEntry *)b)->slotOrder;
+    int sa = ((const SlotRegistryEntry *)a)->slotOrder;
+    int sb = ((const SlotRegistryEntry *)b)->slotOrder;
+    return (sa > sb) - (sa < sb);
 }
 
 JVSInputStatus getInputs(DeviceList *deviceList)
@@ -857,8 +861,11 @@ JVSInputStatus getInputs(DeviceList *deviceList)
 
         char tempFullName[MAX_PATH] = "Unknown";
         
-        // Get the name string first to check if we should filter this device
-        ioctl(device, EVIOCGNAME(sizeof(tempFullName)), tempFullName);
+        // Get the name string first to check if we should filter this device.
+        // On failure tempFullName retains its "Unknown" initialiser, which is
+        // treated as a non-filtered device and processed normally below.
+        if (ioctl(device, EVIOCGNAME(sizeof(tempFullName)), tempFullName) < 0)
+            debug(1, "Warning: Failed to get device name for %s: %s\n", tempPath, strerror(errno));
 
         // Filter out non-controller devices (HDMI, sound cards, etc.)
         if (shouldFilterDevice(tempFullName))
@@ -875,10 +882,8 @@ JVSInputStatus getInputs(DeviceList *deviceList)
             continue;
         }
         Device *dev = &deviceList->devices[validDeviceIndex];
-        strncpy(dev->path, tempPath, MAX_PATH - 1);
-        dev->path[MAX_PATH - 1] = '\0';
-        strncpy(dev->fullName, tempFullName, MAX_PATH - 1);
-        dev->fullName[MAX_PATH - 1] = '\0';
+        snprintf(dev->path, MAX_PATH, "%s", tempPath);
+        snprintf(dev->fullName, MAX_PATH, "%s", tempFullName);
         strncpy(dev->name, "unknown", MAX_PATH - 1);
         dev->name[MAX_PATH - 1] = '\0';
         dev->type = DEVICE_TYPE_UNKNOWN;
@@ -1342,8 +1347,7 @@ JVSInputStatus initInputs(char *outputMappingPath, char *configPath, char *secon
                 }
                 if (!alreadyRegistered && slotRegistryLength < MAX_DEVICES)
                 {
-                    strncpy(slotRegistry[slotRegistryLength].identity, identity, MAX_IDENTITY_LEN - 1);
-                    slotRegistry[slotRegistryLength].identity[MAX_IDENTITY_LEN - 1] = '\0';
+                    snprintf(slotRegistry[slotRegistryLength].identity, MAX_IDENTITY_LEN, "%s", identity);
                     slotRegistry[slotRegistryLength].slotOrder = nextSlotOrder++;
                     slotRegistryLength++;
                     nextNewPlayerNumber++;
