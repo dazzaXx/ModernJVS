@@ -40,6 +40,32 @@ extern volatile int testButtonActive;
 #define ANALOG_CENTER_VALUE 0.5
 #define MIN_DIVISION_THRESHOLD 0.0001
 
+/**
+ * Apply analog stick deadzone and rescale the remaining range.
+ *
+ * @param scaled     Normalised axis value in [0, 1].
+ * @param deadzone   Deadzone radius around the centre (0.0 – MAX_ANALOG_DEADZONE).
+ * @returns          Deadzone-corrected value in [0, 1].
+ */
+static double applyDeadzone(double scaled, double deadzone)
+{
+    double centered  = scaled - ANALOG_CENTER_VALUE;
+    double magnitude = fabs(centered);
+
+    if (magnitude < deadzone)
+        return ANALOG_CENTER_VALUE;
+
+    if (MAX_ANALOG_DEADZONE - deadzone > MIN_DIVISION_THRESHOLD)
+    {
+        double sign = (centered > 0) ? 1.0 : -1.0;
+        return ANALOG_CENTER_VALUE +
+               sign * ((magnitude - deadzone) / (MAX_ANALOG_DEADZONE - deadzone)) *
+               ANALOG_CENTER_VALUE;
+    }
+
+    return scaled;
+}
+
 /* Maximum number of devices to look ahead when searching for a Nunchuk.
  * Wiimotes are Bluetooth-only devices so proximity-based search is always used. */
 #define DEVICE_LOOKAHEAD_DISTANCE 6
@@ -325,24 +351,10 @@ static void *deviceThread(void *_args)
              * Note: Triggers (Z, R, L, T) do not get deadzone applied */
             if (args->analogDeadzone > 0 && args->analogDeadzone < MAX_ANALOG_DEADZONE &&
                 (args->player >= 1 && args->player <= 4) &&
-                (args->inputs.abs[axisIndex].input == CONTROLLER_ANALOGUE_X || 
+                (args->inputs.abs[axisIndex].input == CONTROLLER_ANALOGUE_X ||
                  args->inputs.abs[axisIndex].input == CONTROLLER_ANALOGUE_Y))
             {
-                /* Center the value around 0.5 */
-                double centered = scaled - ANALOG_CENTER_VALUE;
-                double magnitude = fabs(centered);
-                
-                /* Apply deadzone: if within deadzone, set to center */
-                if (magnitude < args->analogDeadzone)
-                {
-                    scaled = ANALOG_CENTER_VALUE;
-                }
-                else if (MAX_ANALOG_DEADZONE - args->analogDeadzone > MIN_DIVISION_THRESHOLD)
-                {
-                    /* Scale the remaining range outside the deadzone */
-                    double sign = (centered > 0) ? 1.0 : -1.0;
-                    scaled = ANALOG_CENTER_VALUE + sign * ((magnitude - args->analogDeadzone) / (MAX_ANALOG_DEADZONE - args->analogDeadzone)) * ANALOG_CENTER_VALUE;
-                }
+                scaled = applyDeadzone(scaled, args->analogDeadzone);
             }
 
             /* Apply reverse logic if configured */
@@ -532,24 +544,10 @@ static void *deviceThread(void *_args)
                     if (args->analogDeadzone > 0 && args->analogDeadzone < MAX_ANALOG_DEADZONE &&
                         (args->player >= 1 && args->player <= 4) &&
                         args->inputs.abs[event.code].type == ANALOGUE &&
-                        (args->inputs.abs[event.code].input == CONTROLLER_ANALOGUE_X || 
+                        (args->inputs.abs[event.code].input == CONTROLLER_ANALOGUE_X ||
                          args->inputs.abs[event.code].input == CONTROLLER_ANALOGUE_Y))
                     {
-                        /* Center the value around 0.5 */
-                        double centered = scaled - ANALOG_CENTER_VALUE;
-                        double magnitude = fabs(centered);
-                        
-                        /* Apply deadzone: if within deadzone, set to center */
-                        if (magnitude < args->analogDeadzone)
-                        {
-                            scaled = ANALOG_CENTER_VALUE;
-                        }
-                        else if (MAX_ANALOG_DEADZONE - args->analogDeadzone > MIN_DIVISION_THRESHOLD)
-                        {
-                            /* Scale the remaining range outside the deadzone (with safety check for division) */
-                            double sign = (centered > 0) ? 1.0 : -1.0;
-                            scaled = ANALOG_CENTER_VALUE + sign * ((magnitude - args->analogDeadzone) / (MAX_ANALOG_DEADZONE - args->analogDeadzone)) * ANALOG_CENTER_VALUE;
-                        }
+                        scaled = applyDeadzone(scaled, args->analogDeadzone);
                     }
 
                     /* Route to the chained IO when secondaryIO is set, matching the
@@ -565,6 +563,10 @@ static void *deviceThread(void *_args)
 
             case EV_MSC:
             {
+                /* Guard against out-of-range kernel MSC codes */
+                if (event.code >= MAX_EV_ITEMS)
+                    continue;
+
                 if (args->inputs.key[event.code].output == COIN)
                 {
                     // The event's value is passed through, allowing the
