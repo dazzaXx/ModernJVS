@@ -129,6 +129,15 @@ int main(int argc, char **argv)
     JVSInputStatus lastInputState = JVS_INPUT_STATUS_SUCCESS;
     while (running != -1)
     {
+        /* The watchdog thread writes 0 to `running` concurrently with the SIGTERM
+         * handler writing -1.  If the watchdog's 0 is the last write, the outer
+         * while condition (running != -1) passes and the unconditional assignment
+         * below would overwrite the shutdown signal.  Guard against this by
+         * checking the async-signal-safe `stopRequested` flag before touching
+         * `running` so that a pending shutdown is never discarded. */
+        if (stopRequested)
+            break;
+
         /* Start the watchdog thread that monitors /dev/input for hot-plug events */
         debug(1, "Init watchdog\n");
         running = 1;
