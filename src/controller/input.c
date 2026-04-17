@@ -168,7 +168,27 @@ static void *wiiDeviceThread(void *_args)
         if (select(fd + 1, &file_descriptor, NULL, NULL, &tv) < 1)
             continue;
 
-        if (read(fd, &event, sizeof(event)) == sizeof(event))
+        ssize_t bytesRead = read(fd, &event, sizeof(event));
+        if (bytesRead == 0)
+        {
+            /* EOF: the device node was removed (hot-unplug).  Exit the thread
+             * cleanly so the watchdog's device-count poll triggers a controlled
+             * reinitialisation instead of spinning at 100% CPU. */
+            debug(1, "Warning: Wii device '%s' disconnected (EOF), exiting thread\n", args->devicePath);
+            break;
+        }
+        if (bytesRead < 0)
+        {
+            /* EAGAIN/EINTR are transient and should not cause the thread to exit.
+             * Any other negative return means the fd is permanently unusable. */
+            if (errno != EAGAIN && errno != EINTR)
+            {
+                debug(1, "Warning: Wii device '%s' read error (%s), exiting thread\n", args->devicePath, strerror(errno));
+                break;
+            }
+            continue;
+        }
+        if (bytesRead == (ssize_t)sizeof(event))
         {
             switch (event.type)
             {
@@ -392,7 +412,27 @@ static void *deviceThread(void *_args)
         if (select(fd + 1, &file_descriptor, NULL, NULL, &tv) < 1)
             continue;
 
-        if (read(fd, &event, sizeof(event)) == sizeof(event))
+        ssize_t bytesRead = read(fd, &event, sizeof(event));
+        if (bytesRead == 0)
+        {
+            /* EOF: the device node was removed (hot-unplug).  Exit the thread
+             * cleanly so the watchdog's device-count poll triggers a controlled
+             * reinitialisation instead of spinning at 100% CPU. */
+            debug(1, "Warning: Device '%s' disconnected (EOF), exiting thread\n", args->devicePath);
+            break;
+        }
+        if (bytesRead < 0)
+        {
+            /* EAGAIN/EINTR are transient and should not cause the thread to exit.
+             * Any other negative return means the fd is permanently unusable. */
+            if (errno != EAGAIN && errno != EINTR)
+            {
+                debug(1, "Warning: Device '%s' read error (%s), exiting thread\n", args->devicePath, strerror(errno));
+                break;
+            }
+            continue;
+        }
+        if (bytesRead == (ssize_t)sizeof(event))
         {
             switch (event.type)
             {
