@@ -107,6 +107,17 @@ int initJVS(JVSIO *jvsIO)
 			io->gunXRestBits = 16 - io->capabilities.gunXBits;
 			io->gunYRestBits = 16 - io->capabilities.gunYBits;
 		}
+		/* Clamp rest-bit counts to the valid shift range [0, 15].
+		 * analogueInBits/gunXBits/gunYBits are parsed from IO definition files;
+		 * a value of 0 would produce a shift of 16 (undefined behaviour on all
+		 * platforms where int is 32 bits, and actual UB where int is 16 bits).
+		 * A value > 16 would produce a negative shift, also UB. */
+		if (io->analogueRestBits < 0) io->analogueRestBits = 0;
+		if (io->analogueRestBits > 15) io->analogueRestBits = 15;
+		if (io->gunXRestBits < 0) io->gunXRestBits = 0;
+		if (io->gunXRestBits > 15) io->gunXRestBits = 15;
+		if (io->gunYRestBits < 0) io->gunYRestBits = 0;
+		if (io->gunYRestBits > 15) io->gunYRestBits = 15;
 		io = io->chainedIO;
 	}
 
@@ -706,6 +717,13 @@ JVSStatus processPacket(JVSIO *jvsIO)
 			int numBytes = inputPacket.data[index + 1];
 			debug(1, "CMD_WRITE_GPO - Writing %d byte(s) to GPO\n", numBytes);
 			size = 2 + numBytes;
+			/* Warn when the computed size would skip past the end of the packet, which
+			 * would cause all remaining commands in this packet to be silently dropped. */
+			if (index + size > (int)inputPacket.length - 1)
+			{
+				debug(0, "Warning: CMD_WRITE_GPO - %d GPO byte(s) (%d total) exceeds remaining packet length; remaining commands in this packet will be skipped\n",
+				      numBytes, size);
+			}
 			CHECK_OUTPUT_SPACE(&outputPacket, 1);
 			outputPacket.data[outputPacket.length] = REPORT_SUCCESS;
 			outputPacket.length += 1;
@@ -752,6 +770,13 @@ JVSStatus processPacket(JVSIO *jvsIO)
 			int numChannels = inputPacket.data[index + 1];
 			debug(1, "CMD_WRITE_ANALOG - Writing %d analog channel(s)\n", numChannels);
 			size = numChannels * 2 + 2;
+			/* Warn when the computed size would skip past the end of the packet, which
+			 * would cause all remaining commands in this packet to be silently dropped. */
+			if (index + size > (int)inputPacket.length - 1)
+			{
+				debug(0, "Warning: CMD_WRITE_ANALOG - %d channel(s) (%d total bytes) exceeds remaining packet length; remaining commands in this packet will be skipped\n",
+				      numChannels, size);
+			}
 			CHECK_OUTPUT_SPACE(&outputPacket, 1);
 			outputPacket.data[outputPacket.length++] = REPORT_SUCCESS;
 		}

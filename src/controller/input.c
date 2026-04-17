@@ -140,7 +140,7 @@ static void *wiiDeviceThread(void *_args)
     {
         debug(0, "Warning: Failed to open Wii Remote device '%s': %s\n", args->devicePath, strerror(errno));
         free(args);
-        return 0;
+        return NULL;
     }
 
     struct input_event event;
@@ -174,6 +174,15 @@ static void *wiiDeviceThread(void *_args)
             {
             case EV_ABS:
             {
+                /* Only process IR tracking axis codes emitted by the hid-wiimote
+                 * driver.  Other EV_ABS events (e.g. accelerometer axes) must be
+                 * ignored here: without this guard `outOfBounds` would be set to
+                 * true for every non-IR axis event, incorrectly triggering the
+                 * "off-screen hold" logic and corrupting the gun state. */
+                if (event.code != 16 && event.code != 17 &&
+                    event.code != 18 && event.code != 19)
+                    continue;
+
                 bool outOfBounds = true;
                 switch (event.code)
                 {
@@ -225,7 +234,7 @@ static void *wiiDeviceThread(void *_args)
                     double valuey = 384 + sin(angle) * (irMidpointX - 512) + cos(angle) * (irMidpointY - 384);
 
                     double finalX = (((double)valuex / (double)1023) * 1.0);
-                    double finalY = 1.0f - ((double)valuey / (double)1023);
+                    double finalY = 1.0 - ((double)valuey / (double)1023);
 
                     /* Apply IR scale: multiply the displacement from screen centre so the
                      * cursor covers more (or less) of the screen per physical movement.
@@ -280,7 +289,7 @@ static void *wiiDeviceThread(void *_args)
     close(fd);
     free(args);
 
-    return 0;
+    return NULL;
 }
 
 static void *deviceThread(void *_args)
@@ -292,7 +301,7 @@ static void *deviceThread(void *_args)
     {
         debug(0, "Critical: Failed to open device '%s': %s\n", args->devicePath, strerror(errno));
         free(args);
-        return 0;
+        return NULL;
     }
 
     struct input_event event;
@@ -583,7 +592,7 @@ static void *deviceThread(void *_args)
     close(fd);
     free(args);
 
-    return 0;
+    return NULL;
 }
 static ThreadStatus startThread(EVInputs *inputs, char *devicePath, int wiiMode, int player, JVSIO *jvsIO, double analogDeadzone, double wiiIRScale)
 {

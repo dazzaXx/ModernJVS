@@ -400,7 +400,7 @@ static JVSConfigStatus parseInputMappingInternal(char *path, InputMappings *inpu
                     {
                         char *token = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
                         if (token)
-                            analogueMapping.multiplier = atof(token);
+                            analogueMapping.multiplier = parseConfigDouble(token, analogueMapping.multiplier);
                     }
                     extra = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
                 }
@@ -445,7 +445,7 @@ static JVSConfigStatus parseInputMappingInternal(char *path, InputMappings *inpu
                 {
                     char *token = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
                     if (token)
-                        analogueMapping.multiplier = atof(token);
+                        analogueMapping.multiplier = parseConfigDouble(token, analogueMapping.multiplier);
                 }
                 extra = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
             }
