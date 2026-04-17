@@ -269,7 +269,9 @@ int setSerialAttributes(int fd, int myBaud)
     return -1;
   }
 
-  ioctl(fd, TIOCMGET, &status);
+  status = 0;
+  if (ioctl(fd, TIOCMGET, &status) < 0)
+    debug(1, "Warning: TIOCMGET failed: %s — asserting DTR/RTS from zero\n", strerror(errno));
 
   status |= TIOCM_DTR;
   status |= TIOCM_RTS;

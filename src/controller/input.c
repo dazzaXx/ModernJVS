@@ -143,6 +143,14 @@ static void *wiiDeviceThread(void *_args)
         return NULL;
     }
 
+    int flags = fcntl(fd, F_GETFL, 0);
+    if (flags < 0)
+    {
+        debug(1, "Warning: fcntl(F_GETFL) failed for '%s': %s — defaulting to O_NONBLOCK only\n", args->devicePath, strerror(errno));
+        flags = 0;
+    }
+    fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+
     struct input_event event;
     fd_set file_descriptor;
     struct timeval tv;
