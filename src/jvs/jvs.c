@@ -337,8 +337,19 @@ JVSStatus processPacket(JVSIO *jvsIO)
 				ioToAssign = ioToAssign->chainedIO;
 			}
 
-			ioToAssign->deviceID = inputPacket.data[index + 1];
-			debug(1, "CMD_ASSIGN_ADDR - Assigning address 0x%02X\n", ioToAssign->deviceID);
+			/* Guard: only assign if this IO is still unaddressed.  If every IO
+			 * in the chain already has an address (e.g. the arcade re-sends
+			 * CMD_ASSIGN_ADDR without a preceding CMD_RESET) we acknowledge
+			 * the command but do not overwrite any existing address. */
+			if (ioToAssign->deviceID == -1)
+			{
+				ioToAssign->deviceID = inputPacket.data[index + 1];
+				debug(1, "CMD_ASSIGN_ADDR - Assigning address 0x%02X\n", ioToAssign->deviceID);
+			}
+			else
+			{
+				debug(0, "Warning: CMD_ASSIGN_ADDR received but all IOs already have addresses assigned\n");
+			}
 			CHECK_OUTPUT_SPACE(&outputPacket, 1);
 			outputPacket.data[outputPacket.length++] = REPORT_SUCCESS;
 
@@ -883,7 +894,13 @@ JVSStatus processPacket(JVSIO *jvsIO)
 			// ID Check (0xFF is what Triforce branch sends)
 			case 0x18:
 			{
-				size += 4;
+				/* This sub-command is followed by 4 bytes of data.  Only
+				 * advance the parser past them if the packet is actually
+				 * large enough to contain them, so that a short/malformed
+				 * packet does not cause subsequent command bytes to be
+				 * skipped. */
+				if (index + 5 < (int)inputPacket.length - 1)
+					size += 4;
 				CHECK_OUTPUT_SPACE(&outputPacket, 1);
 				outputPacket.data[outputPacket.length++] = 0xFF;
 			}
