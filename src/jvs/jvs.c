@@ -808,6 +808,13 @@ JVSStatus processPacket(JVSIO *jvsIO)
 			debug(1, "CMD_WRITE_DISPLAY - Writing %d×%d display data\n", cols, rows);
 			/* JVS spec: cmd(1) + cols(1) + rows(1) + encoding(1) + data(cols×rows) */
 			size = 4 + cols * rows;
+			/* Warn when the computed size would skip past the end of the packet, which
+			 * would cause all remaining commands in this packet to be silently dropped. */
+			if (index + size > (int)inputPacket.length - 1)
+			{
+				debug(0, "Warning: CMD_WRITE_DISPLAY - %d×%d data (%d bytes) exceeds remaining packet length; remaining commands in this packet will be skipped\n",
+				      cols, rows, size);
+			}
 			CHECK_OUTPUT_SPACE(&outputPacket, 1);
 			outputPacket.data[outputPacket.length++] = REPORT_SUCCESS;
 		}

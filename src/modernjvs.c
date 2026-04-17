@@ -29,6 +29,10 @@ void handleSignal(int signal);
 
 volatile int running = 1;
 volatile int testButtonActive = 0;
+/* Set to 1 by the SIGINT handler to request the "stopping" message be printed
+ * from main() rather than from within the signal handler itself, because
+ * debug() calls vprintf/fflush which are not async-signal-safe. */
+static volatile sig_atomic_t stopRequested = 0;
 
 static void writeTestModeState(int active)
 {
@@ -296,6 +300,11 @@ int main(int argc, char **argv)
         cleanup();
     }
 
+    /* Print the shutdown message here (not inside the signal handler) because
+     * debug()/printf are not async-signal-safe. */
+    if (stopRequested)
+        debug(0, "\nModernJVS is stopping...\n");
+
     /* Remove the runtime state file now that the daemon is stopping. */
     unlink(TESTMODE_STATE_PATH);
 
@@ -322,7 +331,9 @@ void handleSignal(int signal)
 {
     if (signal == SIGINT)
     {
-        debug(0, "\nModernJVS is stopping...\n");
+        /* Set flag so main() prints the shutdown message — debug()/printf
+         * are not async-signal-safe and must not be called here. */
+        stopRequested = 1;
         running = -1;
     }
     else if (signal == SIGUSR1)
