@@ -40,6 +40,45 @@ static double clampDeadzone(double deadzone)
     return deadzone;
 }
 
+/**
+ * Parse an integer from a config token, warning on invalid input.
+ *
+ * @param token   The string to parse (must not be NULL).
+ * @param fallback Value returned when the token is not a valid integer.
+ * @returns The parsed integer, or fallback on error.
+ */
+static int parseConfigInt(const char *token, int fallback)
+{
+    char *end;
+    long val = strtol(token, &end, 10);
+    /* end must advance past at least one digit and reach NUL or whitespace */
+    if (end == token || (*end != '\0' && *end != '\n' && *end != '\r'))
+    {
+        debug(0, "Warning: Config value '%s' is not a valid integer, using default %d\n", token, fallback);
+        return fallback;
+    }
+    return (int)val;
+}
+
+/**
+ * Parse a double from a config token, warning on invalid input.
+ *
+ * @param token   The string to parse (must not be NULL).
+ * @param fallback Value returned when the token is not a valid number.
+ * @returns The parsed double, or fallback on error.
+ */
+static double parseConfigDouble(const char *token, double fallback)
+{
+    char *end;
+    double val = strtod(token, &end);
+    if (end == token || (*end != '\0' && *end != '\n' && *end != '\r'))
+    {
+        debug(0, "Warning: Config value '%s' is not a valid number, using default %g\n", token, fallback);
+        return fallback;
+    }
+    return val;
+}
+
 /* Helper function to check if adding a new mapping would exceed the maximum limit */
 static int checkMappingLimit(int currentLength, const char *mappingType)
 {
@@ -114,7 +153,7 @@ static JVSConfigStatus parseConfigInternal(char *path, JVSConfig *config, int de
         {
             char *token = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
             if (token)
-                config->senseLineType = atoi(token);
+                config->senseLineType = parseConfigInt(token, config->senseLineType);
         }
         else if (strcmp(command, "EMULATE") == 0)
         {
@@ -138,7 +177,7 @@ static JVSConfigStatus parseConfigInternal(char *path, JVSConfig *config, int de
         {
             char *token = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
             if (token)
-                config->senseLinePin = atoi(token);
+                config->senseLinePin = parseConfigInt(token, config->senseLinePin);
         }
         else if (strcmp(command, "DEFAULT_GAME") == 0)
         {
@@ -153,7 +192,7 @@ static JVSConfigStatus parseConfigInternal(char *path, JVSConfig *config, int de
         {
             char *token = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
             if (token)
-                config->debugLevel = atoi(token);
+                config->debugLevel = parseConfigInt(token, config->debugLevel);
         }
         else if (strcmp(command, "DEVICE_PATH") == 0)
         {
@@ -168,38 +207,38 @@ static JVSConfigStatus parseConfigInternal(char *path, JVSConfig *config, int de
         {
             char *token = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
             if (token)
-                config->autoControllerDetection = atoi(token);
+                config->autoControllerDetection = parseConfigInt(token, config->autoControllerDetection);
         }
         else if (strcmp(command, "ANALOG_DEADZONE_PLAYER_1") == 0)
         {
             char *token = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
             if (token)
-                config->analogDeadzonePlayer1 = clampDeadzone(atof(token));
+                config->analogDeadzonePlayer1 = clampDeadzone(parseConfigDouble(token, config->analogDeadzonePlayer1));
         }
         else if (strcmp(command, "ANALOG_DEADZONE_PLAYER_2") == 0)
         {
             char *token = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
             if (token)
-                config->analogDeadzonePlayer2 = clampDeadzone(atof(token));
+                config->analogDeadzonePlayer2 = clampDeadzone(parseConfigDouble(token, config->analogDeadzonePlayer2));
         }
         else if (strcmp(command, "ANALOG_DEADZONE_PLAYER_3") == 0)
         {
             char *token = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
             if (token)
-                config->analogDeadzonePlayer3 = clampDeadzone(atof(token));
+                config->analogDeadzonePlayer3 = clampDeadzone(parseConfigDouble(token, config->analogDeadzonePlayer3));
         }
         else if (strcmp(command, "ANALOG_DEADZONE_PLAYER_4") == 0)
         {
             char *token = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
             if (token)
-                config->analogDeadzonePlayer4 = clampDeadzone(atof(token));
+                config->analogDeadzonePlayer4 = clampDeadzone(parseConfigDouble(token, config->analogDeadzonePlayer4));
         }
         else if (strcmp(command, "WII_IR_SCALE") == 0)
         {
             char *token = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
             if (token)
             {
-                double val = atof(token);
+                double val = parseConfigDouble(token, config->wiiIRScale);
                 if (val < MIN_WII_IR_SCALE)
                     val = MIN_WII_IR_SCALE;
                 else if (val > MAX_WII_IR_SCALE)
@@ -290,7 +329,7 @@ static JVSConfigStatus parseInputMappingInternal(char *path, InputMappings *inpu
             char *token = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
             if (token)
             {
-                int player = atoi(token);
+                int player = parseConfigInt(token, inputMappings->player);
                 inputMappings->player = player;
             }
         }
@@ -361,7 +400,7 @@ static JVSConfigStatus parseInputMappingInternal(char *path, InputMappings *inpu
                     {
                         char *token = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
                         if (token)
-                            analogueMapping.multiplier = atof(token);
+                            analogueMapping.multiplier = parseConfigDouble(token, analogueMapping.multiplier);
                     }
                     extra = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
                 }
@@ -406,7 +445,7 @@ static JVSConfigStatus parseInputMappingInternal(char *path, InputMappings *inpu
                 {
                     char *token = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
                     if (token)
-                        analogueMapping.multiplier = atof(token);
+                        analogueMapping.multiplier = parseConfigDouble(token, analogueMapping.multiplier);
                 }
                 extra = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
             }
@@ -711,140 +750,140 @@ JVSConfigStatus parseIO(char *path, JVSCapabilities *capabilities)
         {
             char *token = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
             if (token)
-                capabilities->commandVersion = atoi(token);
+                capabilities->commandVersion = (unsigned char)parseConfigInt(token, capabilities->commandVersion);
         }
         else if (strcmp(command, "JVS_VERSION") == 0)
         {
             char *token = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
             if (token)
-                capabilities->jvsVersion = atoi(token);
+                capabilities->jvsVersion = (unsigned char)parseConfigInt(token, capabilities->jvsVersion);
         }
         else if (strcmp(command, "COMMS_VERSION") == 0)
         {
             char *token = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
             if (token)
-                capabilities->commsVersion = atoi(token);
+                capabilities->commsVersion = (unsigned char)parseConfigInt(token, capabilities->commsVersion);
         }
 
         else if (strcmp(command, "PLAYERS") == 0)
         {
             char *token = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
             if (token)
-                capabilities->players = atoi(token);
+                capabilities->players = (unsigned char)parseConfigInt(token, capabilities->players);
         }
         else if (strcmp(command, "SWITCHES") == 0)
         {
             char *token = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
             if (token)
-                capabilities->switches = atoi(token);
+                capabilities->switches = (unsigned char)parseConfigInt(token, capabilities->switches);
         }
         else if (strcmp(command, "COINS") == 0)
         {
             char *token = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
             if (token)
-                capabilities->coins = atoi(token);
+                capabilities->coins = (unsigned char)parseConfigInt(token, capabilities->coins);
         }
         else if (strcmp(command, "ANALOGUE_IN_CHANNELS") == 0)
         {
             char *token = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
             if (token)
-                capabilities->analogueInChannels = atoi(token);
+                capabilities->analogueInChannels = (unsigned char)parseConfigInt(token, capabilities->analogueInChannels);
         }
         else if (strcmp(command, "ANALOGUE_IN_BITS") == 0)
         {
             char *token = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
             if (token)
-                capabilities->analogueInBits = atoi(token);
+                capabilities->analogueInBits = (unsigned char)parseConfigInt(token, capabilities->analogueInBits);
         }
         else if (strcmp(command, "ROTARY_CHANNELS") == 0)
         {
             char *token = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
             if (token)
-                capabilities->rotaryChannels = atoi(token);
+                capabilities->rotaryChannels = (unsigned char)parseConfigInt(token, capabilities->rotaryChannels);
         }
         else if (strcmp(command, "KEYPAD") == 0)
         {
             char *token = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
             if (token)
-                capabilities->keypad = atoi(token);
+                capabilities->keypad = (unsigned char)parseConfigInt(token, capabilities->keypad);
         }
         else if (strcmp(command, "GUN_CHANNELS") == 0)
         {
             char *token = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
             if (token)
-                capabilities->gunChannels = atoi(token);
+                capabilities->gunChannels = (unsigned char)parseConfigInt(token, capabilities->gunChannels);
         }
         else if (strcmp(command, "GUN_X_BITS") == 0)
         {
             char *token = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
             if (token)
-                capabilities->gunXBits = atoi(token);
+                capabilities->gunXBits = (unsigned char)parseConfigInt(token, capabilities->gunXBits);
         }
         else if (strcmp(command, "GUN_Y_BITS") == 0)
         {
             char *token = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
             if (token)
-                capabilities->gunYBits = atoi(token);
+                capabilities->gunYBits = (unsigned char)parseConfigInt(token, capabilities->gunYBits);
         }
         else if (strcmp(command, "GENERAL_PURPOSE_INPUTS") == 0)
         {
             char *token = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
             if (token)
-                capabilities->generalPurposeInputs = atoi(token);
+                capabilities->generalPurposeInputs = (unsigned char)parseConfigInt(token, capabilities->generalPurposeInputs);
         }
         else if (strcmp(command, "CARD") == 0)
         {
             char *token = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
             if (token)
-                capabilities->card = atoi(token);
+                capabilities->card = (unsigned char)parseConfigInt(token, capabilities->card);
         }
         else if (strcmp(command, "HOPPER") == 0)
         {
             char *token = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
             if (token)
-                capabilities->hopper = atoi(token);
+                capabilities->hopper = (unsigned char)parseConfigInt(token, capabilities->hopper);
         }
         else if (strcmp(command, "GENERAL_PURPOSE_OUTPUTS") == 0)
         {
             char *token = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
             if (token)
-                capabilities->generalPurposeOutputs = atoi(token);
+                capabilities->generalPurposeOutputs = (unsigned char)parseConfigInt(token, capabilities->generalPurposeOutputs);
         }
         else if (strcmp(command, "ANALOGUE_OUT_CHANNELS") == 0)
         {
             char *token = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
             if (token)
-                capabilities->analogueOutChannels = atoi(token);
+                capabilities->analogueOutChannels = (unsigned char)parseConfigInt(token, capabilities->analogueOutChannels);
         }
         else if (strcmp(command, "DISPLAY_OUT_ROWS") == 0)
         {
             char *token = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
             if (token)
-                capabilities->displayOutRows = atoi(token);
+                capabilities->displayOutRows = (unsigned char)parseConfigInt(token, capabilities->displayOutRows);
         }
         else if (strcmp(command, "DISPLAY_OUT_COLUMNS") == 0)
         {
             char *token = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
             if (token)
-                capabilities->displayOutColumns = atoi(token);
+                capabilities->displayOutColumns = (unsigned char)parseConfigInt(token, capabilities->displayOutColumns);
         }
         else if (strcmp(command, "DISPLAY_OUT_ENCODINGS") == 0)
         {
             char *token = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
             if (token)
-                capabilities->displayOutEncodings = atoi(token);
+                capabilities->displayOutEncodings = (unsigned char)parseConfigInt(token, capabilities->displayOutEncodings);
         }
         else if (strcmp(command, "BACKUP") == 0)
         {
             char *token = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
             if (token)
-                capabilities->backup = atoi(token);
+                capabilities->backup = (unsigned char)parseConfigInt(token, capabilities->backup);
         }
         else if (strcmp(command, "RIGHT_ALIGN_BITS") == 0)
         {
             char *token = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
             if (token)
-                capabilities->rightAlignBits = atoi(token);
+                capabilities->rightAlignBits = (unsigned char)parseConfigInt(token, capabilities->rightAlignBits);
         }
 
         else

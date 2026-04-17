@@ -29,9 +29,22 @@ int initIO(JVSIO *io)
 	for (int player = 0; player < maxCoins; player++)
 		io->state.coinCount[player] = 0;
 
-	io->analogueMax = pow(2, io->capabilities.analogueInBits) - 1;
-	io->gunXMax = pow(2, io->capabilities.gunXBits) - 1;
-	io->gunYMax = pow(2, io->capabilities.gunYBits) - 1;
+	/* Compute the maximum representable value for each channel type.
+	 * Use integer bit-shifts instead of pow() to keep this as pure integer
+	 * arithmetic.  Guard against bits == 0 (would produce max == 0, silently
+	 * zeroing all channel output) and bits > 15 (shift would be ≥ 16, which
+	 * is implementation-defined for a 16-bit int on C99). */
+	io->analogueMax = (io->capabilities.analogueInBits > 0 && io->capabilities.analogueInBits <= 15)
+	                  ? (1 << io->capabilities.analogueInBits) - 1 : 0;
+	io->gunXMax     = (io->capabilities.gunXBits > 0 && io->capabilities.gunXBits <= 15)
+	                  ? (1 << io->capabilities.gunXBits) - 1 : 0;
+	io->gunYMax     = (io->capabilities.gunYBits > 0 && io->capabilities.gunYBits <= 15)
+	                  ? (1 << io->capabilities.gunYBits) - 1 : 0;
+
+	if (io->capabilities.analogueInChannels > 0 && io->analogueMax == 0)
+		debug(0, "Warning: analogueInBits is 0 or >15 — analogue output will be zeroed\n");
+	if (io->capabilities.gunChannels > 0 && (io->gunXMax == 0 || io->gunYMax == 0))
+		debug(0, "Warning: gunXBits/gunYBits is 0 or >15 — lightgun output will be zeroed\n");
 
 	return 1;
 }

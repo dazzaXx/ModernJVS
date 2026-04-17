@@ -75,11 +75,10 @@ static int validateFilename(const char *filename)
     if (strstr(filename, "..") != NULL)
         return 0;
     
-    // Only allow alphanumeric, dash, underscore, dot, and slash
+    // Only allow alphanumeric, dash, underscore, and dot (no slash — names are flat identifiers)
     for (const char *p = filename; *p != '\0'; p++)
     {
-        if (!isalnum((unsigned char)*p) && *p != '-' && *p != '_' && 
-            *p != '.' && *p != '/')
+        if (!isalnum((unsigned char)*p) && *p != '-' && *p != '_' && *p != '.')
             return 0;
     }
     
@@ -203,7 +202,8 @@ static JVSCLIStatus enableDevice(char *deviceName)
                 if (ret < 0 || ret >= (int)sizeof(gamePathEnabled))
                     continue;
 
-                rename(gamePath, gamePathEnabled);
+                if (rename(gamePath, gamePathEnabled) < 0)
+                    debug(1, "Warning: Failed to enable '%s': %s\n", dir->d_name, strerror(errno));
             }
             closedir(d);
         }
@@ -278,7 +278,8 @@ static JVSCLIStatus disableDevice(char *deviceName)
                 if (ret < 0 || ret >= (int)sizeof(gamePathDisabled))
                     continue;
 
-                rename(gamePathEnabled, gamePathDisabled);
+                if (rename(gamePathEnabled, gamePathDisabled) < 0)
+                    debug(1, "Warning: Failed to disable '%s': %s\n", dir->d_name, strerror(errno));
             }
             closedir(d);
         }
