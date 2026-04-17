@@ -1287,17 +1287,17 @@ static void test_writePacket_below_min_length(void)
 
     JVSPacket pkt;
     pkt.destination = 0x00;
-    pkt.length      = 1;  /* < 2 → must not write */
+    pkt.length      = 0;  /* truly empty → must not write */
     pkt.data[0]     = 0x01;
 
     JVSStatus s = writePacket(&pkt);
-    ASSERT(s == JVS_STATUS_SUCCESS, "returns SUCCESS even with short packet");
+    ASSERT(s == JVS_STATUS_SUCCESS, "returns SUCCESS even with empty packet");
 
     /* No bytes should have been written */
     fcntl(fds[0], F_SETFL, O_NONBLOCK);
     unsigned char buf[64];
     int n = (int)read(fds[0], buf, sizeof(buf));
-    ASSERT(n <= 0, "no bytes written for short packet");
+    ASSERT(n <= 0, "no bytes written for empty packet");
     close(fds[0]);
     close(fds[1]);
     serialIO = -1;
@@ -1400,7 +1400,7 @@ static void test_processPacket_cmd_reset(void)
     ASSERT(s == JVS_STATUS_SUCCESS, "CMD_RESET returns SUCCESS");
     ASSERT_EQ_INT(io.deviceID, -1, "deviceID reset to -1");
 
-    /* No response should be written (packet data length < 2 → writePacket skips) */
+    /* No response should be written (CMD_RESET is broadcast-only per JVS spec) */
     ASSERT(!fd_has_data(afd), "CMD_RESET produces no response");
 
     close(sv[0]); close(sv[1]); serialIO = -1;
@@ -2179,6 +2179,65 @@ static void test_processPacket_namco_specific_04(void)
 }
 
 /*
+ * Unsupported command: an unrecognised command byte must cause the response
+ * STATUS byte to be STATUS_UNSUPPORTED (0x02) and stop further processing.
+ */
+static void test_processPacket_unsupported_command(void)
+{
+    TEST_BEGIN(test_processPacket_unsupported_command);
+
+    JVSIO io = make_test_io();
+    io.deviceID = 0x01;
+    int sv[2];
+    int afd = open_test_socket(sv);
+    ASSERT(afd >= 0, "socketpair");
+
+    /* 0xAA is not a defined JVS command */
+    unsigned char cmd[] = {0xAA};
+    run_processPacket(&io, afd, 0x01, cmd, 1);
+
+    JVSResponse r = jvs_read_response(afd);
+    ASSERT(r.valid == 1, "response valid");
+    ASSERT_EQ_INT(r.data[0], STATUS_UNSUPPORTED, "STATUS_UNSUPPORTED");
+
+    close(sv[0]); close(sv[1]); serialIO = -1;
+    TEST_PASS();
+}
+
+/*
+ * CMD_REMAINING_PAYOUT with 2 slots: response must contain REPORT_SUCCESS
+ * followed by exactly 2 zero-bytes per requested slot (4 bytes total for 2 slots).
+ */
+static void test_processPacket_cmd_remaining_payout_two_slots(void)
+{
+    TEST_BEGIN(test_processPacket_cmd_remaining_payout_two_slots);
+
+    JVSIO io = make_test_io();
+    io.deviceID = 0x01;
+    int sv[2];
+    int afd = open_test_socket(sv);
+    ASSERT(afd >= 0, "socketpair");
+
+    unsigned char cmd[] = {CMD_REMAINING_PAYOUT, 0x02};
+    run_processPacket(&io, afd, 0x01, cmd, 2);
+
+    JVSResponse r = jvs_read_response(afd);
+    ASSERT(r.valid == 1, "response valid");
+    ASSERT_EQ_INT(r.data[0], STATUS_SUCCESS,  "STATUS_SUCCESS");
+    ASSERT_EQ_INT(r.data[1], REPORT_SUCCESS,  "REPORT_SUCCESS");
+    /* 2 slots × 2 bytes each = 4 data bytes, all zero */
+    ASSERT_EQ_INT(r.data[2], 0x00, "slot1 high = 0");
+    ASSERT_EQ_INT(r.data[3], 0x00, "slot1 low = 0");
+    ASSERT_EQ_INT(r.data[4], 0x00, "slot2 high = 0");
+    ASSERT_EQ_INT(r.data[5], 0x00, "slot2 low = 0");
+    /* Total response data length: STATUS(1) + REPORT(1) + 2*2 = 6 */
+    ASSERT_EQ_INT(r.data_len, 6, "data_len = 6");
+
+    close(sv[0]); close(sv[1]); serialIO = -1;
+    TEST_PASS();
+}
+
+/*
  * INCLUDE depth limit: a chain of 12 files each including the next should not
  * crash or recurse infinitely.  After MAX_INCLUDE_DEPTH (10) levels the
  * remaining files are silently skipped.  The settings set in the first 10
@@ -2619,6 +2678,8 @@ static const TestFn tests[] = {
     test_processPacket_namco_specific_program_date,
     test_processPacket_namco_specific_dip_switch,
     test_processPacket_namco_specific_04,
+    test_processPacket_unsupported_command,
+    test_processPacket_cmd_remaining_payout_two_slots,
 };
 
 int main(void)
