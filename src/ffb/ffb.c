@@ -39,5 +39,5 @@ void *ffbThread(void *_args)
 
     debug(1, "FFB thread started (serial fd: %d)\n", args->serial);
 
-    return 0;
+    return NULL;
 }

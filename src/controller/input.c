@@ -140,7 +140,7 @@ static void *wiiDeviceThread(void *_args)
     {
         debug(0, "Warning: Failed to open Wii Remote device '%s': %s\n", args->devicePath, strerror(errno));
         free(args);
-        return 0;
+        return NULL;
     }
 
     struct input_event event;
@@ -174,6 +174,15 @@ static void *wiiDeviceThread(void *_args)
             {
             case EV_ABS:
             {
+                /* Only process IR tracking axis codes emitted by the hid-wiimote
+                 * driver.  Other EV_ABS events (e.g. accelerometer axes) must be
+                 * ignored here: without this guard `outOfBounds` would be set to
+                 * true for every non-IR axis event, incorrectly triggering the
+                 * "off-screen hold" logic and corrupting the gun state. */
+                if (event.code != 16 && event.code != 17 &&
+                    event.code != 18 && event.code != 19)
+                    continue;
+
                 bool outOfBounds = true;
                 switch (event.code)
                 {
@@ -225,7 +234,7 @@ static void *wiiDeviceThread(void *_args)
                     double valuey = 384 + sin(angle) * (irMidpointX - 512) + cos(angle) * (irMidpointY - 384);
 
                     double finalX = (((double)valuex / (double)1023) * 1.0);
-                    double finalY = 1.0f - ((double)valuey / (double)1023);
+                    double finalY = 1.0 - ((double)valuey / (double)1023);
 
                     /* Apply IR scale: multiply the displacement from screen centre so the
                      * cursor covers more (or less) of the screen per physical movement.
@@ -280,7 +289,7 @@ static void *wiiDeviceThread(void *_args)
     close(fd);
     free(args);
 
-    return 0;
+    return NULL;
 }
 
 static void *deviceThread(void *_args)
@@ -292,12 +301,17 @@ static void *deviceThread(void *_args)
     {
         debug(0, "Critical: Failed to open device '%s': %s\n", args->devicePath, strerror(errno));
         free(args);
-        return 0;
+        return NULL;
     }
 
     struct input_event event;
 
     int flags = fcntl(fd, F_GETFL, 0);
+    if (flags < 0)
+    {
+        debug(1, "Warning: fcntl(F_GETFL) failed for '%s': %s — defaulting to O_NONBLOCK only\n", args->devicePath, strerror(errno));
+        flags = 0;
+    }
     fcntl(fd, F_SETFL, flags | O_NONBLOCK);
 
     uint8_t absoluteBitmask[ABS_MAX / 8 + 1];
@@ -578,7 +592,7 @@ static void *deviceThread(void *_args)
     close(fd);
     free(args);
 
-    return 0;
+    return NULL;
 }
 static ThreadStatus startThread(EVInputs *inputs, char *devicePath, int wiiMode, int player, JVSIO *jvsIO, double analogDeadzone, double wiiIRScale)
 {
@@ -816,8 +830,9 @@ int getNumberOfDevices(void)
 
 static int compareSlotRegistryOrder(const void *a, const void *b)
 {
-    return ((const SlotRegistryEntry *)a)->slotOrder -
-           ((const SlotRegistryEntry *)b)->slotOrder;
+    int sa = ((const SlotRegistryEntry *)a)->slotOrder;
+    int sb = ((const SlotRegistryEntry *)b)->slotOrder;
+    return (sa > sb) - (sa < sb);
 }
 
 JVSInputStatus getInputs(DeviceList *deviceList)
@@ -855,8 +870,11 @@ JVSInputStatus getInputs(DeviceList *deviceList)
 
         char tempFullName[MAX_PATH] = "Unknown";
         
-        // Get the name string first to check if we should filter this device
-        ioctl(device, EVIOCGNAME(sizeof(tempFullName)), tempFullName);
+        // Get the name string first to check if we should filter this device.
+        // On failure tempFullName retains its "Unknown" initialiser, which is
+        // treated as a non-filtered device and processed normally below.
+        if (ioctl(device, EVIOCGNAME(sizeof(tempFullName)), tempFullName) < 0)
+            debug(1, "Warning: Failed to get device name for %s: %s\n", tempPath, strerror(errno));
 
         // Filter out non-controller devices (HDMI, sound cards, etc.)
         if (shouldFilterDevice(tempFullName))
@@ -873,24 +891,24 @@ JVSInputStatus getInputs(DeviceList *deviceList)
             continue;
         }
         Device *dev = &deviceList->devices[validDeviceIndex];
-        strncpy(dev->path, tempPath, MAX_PATH - 1);
-        dev->path[MAX_PATH - 1] = '\0';
-        strncpy(dev->fullName, tempFullName, MAX_PATH - 1);
-        dev->fullName[MAX_PATH - 1] = '\0';
+        snprintf(dev->path, MAX_PATH, "%s", tempPath);
+        snprintf(dev->fullName, MAX_PATH, "%s", tempFullName);
         strncpy(dev->name, "unknown", MAX_PATH - 1);
         dev->name[MAX_PATH - 1] = '\0';
         dev->type = DEVICE_TYPE_UNKNOWN;
 
         // Get product vendor and ID information
-        struct input_id device_info;
-        ioctl(device, EVIOCGID, &device_info);
+        struct input_id device_info = {0};
+        if (ioctl(device, EVIOCGID, &device_info) < 0)
+            debug(1, "Warning: Failed to get device ID info for %s: %s\n", tempPath, strerror(errno));
         dev->vendorID = device_info.vendor;
         dev->productID = device_info.product;
         dev->version = device_info.version;
         dev->bus = device_info.bustype;
 
         // Get the physical location string
-        ioctl(device, EVIOCGPHYS(sizeof(dev->physicalLocation)), dev->physicalLocation);
+        if (ioctl(device, EVIOCGPHYS(sizeof(dev->physicalLocation)), dev->physicalLocation) < 0)
+            debug(1, "Warning: Failed to get physical location for %s: %s\n", tempPath, strerror(errno));
         /* Truncate at the first '/' to keep only the bus-address component
          * (e.g. "usb-0000:01:00.0-1" → "usb-0000:01:00.0-1/input0" → "usb-0000:01:00.0-1").
          * strchr is O(n) vs the previous O(n²) strlen-in-loop approach. */
@@ -1338,8 +1356,7 @@ JVSInputStatus initInputs(char *outputMappingPath, char *configPath, char *secon
                 }
                 if (!alreadyRegistered && slotRegistryLength < MAX_DEVICES)
                 {
-                    strncpy(slotRegistry[slotRegistryLength].identity, identity, MAX_IDENTITY_LEN - 1);
-                    slotRegistry[slotRegistryLength].identity[MAX_IDENTITY_LEN - 1] = '\0';
+                    snprintf(slotRegistry[slotRegistryLength].identity, MAX_IDENTITY_LEN, "%s", identity);
                     slotRegistry[slotRegistryLength].slotOrder = nextSlotOrder++;
                     slotRegistryLength++;
                     nextNewPlayerNumber++;

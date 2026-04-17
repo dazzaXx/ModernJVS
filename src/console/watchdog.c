@@ -3,6 +3,7 @@
 #include "controller/threading.h"
 
 #include <pthread.h>
+#include <signal.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <time.h>
@@ -11,7 +12,7 @@
 
 typedef struct
 {
-    volatile int *running;
+    volatile sig_atomic_t *running;
 
 } WatchdogThreadArguments;
 
@@ -65,10 +66,10 @@ static void *watchdogThread(void *_args)
 
     free(_args);
 
-    return 0;
+    return NULL;
 }
 
-WatchdogStatus initWatchdog(volatile int *running)
+WatchdogStatus initWatchdog(volatile sig_atomic_t *running)
 {
     WatchdogThreadArguments *args = malloc(sizeof(WatchdogThreadArguments));
     if (args == NULL)
