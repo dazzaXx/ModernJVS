@@ -388,6 +388,29 @@ static void test_setSwitch_out_of_range_player(void)
     TEST_PASS();
 }
 
+/*
+ * setSwitch must reject a player index >= JVS_MAX_STATE_SIZE even when
+ * capabilities.players is set to that same large value.  Without the
+ * JVS_MAX_STATE_SIZE guard the write to inputSwitch[player] would be
+ * out-of-bounds.
+ */
+static void test_setSwitch_oversized_player(void)
+{
+    TEST_BEGIN(test_setSwitch_oversized_player);
+
+    JVSIO io;
+    memset(&io, 0, sizeof(io));
+    /* Set capabilities.players to JVS_MAX_STATE_SIZE so the first guard
+     * (player > capabilities.players) would NOT catch the out-of-bounds
+     * access without the second JVS_MAX_STATE_SIZE guard. */
+    io.capabilities.players = JVS_MAX_STATE_SIZE;
+    initIO(&io);
+
+    int r = setSwitch(&io, (JVSPlayer)JVS_MAX_STATE_SIZE, BUTTON_1, 1);
+    ASSERT_EQ_INT(r, 0, "setSwitch with player == JVS_MAX_STATE_SIZE must return 0");
+    TEST_PASS();
+}
+
 static void test_setSwitch_all_buttons(void)
 {
     TEST_BEGIN(test_setSwitch_all_buttons);
@@ -1264,17 +1287,17 @@ static void test_writePacket_below_min_length(void)
 
     JVSPacket pkt;
     pkt.destination = 0x00;
-    pkt.length      = 1;  /* < 2 → must not write */
+    pkt.length      = 0;  /* truly empty → must not write */
     pkt.data[0]     = 0x01;
 
     JVSStatus s = writePacket(&pkt);
-    ASSERT(s == JVS_STATUS_SUCCESS, "returns SUCCESS even with short packet");
+    ASSERT(s == JVS_STATUS_SUCCESS, "returns SUCCESS even with empty packet");
 
     /* No bytes should have been written */
     fcntl(fds[0], F_SETFL, O_NONBLOCK);
     unsigned char buf[64];
     int n = (int)read(fds[0], buf, sizeof(buf));
-    ASSERT(n <= 0, "no bytes written for short packet");
+    ASSERT(n <= 0, "no bytes written for empty packet");
     close(fds[0]);
     close(fds[1]);
     serialIO = -1;
@@ -1314,10 +1337,40 @@ static void test_writePacket_escape_in_data(void)
     TEST_PASS();
 }
 
-/* =========================================================================
- * ──────────────────── processPacket INTEGRATION TESTS ─────────────────────
- * (uses socketpair so both read and write go through serialIO)
- * ========================================================================= */
+/*
+ * writePacket must return JVS_STATUS_ERROR and not produce any wire output
+ * when packet->length == JVS_MAX_PACKET_SIZE (255).  Adding 1 for the JVS
+ * wire-format checksum would overflow the 1-byte length field (256 truncates
+ * to 0), sending an unparseable packet to the arcade machine.
+ */
+static void test_writePacket_max_length_guard(void)
+{
+    TEST_BEGIN(test_writePacket_max_length_guard);
+
+    int fds[2];
+    ASSERT(pipe(fds) == 0, "pipe");
+    serialIO = fds[1];
+
+    JVSPacket pkt;
+    pkt.destination = BUS_MASTER;
+    pkt.length      = JVS_MAX_PACKET_SIZE;  /* 255 — wireLength would wrap to 0 */
+    memset(pkt.data, 0x01, sizeof(pkt.data));
+
+    JVSStatus s = writePacket(&pkt);
+    ASSERT(s == JVS_STATUS_ERROR, "writePacket with length==MAX must return ERROR");
+    ASSERT_EQ_INT(pkt.length, JVS_MAX_PACKET_SIZE, "packet->length must not be modified");
+
+    /* No bytes should have been written to the wire */
+    fcntl(fds[0], F_SETFL, O_NONBLOCK);
+    unsigned char buf[64];
+    int n = (int)read(fds[0], buf, sizeof(buf));
+    ASSERT(n <= 0, "no bytes written when length overflow guard fires");
+
+    close(fds[0]);
+    close(fds[1]);
+    serialIO = -1;
+    TEST_PASS();
+}
 
 /** Send a JVS command packet from the arcade side and call processPacket(). */
 static JVSStatus run_processPacket(JVSIO *io, int arcade_fd,
@@ -1347,7 +1400,7 @@ static void test_processPacket_cmd_reset(void)
     ASSERT(s == JVS_STATUS_SUCCESS, "CMD_RESET returns SUCCESS");
     ASSERT_EQ_INT(io.deviceID, -1, "deviceID reset to -1");
 
-    /* No response should be written (packet data length < 2 → writePacket skips) */
+    /* No response should be written (CMD_RESET is broadcast-only per JVS spec) */
     ASSERT(!fd_has_data(afd), "CMD_RESET produces no response");
 
     close(sv[0]); close(sv[1]); serialIO = -1;
@@ -2126,6 +2179,65 @@ static void test_processPacket_namco_specific_04(void)
 }
 
 /*
+ * Unsupported command: an unrecognised command byte must cause the response
+ * STATUS byte to be STATUS_UNSUPPORTED (0x02) and stop further processing.
+ */
+static void test_processPacket_unsupported_command(void)
+{
+    TEST_BEGIN(test_processPacket_unsupported_command);
+
+    JVSIO io = make_test_io();
+    io.deviceID = 0x01;
+    int sv[2];
+    int afd = open_test_socket(sv);
+    ASSERT(afd >= 0, "socketpair");
+
+    /* 0xAA is not a defined JVS command */
+    unsigned char cmd[] = {0xAA};
+    run_processPacket(&io, afd, 0x01, cmd, 1);
+
+    JVSResponse r = jvs_read_response(afd);
+    ASSERT(r.valid == 1, "response valid");
+    ASSERT_EQ_INT(r.data[0], STATUS_UNSUPPORTED, "STATUS_UNSUPPORTED");
+
+    close(sv[0]); close(sv[1]); serialIO = -1;
+    TEST_PASS();
+}
+
+/*
+ * CMD_REMAINING_PAYOUT with 2 slots: response must contain REPORT_SUCCESS
+ * followed by exactly 2 zero-bytes per requested slot (4 bytes total for 2 slots).
+ */
+static void test_processPacket_cmd_remaining_payout_two_slots(void)
+{
+    TEST_BEGIN(test_processPacket_cmd_remaining_payout_two_slots);
+
+    JVSIO io = make_test_io();
+    io.deviceID = 0x01;
+    int sv[2];
+    int afd = open_test_socket(sv);
+    ASSERT(afd >= 0, "socketpair");
+
+    unsigned char cmd[] = {CMD_REMAINING_PAYOUT, 0x02};
+    run_processPacket(&io, afd, 0x01, cmd, 2);
+
+    JVSResponse r = jvs_read_response(afd);
+    ASSERT(r.valid == 1, "response valid");
+    ASSERT_EQ_INT(r.data[0], STATUS_SUCCESS,  "STATUS_SUCCESS");
+    ASSERT_EQ_INT(r.data[1], REPORT_SUCCESS,  "REPORT_SUCCESS");
+    /* 2 slots × 2 bytes each = 4 data bytes, all zero */
+    ASSERT_EQ_INT(r.data[2], 0x00, "slot1 high = 0");
+    ASSERT_EQ_INT(r.data[3], 0x00, "slot1 low = 0");
+    ASSERT_EQ_INT(r.data[4], 0x00, "slot2 high = 0");
+    ASSERT_EQ_INT(r.data[5], 0x00, "slot2 low = 0");
+    /* Total response data length: STATUS(1) + REPORT(1) + 2*2 = 6 */
+    ASSERT_EQ_INT(r.data_len, 6, "data_len = 6");
+
+    close(sv[0]); close(sv[1]); serialIO = -1;
+    TEST_PASS();
+}
+
+/*
  * INCLUDE depth limit: a chain of 12 files each including the next should not
  * crash or recurse infinitely.  After MAX_INCLUDE_DEPTH (10) levels the
  * remaining files are silently skipped.  The settings set in the first 10
@@ -2476,6 +2588,7 @@ static const TestFn tests[] = {
     test_setSwitch_player1,
     test_setSwitch_player2,
     test_setSwitch_out_of_range_player,
+    test_setSwitch_oversized_player,
     test_setSwitch_all_buttons,
     test_incrementCoin_basic,
     test_incrementCoin_system_rejected,
@@ -2531,6 +2644,7 @@ static const TestFn tests[] = {
     test_writePacket_below_min_length,
     test_writePacket_escape_in_data,
     test_writePacket_large_length_no_wrap,
+    test_writePacket_max_length_guard,
     /* processPacket integration */
     test_processPacket_cmd_reset,
     test_processPacket_cmd_reset_chained_io,
@@ -2564,6 +2678,8 @@ static const TestFn tests[] = {
     test_processPacket_namco_specific_program_date,
     test_processPacket_namco_specific_dip_switch,
     test_processPacket_namco_specific_04,
+    test_processPacket_unsupported_command,
+    test_processPacket_cmd_remaining_payout_two_slots,
 };
 
 int main(void)
