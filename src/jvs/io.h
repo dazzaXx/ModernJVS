@@ -60,57 +60,6 @@ typedef enum
     NONE = 99,
 } JVSInput;
 
-static const struct
-{
-    const char *string;
-    JVSInput input;
-} jvsInputConversion[] = {
-    {"BUTTON_TEST", BUTTON_TEST},
-    {"BUTTON_TILT_1", BUTTON_TILT_1},
-    {"BUTTON_TILT_2", BUTTON_TILT_2},
-    {"BUTTON_TILT_3", BUTTON_TILT_3},
-    {"BUTTON_TILT_4", BUTTON_TILT_4},
-    {"BUTTON_TILT_5", BUTTON_TILT_5},
-    {"BUTTON_TILT_6", BUTTON_TILT_6},
-    {"BUTTON_TILT_7", BUTTON_TILT_7},
-    {"BUTTON_START", BUTTON_START},
-    {"BUTTON_SERVICE", BUTTON_SERVICE},
-    {"BUTTON_UP", BUTTON_UP},
-    {"BUTTON_DOWN", BUTTON_DOWN},
-    {"BUTTON_LEFT", BUTTON_LEFT},
-    {"BUTTON_RIGHT", BUTTON_RIGHT},
-    {"BUTTON_1", BUTTON_1},
-    {"BUTTON_2", BUTTON_2},
-    {"BUTTON_3", BUTTON_3},
-    {"BUTTON_4", BUTTON_4},
-    {"BUTTON_5", BUTTON_5},
-    {"BUTTON_6", BUTTON_6},
-    {"BUTTON_7", BUTTON_7},
-    {"BUTTON_8", BUTTON_8},
-    {"BUTTON_9", BUTTON_9},
-    {"BUTTON_10", BUTTON_10},
-    {"ANALOGUE_1", ANALOGUE_1},
-    {"ANALOGUE_2", ANALOGUE_2},
-    {"ANALOGUE_3", ANALOGUE_3},
-    {"ANALOGUE_4", ANALOGUE_4},
-    {"ANALOGUE_5", ANALOGUE_5},
-    {"ANALOGUE_6", ANALOGUE_6},
-    {"ANALOGUE_7", ANALOGUE_7},
-    {"ANALOGUE_8", ANALOGUE_8},
-    {"ANALOGUE_9", ANALOGUE_9},
-    {"ANALOGUE_10", ANALOGUE_10},
-    {"ROTARY_1", ROTARY_1},
-    {"ROTARY_2", ROTARY_2},
-    {"ROTARY_3", ROTARY_3},
-    {"ROTARY_4", ROTARY_4},
-    {"ROTARY_5", ROTARY_5},
-    {"ROTARY_6", ROTARY_6},
-    {"ROTARY_7", ROTARY_7},
-    {"ROTARY_8", ROTARY_8},
-    {"ROTARY_9", ROTARY_9},
-    {"ROTARY_10", ROTARY_10},
-    {"COIN", COIN},
-};
 
 typedef enum
 {
@@ -121,17 +70,6 @@ typedef enum
     PLAYER_4 = 4,
 } JVSPlayer;
 
-static const struct
-{
-    const char *string;
-    JVSPlayer player;
-} jvsPlayerConversion[] = {
-    {"SYSTEM", SYSTEM},
-    {"PLAYER_1", PLAYER_1},
-    {"PLAYER_2", PLAYER_2},
-    {"PLAYER_3", PLAYER_3},
-    {"PLAYER_4", PLAYER_4},
-};
 
 typedef struct
 {

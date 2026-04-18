@@ -974,8 +974,10 @@ JVSStatus processPacket(JVSIO *jvsIO)
 				if (!inputPacket.data[index + 1 + i])
 					break;
 			}
-			// Ensure null termination (either already copied or set at end of buffer)
-			idData[i < 99 ? i : 99] = '\0';
+			// Ensure null termination. When the loop breaks on the null byte,
+			// idData[i] was just copied as '\0'. When the loop runs to i == 99
+			// without finding a null (malformed packet), we terminate at [99].
+			idData[i] = '\0';
 			debug(0, "CMD_CONVEY_ID - Main board ID: %s\n", idData);
 		}
 		break;
