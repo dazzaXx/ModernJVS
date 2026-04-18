@@ -1,3 +1,5 @@
+# Version 6.0.0-dev - IN DEVELOPMENT - Code Refactoring, More Bugfixes and Optimizations
+
 # ![ModernJVS](docs/modernjvs2.png)
 
 ModernJVS is fork of OpenJVS, an emulator for I/O boards in arcade machines that use the JVS protocol. It requires a USB RS485 converter.
