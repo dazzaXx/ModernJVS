@@ -2512,6 +2512,8 @@ static void test_initIO_oversized_capabilities(void)
     ASSERT_EQ_INT(io.state.analogueChannel[0], 0, "analogue[0] clamped to 0");
     ASSERT_EQ_INT(io.state.coinCount[0],       0, "coin[0] clamped to 0");
     ASSERT_EQ_INT(io.state.rotaryChannel[0],   0, "rotary[0] clamped to 0");
+    ASSERT_EQ_INT(io.state.gunChannel[0],      0, "gunChannel[0] clamped to 0");
+    ASSERT_EQ_INT(io.state.gunChannel[1],      0, "gunChannel[1] clamped to 0");
 
     /* analogueMax / gunXMax / gunYMax must still be computed correctly */
     ASSERT_EQ_INT(io.analogueMax, 1023, "analogueMax for 10-bit");
@@ -2574,6 +2576,379 @@ static void test_processPacket_cmd_reset_chained_io(void)
 
     ASSERT_EQ_INT(io1.deviceID, 0x01, "io1 re-assigned after reset");
     ASSERT_EQ_INT(io2.deviceID, 0x02, "io2 re-assigned after reset");
+
+    close(sv[0]); close(sv[1]); serialIO = -1;
+    TEST_PASS();
+}
+
+/* =========================================================================
+ * ──────────────────── ADDITIONAL COMMAND TESTS ───────────────────────────
+ * ========================================================================= */
+
+static void test_processPacket_cmd_set_comms_mode(void)
+{
+    TEST_BEGIN(test_processPacket_cmd_set_comms_mode);
+
+    JVSIO io = make_test_io();
+    io.deviceID = 0x01;
+    int sv[2];
+    int afd = open_test_socket(sv);
+    ASSERT(afd >= 0, "socketpair");
+
+    /* Set comms mode 0x01; emulator always acknowledges without changing anything */
+    unsigned char cmd[] = {CMD_SET_COMMS_MODE, 0x01};
+    JVSStatus s = run_processPacket(&io, afd, 0x01, cmd, 2);
+    ASSERT(s == JVS_STATUS_SUCCESS, "CMD_SET_COMMS_MODE SUCCESS");
+
+    JVSResponse r = jvs_read_response(afd);
+    ASSERT(r.valid == 1, "response valid");
+    ASSERT_EQ_INT(r.data[0], STATUS_SUCCESS,  "STATUS_SUCCESS");
+    ASSERT_EQ_INT(r.data[1], REPORT_SUCCESS,  "REPORT_SUCCESS");
+
+    close(sv[0]); close(sv[1]); serialIO = -1;
+    TEST_PASS();
+}
+
+static void test_processPacket_cmd_read_keypad(void)
+{
+    TEST_BEGIN(test_processPacket_cmd_read_keypad);
+
+    JVSIO io = make_test_io();
+    io.deviceID = 0x01;
+    int sv[2];
+    int afd = open_test_socket(sv);
+    ASSERT(afd >= 0, "socketpair");
+
+    /* CMD_READ_KEYPAD takes no argument and always returns 0x00 */
+    unsigned char cmd[] = {CMD_READ_KEYPAD};
+    JVSStatus s = run_processPacket(&io, afd, 0x01, cmd, 1);
+    ASSERT(s == JVS_STATUS_SUCCESS, "CMD_READ_KEYPAD SUCCESS");
+
+    JVSResponse r = jvs_read_response(afd);
+    ASSERT(r.valid == 1, "response valid");
+    ASSERT_EQ_INT(r.data[0], STATUS_SUCCESS,  "STATUS_SUCCESS");
+    ASSERT_EQ_INT(r.data[1], REPORT_SUCCESS,  "REPORT_SUCCESS");
+    ASSERT_EQ_INT(r.data[2], 0x00, "keypad byte = 0x00");
+
+    close(sv[0]); close(sv[1]); serialIO = -1;
+    TEST_PASS();
+}
+
+static void test_processPacket_cmd_write_gpo_bit(void)
+{
+    TEST_BEGIN(test_processPacket_cmd_write_gpo_bit);
+
+    JVSIO io = make_test_io();
+    io.deviceID = 0x01;
+    int sv[2];
+    int afd = open_test_socket(sv);
+    ASSERT(afd >= 0, "socketpair");
+
+    /* Write GPO bit: byte_index=0, bit_value=1 */
+    unsigned char cmd[] = {CMD_WRITE_GPO_BIT, 0x00, 0x01};
+    JVSStatus s = run_processPacket(&io, afd, 0x01, cmd, 3);
+    ASSERT(s == JVS_STATUS_SUCCESS, "CMD_WRITE_GPO_BIT SUCCESS");
+
+    JVSResponse r = jvs_read_response(afd);
+    ASSERT(r.valid == 1, "response valid");
+    ASSERT_EQ_INT(r.data[1], REPORT_SUCCESS, "REPORT_SUCCESS");
+
+    close(sv[0]); close(sv[1]); serialIO = -1;
+    TEST_PASS();
+}
+
+static void test_processPacket_cmd_write_analog(void)
+{
+    TEST_BEGIN(test_processPacket_cmd_write_analog);
+
+    JVSIO io = make_test_io();
+    io.deviceID = 0x01;
+    int sv[2];
+    int afd = open_test_socket(sv);
+    ASSERT(afd >= 0, "socketpair");
+
+    /* Write 2 analogue output channels; size = 2 + 2*2 = 6 bytes */
+    unsigned char cmd[] = {CMD_WRITE_ANALOG, 0x02, 0x00, 0x80, 0x00, 0x80};
+    JVSStatus s = run_processPacket(&io, afd, 0x01, cmd, 6);
+    ASSERT(s == JVS_STATUS_SUCCESS, "CMD_WRITE_ANALOG SUCCESS");
+
+    JVSResponse r = jvs_read_response(afd);
+    ASSERT(r.valid == 1, "response valid");
+    ASSERT_EQ_INT(r.data[1], REPORT_SUCCESS, "REPORT_SUCCESS");
+
+    close(sv[0]); close(sv[1]); serialIO = -1;
+    TEST_PASS();
+}
+
+static void test_processPacket_cmd_write_display(void)
+{
+    TEST_BEGIN(test_processPacket_cmd_write_display);
+
+    JVSIO io = make_test_io();
+    io.deviceID = 0x01;
+    int sv[2];
+    int afd = open_test_socket(sv);
+    ASSERT(afd >= 0, "socketpair");
+
+    /* 1-column × 1-row display: cmd(1)+cols(1)+rows(1)+encoding(1)+data(1) = 5 bytes */
+    unsigned char cmd[] = {CMD_WRITE_DISPLAY, 0x01, 0x01, 0x00, 'A'};
+    JVSStatus s = run_processPacket(&io, afd, 0x01, cmd, 5);
+    ASSERT(s == JVS_STATUS_SUCCESS, "CMD_WRITE_DISPLAY SUCCESS");
+
+    JVSResponse r = jvs_read_response(afd);
+    ASSERT(r.valid == 1, "response valid");
+    ASSERT_EQ_INT(r.data[1], REPORT_SUCCESS, "REPORT_SUCCESS");
+
+    close(sv[0]); close(sv[1]); serialIO = -1;
+    TEST_PASS();
+}
+
+static void test_processPacket_cmd_subtract_payout(void)
+{
+    TEST_BEGIN(test_processPacket_cmd_subtract_payout);
+
+    JVSIO io = make_test_io();
+    io.deviceID = 0x01;
+    int sv[2];
+    int afd = open_test_socket(sv);
+    ASSERT(afd >= 0, "socketpair");
+
+    /* Subtract payout: slot=1, amount high=0x00 low=0x05 */
+    unsigned char cmd[] = {CMD_SUBTRACT_PAYOUT, 0x00, 0x05};
+    JVSStatus s = run_processPacket(&io, afd, 0x01, cmd, 3);
+    ASSERT(s == JVS_STATUS_SUCCESS, "CMD_SUBTRACT_PAYOUT SUCCESS");
+
+    JVSResponse r = jvs_read_response(afd);
+    ASSERT(r.valid == 1, "response valid");
+    ASSERT_EQ_INT(r.data[1], REPORT_SUCCESS, "REPORT_SUCCESS");
+
+    close(sv[0]); close(sv[1]); serialIO = -1;
+    TEST_PASS();
+}
+
+/*
+ * End-to-end path for the PR #177 fix (allow 16-bit analogue/gun channels).
+ * Verifies that CMD_READ_ANALOGS produces the correct wire bytes when
+ * analogueInBits == 16 (analogueRestBits == 0, no left-shift applied).
+ *
+ * With channel set to 1.0:
+ *   analogueMax = (1<<16)-1 = 65535
+ *   analogueData = 65535 << 0 = 65535 = 0xFFFF → high=0xFF, low=0xFF
+ */
+static void test_processPacket_cmd_read_analogs_16bit(void)
+{
+    TEST_BEGIN(test_processPacket_cmd_read_analogs_16bit);
+
+    JVSIO io;
+    memset(&io, 0, sizeof(io));
+    io.deviceID  = 0x01;
+    io.chainedIO = NULL;
+
+    io.capabilities.players            = 2;
+    io.capabilities.analogueInChannels = 2;
+    io.capabilities.analogueInBits     = 16;
+    io.capabilities.coins              = 2;
+    io.capabilities.rightAlignBits     = 0;
+
+    initIO(&io);   /* analogueMax = 65535 */
+    initJVS(&io);  /* analogueRestBits = 16-16 = 0 */
+
+    ASSERT_EQ_INT(io.analogueMax, 65535, "analogueMax for 16-bit");
+
+    setAnalogue(&io, ANALOGUE_1, 1.0);  /* channel[0] = 65535 */
+    setAnalogue(&io, ANALOGUE_2, 0.0);  /* channel[1] = 0     */
+
+    int sv[2];
+    int afd = open_test_socket(sv);
+    ASSERT(afd >= 0, "socketpair");
+
+    unsigned char cmd[] = {CMD_READ_ANALOGS, 0x02};
+    run_processPacket(&io, afd, 0x01, cmd, 2);
+
+    JVSResponse r = jvs_read_response(afd);
+    ASSERT(r.valid == 1, "response valid");
+    ASSERT_EQ_INT(r.data[1], REPORT_SUCCESS, "REPORT_SUCCESS");
+    /* ch0: 65535 << 0 = 65535 = 0xFFFF */
+    ASSERT_EQ_INT(r.data[2], 0xFF, "ch0 high byte = 0xFF");
+    ASSERT_EQ_INT(r.data[3], 0xFF, "ch0 low byte = 0xFF");
+    /* ch1: 0 */
+    ASSERT_EQ_INT(r.data[4], 0x00, "ch1 high byte = 0x00");
+    ASSERT_EQ_INT(r.data[5], 0x00, "ch1 low byte = 0x00");
+
+    close(sv[0]); close(sv[1]); serialIO = -1;
+    TEST_PASS();
+}
+
+/*
+ * CMD_READ_LIGHTGUN: verify the Y-channel value is correctly emitted.
+ * The existing test only checked the X value; this test checks both X and Y.
+ *
+ * setGun(channel_odd, 0.5) stores (1.0-0.5)*gunYMax = 0.5*4095 = 2047.
+ * yData = 2047 << 4 = 32752 = 0x7FF0.
+ */
+static void test_processPacket_cmd_read_lightgun_y_channel(void)
+{
+    TEST_BEGIN(test_processPacket_cmd_read_lightgun_y_channel);
+
+    JVSIO io = make_test_io();  /* gunXBits=12, gunYBits=12 → restBits=4 */
+    io.deviceID = 0x01;
+    setGun(&io, 0, 1.0);  /* X → gunChannel[0] = 4095 */
+    setGun(&io, 1, 0.5);  /* Y → gunChannel[1] = (int)((1.0-0.5)*4095) = 2047 */
+
+    int sv[2];
+    int afd = open_test_socket(sv);
+    ASSERT(afd >= 0, "socketpair");
+
+    unsigned char cmd[] = {CMD_READ_LIGHTGUN, 0x01};
+    run_processPacket(&io, afd, 0x01, cmd, 2);
+
+    JVSResponse r = jvs_read_response(afd);
+    ASSERT(r.valid == 1, "response valid");
+    ASSERT_EQ_INT(r.data[1], REPORT_SUCCESS, "REPORT_SUCCESS");
+    /* X: 4095 << 4 = 65520 = 0xFFF0 */
+    ASSERT_EQ_INT(r.data[2], 0xFF, "gun X high = 0xFF");
+    ASSERT_EQ_INT(r.data[3], 0xF0, "gun X low = 0xF0");
+    /* Y: 2047 << 4 = 32752 = 0x7FF0 */
+    ASSERT_EQ_INT(r.data[4], 0x7F, "gun Y high = 0x7F");
+    ASSERT_EQ_INT(r.data[5], 0xF0, "gun Y low = 0xF0");
+
+    close(sv[0]); close(sv[1]); serialIO = -1;
+    TEST_PASS();
+}
+
+/*
+ * CMD_READ_LIGHTGUN with two guns: verify both guns' X/Y values are reported.
+ * Gun 1 is at (0, 0) (left/top), gun 2 is at (1.0, 1.0) (right/bottom).
+ *
+ * setGun(even, 0.0) → xMax * 0.0 = 0.
+ * setGun(odd, 1.0) → yMax * (1.0-1.0) = 0.
+ * setGun(even, 1.0) → xMax * 1.0 = 4095.
+ * setGun(odd, 0.0) → yMax * (1.0-0.0) = 4095.
+ */
+static void test_processPacket_cmd_read_lightgun_two_guns(void)
+{
+    TEST_BEGIN(test_processPacket_cmd_read_lightgun_two_guns);
+
+    JVSIO io = make_test_io();  /* gunChannels=2, 12-bit, restBits=4 */
+    io.deviceID = 0x01;
+    /* Gun 1: left/top corner → X=0, Y=0 */
+    setGun(&io, 0, 0.0);  /* channel[0] = 0    */
+    setGun(&io, 1, 1.0);  /* channel[1] = (1.0-1.0)*4095 = 0 */
+    /* Gun 2: right/bottom corner → X=4095, Y=4095 */
+    setGun(&io, 2, 1.0);  /* channel[2] = 4095 */
+    setGun(&io, 3, 0.0);  /* channel[3] = (1.0-0.0)*4095 = 4095 */
+
+    int sv[2];
+    int afd = open_test_socket(sv);
+    ASSERT(afd >= 0, "socketpair");
+
+    unsigned char cmd[] = {CMD_READ_LIGHTGUN, 0x02};
+    run_processPacket(&io, afd, 0x01, cmd, 2);
+
+    JVSResponse r = jvs_read_response(afd);
+    ASSERT(r.valid == 1, "response valid");
+    ASSERT_EQ_INT(r.data[1], REPORT_SUCCESS, "REPORT_SUCCESS");
+    /* Gun 1 X=0: 0<<4=0 */
+    ASSERT_EQ_INT(r.data[2], 0x00, "gun1 X high = 0x00");
+    ASSERT_EQ_INT(r.data[3], 0x00, "gun1 X low = 0x00");
+    /* Gun 1 Y=0: 0<<4=0 */
+    ASSERT_EQ_INT(r.data[4], 0x00, "gun1 Y high = 0x00");
+    ASSERT_EQ_INT(r.data[5], 0x00, "gun1 Y low = 0x00");
+    /* Gun 2 X=4095: 4095<<4 = 65520 = 0xFFF0 */
+    ASSERT_EQ_INT(r.data[6], 0xFF, "gun2 X high = 0xFF");
+    ASSERT_EQ_INT(r.data[7], 0xF0, "gun2 X low = 0xF0");
+    /* Gun 2 Y=4095: 4095<<4 = 65520 = 0xFFF0 */
+    ASSERT_EQ_INT(r.data[8], 0xFF, "gun2 Y high = 0xFF");
+    ASSERT_EQ_INT(r.data[9], 0xF0, "gun2 Y low = 0xF0");
+
+    close(sv[0]); close(sv[1]); serialIO = -1;
+    TEST_PASS();
+}
+
+/*
+ * CMD_DECREASE_COINS underflow protection: decreasing by more than the current
+ * count must clamp the count to zero, not underflow to a negative value.
+ */
+static void test_processPacket_cmd_decrease_coins_underflow_clamp(void)
+{
+    TEST_BEGIN(test_processPacket_cmd_decrease_coins_underflow_clamp);
+
+    JVSIO io = make_test_io();
+    io.deviceID = 0x01;
+    io.state.coinCount[0] = 3;
+
+    int sv[2];
+    int afd = open_test_socket(sv);
+    ASSERT(afd >= 0, "socketpair");
+
+    /* Slot 1, decrement 10 (0x000A) — more than the current count of 3 */
+    unsigned char cmd[] = {CMD_DECREASE_COINS, 0x01, 0x00, 0x0A};
+    JVSStatus s = run_processPacket(&io, afd, 0x01, cmd, 4);
+    ASSERT(s == JVS_STATUS_SUCCESS, "CMD_DECREASE_COINS SUCCESS");
+    ASSERT_EQ_INT(io.state.coinCount[0], 0, "coin count clamped to 0, not negative");
+
+    JVSResponse r = jvs_read_response(afd);
+    ASSERT(r.valid == 1, "response valid");
+    ASSERT_EQ_INT(r.data[1], REPORT_SUCCESS, "REPORT_SUCCESS");
+
+    close(sv[0]); close(sv[1]); serialIO = -1;
+    TEST_PASS();
+}
+
+/*
+ * CMD_WRITE_COINS overflow protection: adding coins beyond 16383 must clamp
+ * the count to 16383, not overflow.
+ */
+static void test_processPacket_cmd_write_coins_overflow_clamp(void)
+{
+    TEST_BEGIN(test_processPacket_cmd_write_coins_overflow_clamp);
+
+    JVSIO io = make_test_io();
+    io.deviceID = 0x01;
+    io.state.coinCount[0] = 16380;
+
+    int sv[2];
+    int afd = open_test_socket(sv);
+    ASSERT(afd >= 0, "socketpair");
+
+    /* Slot 1, increment 100 (0x0064) — would overflow 16383 */
+    unsigned char cmd[] = {CMD_WRITE_COINS, 0x01, 0x00, 0x64};
+    JVSStatus s = run_processPacket(&io, afd, 0x01, cmd, 4);
+    ASSERT(s == JVS_STATUS_SUCCESS, "CMD_WRITE_COINS SUCCESS");
+    ASSERT_EQ_INT(io.state.coinCount[0], 16383, "coin count clamped at 16383");
+
+    JVSResponse r = jvs_read_response(afd);
+    ASSERT(r.valid == 1, "response valid");
+    ASSERT_EQ_INT(r.data[1], REPORT_SUCCESS, "REPORT_SUCCESS");
+
+    close(sv[0]); close(sv[1]); serialIO = -1;
+    TEST_PASS();
+}
+
+/*
+ * CMD_NAMCO_SPECIFIC sub-command 0x18 (Triforce ID check):
+ * followed by 4 data bytes, must return REPORT_SUCCESS + 0xFF.
+ */
+static void test_processPacket_namco_specific_18(void)
+{
+    TEST_BEGIN(test_processPacket_namco_specific_18);
+
+    JVSIO io = make_test_io();
+    io.deviceID = 0x01;
+    int sv[2];
+    int afd = open_test_socket(sv);
+    ASSERT(afd >= 0, "socketpair");
+
+    /* Sub-command 0x18 followed by 4 data bytes */
+    unsigned char cmd[] = {CMD_NAMCO_SPECIFIC, 0x18, 0x01, 0x02, 0x03, 0x04};
+    JVSStatus s = run_processPacket(&io, afd, 0x01, cmd, 6);
+    ASSERT(s == JVS_STATUS_SUCCESS, "CMD_NAMCO_SPECIFIC 0x18 SUCCESS");
+
+    JVSResponse r = jvs_read_response(afd);
+    ASSERT(r.valid == 1, "response valid");
+    ASSERT_EQ_INT(r.data[0], STATUS_SUCCESS,  "STATUS_SUCCESS");
+    ASSERT_EQ_INT(r.data[1], REPORT_SUCCESS,  "REPORT_SUCCESS");
+    ASSERT_EQ_INT(r.data[2], 0xFF, "Namco 0x18 response byte = 0xFF");
 
     close(sv[0]); close(sv[1]); serialIO = -1;
     TEST_PASS();
@@ -2684,6 +3059,19 @@ static const TestFn tests[] = {
     test_processPacket_namco_specific_04,
     test_processPacket_unsupported_command,
     test_processPacket_cmd_remaining_payout_two_slots,
+    /* Additional command coverage */
+    test_processPacket_cmd_set_comms_mode,
+    test_processPacket_cmd_read_keypad,
+    test_processPacket_cmd_write_gpo_bit,
+    test_processPacket_cmd_write_analog,
+    test_processPacket_cmd_write_display,
+    test_processPacket_cmd_subtract_payout,
+    test_processPacket_cmd_read_analogs_16bit,
+    test_processPacket_cmd_read_lightgun_y_channel,
+    test_processPacket_cmd_read_lightgun_two_guns,
+    test_processPacket_cmd_decrease_coins_underflow_clamp,
+    test_processPacket_cmd_write_coins_overflow_clamp,
+    test_processPacket_namco_specific_18,
 };
 
 int main(void)
