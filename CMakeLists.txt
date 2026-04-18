@@ -14,7 +14,7 @@ find_package(PkgConfig REQUIRED)
 pkg_check_modules(LIBGPIOD REQUIRED libgpiod)
 
 # Append "-dev" to the version string when DEV_BUILD is enabled
-option(DEV_BUILD "Append -dev suffix to the version string" OFF)
+option(DEV_BUILD "Append -dev suffix to the version string" ON)
 if(DEV_BUILD)
     set(PROJECT_VERSION_SUFFIX "-dev")
     message(STATUS "Dev build: version suffix set to -dev")
