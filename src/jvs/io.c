@@ -29,6 +29,11 @@ int initIO(JVSIO *io)
 	for (int player = 0; player < maxCoins; player++)
 		io->state.coinCount[player] = 0;
 
+	int maxGun = io->capabilities.gunChannels * 2;
+	if (maxGun > JVS_MAX_STATE_SIZE) maxGun = JVS_MAX_STATE_SIZE;
+	for (int gunChannels = 0; gunChannels < maxGun; gunChannels++)
+		io->state.gunChannel[gunChannels] = 0;
+
 	/* Compute the maximum representable value for each channel type.
 	 * Use integer bit-shifts instead of pow() to keep this as pure integer
 	 * arithmetic.  Guard against bits == 0 (would produce max == 0, silently

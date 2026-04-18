@@ -322,6 +322,10 @@ static void test_initIO_zeros_state(void)
     ASSERT(io.analogueMax == 1023, "analogueMax for 10-bit");
     ASSERT(io.gunXMax     == 4095, "gunXMax for 12-bit");
     ASSERT(io.gunYMax     == 4095, "gunYMax for 12-bit");
+    ASSERT(io.state.gunChannel[0] == 0, "gun channel 0 should be 0");
+    ASSERT(io.state.gunChannel[1] == 0, "gun channel 1 should be 0");
+    ASSERT(io.state.gunChannel[2] == 0, "gun channel 2 should be 0");
+    ASSERT(io.state.gunChannel[3] == 0, "gun channel 3 should be 0");
     TEST_PASS();
 }
 
