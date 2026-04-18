@@ -529,6 +529,27 @@ static void test_setAnalogue_all_channels(void)
     TEST_PASS();
 }
 
+/*
+ * setAnalogue must clamp values outside [0.0, 1.0] rather than writing a
+ * negative channel value or one exceeding analogueMax.
+ */
+static void test_setAnalogue_value_clamping(void)
+{
+    TEST_BEGIN(test_setAnalogue_value_clamping);
+    JVSIO io = make_test_io();  /* analogueInBits=10, analogueMax=1023 */
+
+    /* Value above 1.0 clamps to 1.0 → stored as analogueMax */
+    int r = setAnalogue(&io, ANALOGUE_1, 2.0);
+    ASSERT(r == 1, "setAnalogue returns 1 for clamped value");
+    ASSERT_EQ_INT(io.state.analogueChannel[0], 1023, "value > 1.0 clamped to analogueMax");
+
+    /* Value below 0.0 clamps to 0.0 → stored as 0 */
+    setAnalogue(&io, ANALOGUE_1, -0.5);
+    ASSERT_EQ_INT(io.state.analogueChannel[0], 0, "value < 0.0 clamped to 0");
+
+    TEST_PASS();
+}
+
 static void test_setGun_x_channel(void)
 {
     TEST_BEGIN(test_setGun_x_channel);
@@ -579,6 +600,39 @@ static void test_setGun_out_of_range(void)
     TEST_PASS();
 }
 
+/*
+ * setGun must clamp values outside [0.0, 1.0] to the boundary rather than
+ * producing out-of-range channel data.
+ *   X channel (even): stored as value * gunXMax → >1.0 clamps to gunXMax,
+ *                                                   <0.0 clamps to 0.
+ *   Y channel (odd):  stored as (1-value) * gunYMax → value>1.0 → stored 0,
+ *                                                       value<0.0 → stored gunYMax.
+ */
+static void test_setGun_value_clamping(void)
+{
+    TEST_BEGIN(test_setGun_value_clamping);
+    JVSIO io = make_test_io();  /* gunXBits=12, gunYBits=12 → max=4095 */
+
+    /* X: value > 1.0 clamps to 1.0 → stored as gunXMax */
+    int r = setGun(&io, 0, 5.0);
+    ASSERT(r == 1, "setGun returns 1 for clamped X");
+    ASSERT_EQ_INT(io.state.gunChannel[0], 4095, "X value > 1.0 clamped to gunXMax");
+
+    /* X: value < 0.0 clamps to 0.0 → stored as 0 */
+    setGun(&io, 0, -1.0);
+    ASSERT_EQ_INT(io.state.gunChannel[0], 0, "X value < 0.0 clamped to 0");
+
+    /* Y: value > 1.0 clamps to 1.0 → stored as (1-1)*gunYMax = 0 */
+    setGun(&io, 1, 5.0);
+    ASSERT_EQ_INT(io.state.gunChannel[1], 0, "Y value > 1.0 clamped: stored as 0");
+
+    /* Y: value < 0.0 clamps to 0.0 → stored as (1-0)*gunYMax = 4095 */
+    setGun(&io, 1, -1.0);
+    ASSERT_EQ_INT(io.state.gunChannel[1], 4095, "Y value < 0.0 clamped: stored as gunYMax");
+
+    TEST_PASS();
+}
+
 static void test_setRotary_getRotary_roundtrip(void)
 {
     TEST_BEGIN(test_setRotary_getRotary_roundtrip);
@@ -601,6 +655,63 @@ static void test_setRotary_out_of_range(void)
     int r = setRotary(&io, ROTARY_3, 999);
     ASSERT_EQ_INT(r, 0, "channel 2 out of range");
     ASSERT_EQ_INT(getRotary(&io, ROTARY_3), 0, "getRotary out-of-range returns 0");
+    TEST_PASS();
+}
+
+/* -- incrementRotary tests ------------------------------------------------- */
+
+/* Basic accumulation: increment twice, values must sum */
+static void test_incrementRotary_basic(void)
+{
+    TEST_BEGIN(test_incrementRotary_basic);
+    JVSIO io = make_test_io();  /* rotaryChannels=2 */
+
+    int r = incrementRotary(&io, ROTARY_1, 100);
+    ASSERT(r == 1, "incrementRotary returns 1");
+    ASSERT_EQ_INT(getRotary(&io, ROTARY_1), 100, "rotary after first increment");
+
+    incrementRotary(&io, ROTARY_1, 50);
+    ASSERT_EQ_INT(getRotary(&io, ROTARY_1), 150, "rotary after second increment");
+
+    TEST_PASS();
+}
+
+/* Negative delta subtracts from the accumulated value */
+static void test_incrementRotary_negative_delta(void)
+{
+    TEST_BEGIN(test_incrementRotary_negative_delta);
+    JVSIO io = make_test_io();
+
+    setRotary(&io, ROTARY_1, 500);
+    incrementRotary(&io, ROTARY_1, -200);
+    ASSERT_EQ_INT(getRotary(&io, ROTARY_1), 300, "rotary after negative delta");
+
+    TEST_PASS();
+}
+
+/* Out-of-range channel (ROTARY_3=2, but rotaryChannels=2) must return 0 */
+static void test_incrementRotary_out_of_range(void)
+{
+    TEST_BEGIN(test_incrementRotary_out_of_range);
+    JVSIO io = make_test_io();  /* rotaryChannels=2 → valid: ROTARY_1, ROTARY_2 */
+
+    int r = incrementRotary(&io, ROTARY_3, 10);
+    ASSERT_EQ_INT(r, 0, "incrementRotary out-of-range returns 0");
+    /* Value must remain 0 (untouched) */
+    ASSERT_EQ_INT(getRotary(&io, ROTARY_3), 0, "out-of-range channel value unchanged");
+
+    TEST_PASS();
+}
+
+/* Negative channel index (cast from -1) must be rejected */
+static void test_incrementRotary_negative_channel(void)
+{
+    TEST_BEGIN(test_incrementRotary_negative_channel);
+    JVSIO io = make_test_io();
+
+    int r = incrementRotary(&io, (JVSInput)-1, 50);
+    ASSERT_EQ_INT(r, 0, "incrementRotary with channel -1 must return 0");
+
     TEST_PASS();
 }
 
@@ -812,6 +923,57 @@ static void test_parseConfig_file_not_found(void)
     TEST_PASS();
 }
 
+/*
+ * EMULATE_SECOND must store the second-IO capability profile name so that
+ * the daemon can load a second emulated IO board alongside the primary one.
+ */
+static void test_parseConfig_emulate_second(void)
+{
+    TEST_BEGIN(test_parseConfig_emulate_second);
+
+    const char *path = "/tmp/mjtest_emul2.conf";
+    FILE *f = fopen(path, "w");
+    ASSERT(f != NULL, "create temp config file");
+    fprintf(f, "EMULATE_SECOND namco-FCA1\n");
+    fclose(f);
+
+    JVSConfig cfg;
+    getDefaultConfig(&cfg);
+    JVSConfigStatus s = parseConfig((char *)path, &cfg);
+    ASSERT(s == JVS_CONFIG_STATUS_SUCCESS, "parseConfig SUCCESS");
+    ASSERT(strcmp(cfg.secondCapabilitiesPath, "namco-FCA1") == 0,
+           "secondCapabilitiesPath set correctly");
+
+    unlink(path);
+    TEST_PASS();
+}
+
+/*
+ * An invalid (non-numeric) value for an integer key must not change the
+ * existing field – the parser should keep the default/previous value.
+ */
+static void test_parseConfig_invalid_int_fallback(void)
+{
+    TEST_BEGIN(test_parseConfig_invalid_int_fallback);
+
+    const char *path = "/tmp/mjtest_invalid_int.conf";
+    FILE *f = fopen(path, "w");
+    ASSERT(f != NULL, "create temp config file");
+    fprintf(f, "DEBUG_MODE notanumber\n");
+    fclose(f);
+
+    JVSConfig cfg;
+    getDefaultConfig(&cfg);
+    int default_level = cfg.debugLevel;
+    parseConfig((char *)path, &cfg);
+    /* The invalid token must not corrupt the field */
+    ASSERT_EQ_INT(cfg.debugLevel, default_level,
+                  "invalid integer token keeps the fallback/default value");
+
+    unlink(path);
+    TEST_PASS();
+}
+
 static void test_parseConfig_comments_and_blanks(void)
 {
     TEST_BEGIN(test_parseConfig_comments_and_blanks);
@@ -1009,6 +1171,90 @@ static void test_debug_level_filtering(void)
  * ─────────────────────── JVS PACKET FRAMING TESTS ─────────────────────────
  * (uses a pipe: test writes wire bytes → readPacket() reads them)
  * ========================================================================= */
+
+/*
+ * A packet whose length byte is 0x00 is always malformed (the length field
+ * counts the following bytes including the checksum, so the minimum valid
+ * value is 1).  readPacket() must return JVS_STATUS_ERROR_CHECKSUM immediately
+ * rather than accepting the malformed frame.
+ */
+static void test_readPacket_zero_length(void)
+{
+    TEST_BEGIN(test_readPacket_zero_length);
+
+    /* Raw wire bytes: SYNC(E0) + dest(01) + length(00) + garbage(01) */
+    unsigned char stream[] = {0xE0, 0x01, 0x00, 0x01};
+    int fds[2];
+    ASSERT(pipe(fds) == 0, "pipe");
+    serialIO = fds[0];
+    write(fds[1], stream, sizeof(stream));
+
+    JVSPacket pkt;
+    memset(&pkt, 0, sizeof(pkt));
+    JVSStatus s = readPacket(&pkt);
+    ASSERT(s == JVS_STATUS_ERROR_CHECKSUM, "zero-length packet → ERROR_CHECKSUM");
+
+    close(fds[0]);
+    close(fds[1]);
+    serialIO = -1;
+    TEST_PASS();
+}
+
+/*
+ * resetPacketParser() must discard any partial receive state accumulated by a
+ * preceding incomplete/timed-out readPacket() call so that the next
+ * well-formed packet decodes cleanly.
+ *
+ * Sequence:
+ *   1. Feed a partial packet (SYNC + dest + length=5 + 2 data bytes) then
+ *      close the write end → EOF causes readPacket() to time-out with the
+ *      parser in phase 2.
+ *   2. Call resetPacketParser() to wipe the stale state.
+ *   3. Open a fresh pipe, write a complete valid packet.
+ *   4. readPacket() must succeed and decode the correct content.
+ */
+static void test_resetPacketParser_clears_stale_state(void)
+{
+    TEST_BEGIN(test_resetPacketParser_clears_stale_state);
+
+    /* Step 1: partial packet – SYNC + dest=0x01 + length=5 (claims 4 data bytes,
+     * but we only provide 2) before EOF. */
+    int fds1[2];
+    ASSERT(pipe(fds1) == 0, "pipe 1");
+    serialIO = fds1[0];
+    unsigned char partial[] = {0xE0, 0x01, 0x05, 0xAA, 0xBB};
+    write(fds1[1], partial, sizeof(partial));
+    close(fds1[1]);  /* EOF on write end → readBytes returns -1 */
+
+    JVSPacket pkt;
+    memset(&pkt, 0, sizeof(pkt));
+    JVSStatus s1 = readPacket(&pkt);
+    ASSERT(s1 == JVS_STATUS_ERROR_TIMEOUT, "incomplete packet → timeout");
+    close(fds1[0]);
+
+    /* Step 2: reset the parser – must clear rxPhase / rxDataIndex / etc. */
+    resetPacketParser();
+
+    /* Step 3: fresh pipe with a complete, valid packet (CMD_REQUEST_ID) */
+    unsigned char data[] = {0x10};
+    unsigned char wire[32];
+    int wlen = jvs_build_wire(wire, 0x01, data, 1);
+    int fds2[2];
+    ASSERT(pipe(fds2) == 0, "pipe 2");
+    serialIO = fds2[0];
+    write(fds2[1], wire, wlen);
+
+    memset(&pkt, 0, sizeof(pkt));
+    JVSStatus s2 = readPacket(&pkt);
+    ASSERT(s2 == JVS_STATUS_SUCCESS, "valid packet after resetPacketParser → SUCCESS");
+    ASSERT_EQ_INT(pkt.destination, 0x01, "destination correct");
+    ASSERT_EQ_INT(pkt.data[0], 0x10, "data byte correct (CMD_REQUEST_ID)");
+
+    close(fds2[0]);
+    close(fds2[1]);
+    serialIO = -1;
+    TEST_PASS();
+}
 
 static void test_readPacket_valid(void)
 {
@@ -1430,6 +1676,39 @@ static void test_processPacket_cmd_assign_addr(void)
     ASSERT_EQ_INT(r.dest, BUS_MASTER, "response to bus master");
     ASSERT_EQ_INT(r.data[0], STATUS_SUCCESS,  "STATUS_SUCCESS");
     ASSERT_EQ_INT(r.data[1], REPORT_SUCCESS,  "REPORT_SUCCESS");
+
+    close(sv[0]); close(sv[1]); serialIO = -1;
+    TEST_PASS();
+}
+
+/*
+ * When every IO in the chain already has an address assigned and the arcade
+ * board re-sends CMD_ASSIGN_ADDR (e.g. without an intervening CMD_RESET),
+ * the emulator must acknowledge with REPORT_SUCCESS but must NOT overwrite the
+ * existing address.
+ */
+static void test_processPacket_cmd_assign_addr_all_assigned(void)
+{
+    TEST_BEGIN(test_processPacket_cmd_assign_addr_all_assigned);
+
+    JVSIO io = make_test_io();
+    io.deviceID = 0x01;  /* already assigned */
+
+    int sv[2];
+    int afd = open_test_socket(sv);
+    ASSERT(afd >= 0, "socketpair");
+
+    /* Try to assign a different address to an already-assigned single-device chain */
+    unsigned char cmd[] = {CMD_ASSIGN_ADDR, 0x02};
+    JVSStatus s = run_processPacket(&io, afd, BROADCAST, cmd, 2);
+    ASSERT(s == JVS_STATUS_SUCCESS, "CMD_ASSIGN_ADDR still returns SUCCESS");
+
+    /* Existing address must not be overwritten */
+    ASSERT_EQ_INT(io.deviceID, 0x01, "deviceID unchanged after re-assign attempt");
+
+    JVSResponse r = jvs_read_response(afd);
+    ASSERT(r.valid == 1, "response valid");
+    ASSERT_EQ_INT(r.data[1], REPORT_SUCCESS, "REPORT_SUCCESS");
 
     close(sv[0]); close(sv[1]); serialIO = -1;
     TEST_PASS();
@@ -2524,6 +2803,117 @@ static void test_initIO_oversized_capabilities(void)
 }
 
 /**
+ * initIO must set analogueMax to 0 when analogueInBits is 0 (invalid).
+ * The intent is to prevent undefined-behaviour shifts and zero the channel output.
+ */
+static void test_initIO_zero_analogue_bits(void)
+{
+    TEST_BEGIN(test_initIO_zero_analogue_bits);
+
+    JVSIO io;
+    memset(&io, 0, sizeof(io));
+    io.capabilities.analogueInChannels = 2;
+    io.capabilities.analogueInBits     = 0;  /* invalid: guard should yield max=0 */
+
+    int r = initIO(&io);
+    ASSERT(r == 1, "initIO returns 1");
+    ASSERT_EQ_INT(io.analogueMax, 0, "analogueMax = 0 for 0-bit analogue");
+
+    TEST_PASS();
+}
+
+/**
+ * initIO must set analogueMax to 0 when analogueInBits > 16 (shift would be UB).
+ */
+static void test_initIO_oversized_analogue_bits(void)
+{
+    TEST_BEGIN(test_initIO_oversized_analogue_bits);
+
+    JVSIO io;
+    memset(&io, 0, sizeof(io));
+    io.capabilities.analogueInChannels = 2;
+    io.capabilities.analogueInBits     = 17;  /* > 16: guard should yield max=0 */
+
+    int r = initIO(&io);
+    ASSERT(r == 1, "initIO returns 1");
+    ASSERT_EQ_INT(io.analogueMax, 0, "analogueMax = 0 for 17-bit analogue");
+
+    TEST_PASS();
+}
+
+/**
+ * When rightAlignBits == 1, initJVS must leave analogueRestBits /
+ * gunXRestBits / gunYRestBits at zero rather than computing (16 - bits).
+ * This allows IO board files that want right-aligned (raw) output to opt
+ * out of the automatic left-shift.
+ */
+static void test_initJVS_right_align_bits(void)
+{
+    TEST_BEGIN(test_initJVS_right_align_bits);
+
+    JVSIO io;
+    memset(&io, 0, sizeof(io));
+    io.capabilities.analogueInBits = 10;
+    io.capabilities.gunXBits       = 12;
+    io.capabilities.gunYBits       = 12;
+    io.capabilities.rightAlignBits = 1;  /* skip rest-bit computation */
+    io.chainedIO = NULL;
+    initIO(&io);
+    initJVS(&io);  /* must NOT overwrite the zero rest bits */
+
+    ASSERT_EQ_INT(io.analogueRestBits, 0, "rightAlignBits=1: analogueRestBits stays 0");
+    ASSERT_EQ_INT(io.gunXRestBits,     0, "rightAlignBits=1: gunXRestBits stays 0");
+    ASSERT_EQ_INT(io.gunYRestBits,     0, "rightAlignBits=1: gunYRestBits stays 0");
+
+    TEST_PASS();
+}
+
+/**
+ * initJVS must propagate the correct analogueRestBits / gunXRestBits /
+ * gunYRestBits to every IO in the chain, not only the primary IO.
+ *
+ * This is the bug-fix regression test for the chained-IO restBits omission
+ * where the second IO kept 0 restBits regardless of its bit-depth.
+ */
+static void test_initJVS_chained_io_rest_bits(void)
+{
+    TEST_BEGIN(test_initJVS_chained_io_rest_bits);
+
+    JVSIO io1, io2;
+    memset(&io1, 0, sizeof(io1));
+    memset(&io2, 0, sizeof(io2));
+
+    /* io1: 10-bit analogue, 12-bit gun */
+    io1.capabilities.analogueInBits = 10;
+    io1.capabilities.gunXBits       = 12;
+    io1.capabilities.gunYBits       = 12;
+    io1.capabilities.rightAlignBits = 0;
+
+    /* io2: 12-bit analogue, 10-bit gun — different depths to detect mix-ups */
+    io2.capabilities.analogueInBits = 12;
+    io2.capabilities.gunXBits       = 10;
+    io2.capabilities.gunYBits       = 10;
+    io2.capabilities.rightAlignBits = 0;
+    io2.chainedIO = NULL;
+
+    io1.chainedIO = &io2;
+
+    initIO(&io1);
+    initIO(&io2);
+    initJVS(&io1);  /* must walk the chain and set restBits on io2 too */
+
+    ASSERT_EQ_INT(io1.analogueRestBits, 6,  "io1: 16-10 = 6");
+    ASSERT_EQ_INT(io1.gunXRestBits,     4,  "io1: 16-12 = 4");
+    ASSERT_EQ_INT(io1.gunYRestBits,     4,  "io1: 16-12 = 4");
+
+    ASSERT_EQ_INT(io2.analogueRestBits, 4,  "io2: 16-12 = 4");
+    ASSERT_EQ_INT(io2.gunXRestBits,     6,  "io2: 16-10 = 6");
+    ASSERT_EQ_INT(io2.gunYRestBits,     6,  "io2: 16-10 = 6");
+
+    TEST_PASS();
+}
+
+/**
  * Verify that CMD_RESET resets all IOs in a chained setup.
  *
  * This exercises the bug-fix that iterates the full chain and clears every
@@ -2954,6 +3344,84 @@ static void test_processPacket_namco_specific_18(void)
     TEST_PASS();
 }
 
+/*
+ * An unrecognised Namco sub-command (not 0x01..0x04 or 0x18) must be handled
+ * gracefully: the enclosing CMD_NAMCO_SPECIFIC handler already emitted
+ * REPORT_SUCCESS before the sub-command switch, so the response must still
+ * carry STATUS_SUCCESS + REPORT_SUCCESS without crashing.
+ */
+static void test_processPacket_namco_specific_unknown(void)
+{
+    TEST_BEGIN(test_processPacket_namco_specific_unknown);
+
+    JVSIO io = make_test_io();
+    io.deviceID = 0x01;
+    int sv[2];
+    int afd = open_test_socket(sv);
+    ASSERT(afd >= 0, "socketpair");
+
+    /* Sub-command 0x99 is not implemented */
+    unsigned char cmd[] = {CMD_NAMCO_SPECIFIC, 0x99};
+    JVSStatus s = run_processPacket(&io, afd, 0x01, cmd, 2);
+    ASSERT(s == JVS_STATUS_SUCCESS, "unknown Namco sub-cmd still returns SUCCESS");
+
+    JVSResponse r = jvs_read_response(afd);
+    ASSERT(r.valid == 1, "response valid");
+    ASSERT_EQ_INT(r.data[0], STATUS_SUCCESS,  "STATUS_SUCCESS");
+    ASSERT_EQ_INT(r.data[1], REPORT_SUCCESS,  "REPORT_SUCCESS");
+
+    close(sv[0]); close(sv[1]); serialIO = -1;
+    TEST_PASS();
+}
+
+/*
+ * CMD_READ_LIGHTGUN requesting more guns than the IO board declares:
+ * the extra (undeclared) gun slots must be reported as X=0, Y=0 rather than
+ * emitting stale channel data or crashing.
+ *
+ * make_test_io() declares gunChannels=2.  Requesting 3 guns means gun 3
+ * (index 2) is beyond the declaration and must produce 0x0000 / 0x0000.
+ */
+static void test_processPacket_cmd_read_lightgun_extra_guns_zero(void)
+{
+    TEST_BEGIN(test_processPacket_cmd_read_lightgun_extra_guns_zero);
+
+    JVSIO io = make_test_io();  /* gunChannels=2, 12-bit, restBits=4 */
+    io.deviceID = 0x01;
+    /* Set known values for declared guns so the assertion is unambiguous */
+    setGun(&io, 0, 1.0);  /* gun1 X = 4095 */
+    setGun(&io, 1, 0.0);  /* gun1 Y = (1-0)*4095 = 4095 */
+    setGun(&io, 2, 1.0);  /* gun2 X = 4095 */
+    setGun(&io, 3, 0.0);  /* gun2 Y = 4095 */
+
+    int sv[2];
+    int afd = open_test_socket(sv);
+    ASSERT(afd >= 0, "socketpair");
+
+    /* Request 3 guns; only 2 are declared */
+    unsigned char cmd[] = {CMD_READ_LIGHTGUN, 0x03};
+    JVSStatus s = run_processPacket(&io, afd, 0x01, cmd, 2);
+    ASSERT(s == JVS_STATUS_SUCCESS, "SUCCESS even when more guns requested than declared");
+
+    JVSResponse r = jvs_read_response(afd);
+    ASSERT(r.valid == 1, "response valid");
+    ASSERT_EQ_INT(r.data[1], REPORT_SUCCESS, "REPORT_SUCCESS");
+    /* Gun 3 (index 2, beyond declared): both X and Y must be zero.
+     * Response byte layout:
+     *   [0] = STATUS_SUCCESS
+     *   [1] = REPORT_SUCCESS
+     *   [2..5]  = gun1 X_hi, X_lo, Y_hi, Y_lo
+     *   [6..9]  = gun2 X_hi, X_lo, Y_hi, Y_lo
+     *   [10..13] = gun3 X_hi, X_lo, Y_hi, Y_lo  (undeclared, must be 0) */
+    ASSERT_EQ_INT(r.data[10], 0x00, "gun3 X high = 0x00");
+    ASSERT_EQ_INT(r.data[11], 0x00, "gun3 X low = 0x00");
+    ASSERT_EQ_INT(r.data[12], 0x00, "gun3 Y high = 0x00");
+    ASSERT_EQ_INT(r.data[13], 0x00, "gun3 Y low = 0x00");
+
+    close(sv[0]); close(sv[1]); serialIO = -1;
+    TEST_PASS();
+}
+
 /* =========================================================================
  * ───────────────────────────── MAIN RUNNER ────────────────────────────────
  * ========================================================================= */
@@ -2975,12 +3443,18 @@ static const TestFn tests[] = {
     test_setAnalogue_full_scale,
     test_setAnalogue_out_of_range_channel,
     test_setAnalogue_all_channels,
+    test_setAnalogue_value_clamping,
     test_setGun_x_channel,
     test_setGun_y_channel_inverted,
     test_setGun_gun2,
     test_setGun_out_of_range,
+    test_setGun_value_clamping,
     test_setRotary_getRotary_roundtrip,
     test_setRotary_out_of_range,
+    test_incrementRotary_basic,
+    test_incrementRotary_negative_delta,
+    test_incrementRotary_out_of_range,
+    test_incrementRotary_negative_channel,
     test_jvsInputFromString_known,
     test_jvsInputFromString_unknown,
     test_jvsPlayerFromString_known,
@@ -2991,12 +3465,18 @@ static const TestFn tests[] = {
     test_setGun_negative_channel,
     test_setRotary_negative_channel,
     test_incrementCoin_cap_at_16383,
-    /* initIO bounds clamping (branch bug-fix) */
+    /* initIO and initJVS capability / bit-depth tests */
     test_initIO_oversized_capabilities,
+    test_initIO_zero_analogue_bits,
+    test_initIO_oversized_analogue_bits,
+    test_initJVS_right_align_bits,
+    test_initJVS_chained_io_rest_bits,
     /* Config parsing */
     test_getDefaultConfig,
     test_parseConfig_valid_file,
     test_parseConfig_file_not_found,
+    test_parseConfig_emulate_second,
+    test_parseConfig_invalid_int_fallback,
     test_parseConfig_comments_and_blanks,
     test_parseConfig_deadzone_clamping,
     test_parseConfig_wii_ir_scale_clamping,
@@ -3011,6 +3491,8 @@ static const TestFn tests[] = {
     test_debug_getLevel,
     test_debug_level_filtering,
     /* JVS packet framing */
+    test_readPacket_zero_length,
+    test_resetPacketParser_clears_stale_state,
     test_readPacket_valid,
     test_readPacket_checksum_error,
     test_readPacket_escape_bytes,
@@ -3028,6 +3510,7 @@ static const TestFn tests[] = {
     test_processPacket_cmd_reset,
     test_processPacket_cmd_reset_chained_io,
     test_processPacket_cmd_assign_addr,
+    test_processPacket_cmd_assign_addr_all_assigned,
     test_processPacket_cmd_request_id,
     test_processPacket_cmd_command_version,
     test_processPacket_cmd_jvs_version,
@@ -3069,9 +3552,11 @@ static const TestFn tests[] = {
     test_processPacket_cmd_read_analogs_16bit,
     test_processPacket_cmd_read_lightgun_y_channel,
     test_processPacket_cmd_read_lightgun_two_guns,
+    test_processPacket_cmd_read_lightgun_extra_guns_zero,
     test_processPacket_cmd_decrease_coins_underflow_clamp,
     test_processPacket_cmd_write_coins_overflow_clamp,
     test_processPacket_namco_specific_18,
+    test_processPacket_namco_specific_unknown,
 };
 
 int main(void)
