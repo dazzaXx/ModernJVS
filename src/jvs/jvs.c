@@ -912,12 +912,19 @@ JVSStatus processPacket(JVSIO *jvsIO)
 			debug(1, "CMD_WRITE_DISPLAY - Writing %d×%d display data\n", cols, rows);
 			/* JVS spec: cmd(1) + cols(1) + rows(1) + encoding(1) + data(cols×rows) */
 			size = 4 + cols * rows;
-			/* Warn when the computed size would skip past the end of the packet, which
-			 * would cause all remaining commands in this packet to be silently dropped. */
-			if (index + size > (int)inputPacket.length - 1)
+			/* cols and rows are each up to 255, so cols*rows can reach 65025,
+			 * far exceeding JVS_MAX_PACKET_SIZE.  Clamp size to the remaining
+			 * available packet bytes so that subsequent commands in the same
+			 * packet are not silently skipped when the display data is large or
+			 * the packet is truncated. */
+			int maxSize = (int)inputPacket.length - 1 - index;
+			if (maxSize < 1)
+				maxSize = 1; /* always advance by at least 1 to avoid an infinite loop */
+			if (size > maxSize)
 			{
-				debug(0, "Warning: CMD_WRITE_DISPLAY - %d×%d data (%d bytes) exceeds remaining packet length; remaining commands in this packet will be skipped\n",
-				      cols, rows, size);
+				debug(0, "Warning: CMD_WRITE_DISPLAY - %d×%d data (%d bytes) exceeds remaining packet length (%d bytes); clamping\n",
+				      cols, rows, size, maxSize);
+				size = maxSize;
 			}
 			CHECK_OUTPUT_SPACE(&outputPacket, 1);
 			outputPacket.data[outputPacket.length++] = REPORT_SUCCESS;

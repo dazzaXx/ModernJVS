@@ -215,23 +215,30 @@ static void *wiiDeviceThread(void *_args)
                     event.code != 18 && event.code != 19)
                     continue;
 
-                bool outOfBounds = true;
+                /* The hid-wiimote driver emits four EV_ABS events per IR frame
+                 * (codes 16-19).  Accumulate each coordinate update and only
+                 * recompute the gun position after the last axis (code 19 = y1)
+                 * has arrived.  Without this, the outOfBounds logic would fire
+                 * on every intermediate event, causing the game to see the gun
+                 * as off-screen 3 out of 4 times per frame and missing shots. */
                 switch (event.code)
                 {
                 case 16:
                     x0 = event.value;
-                    break;
+                    continue;
                 case 17:
                     y0 = event.value;
-                    break;
+                    continue;
                 case 18:
                     x1 = event.value;
-                    break;
+                    continue;
                 case 19:
                     y1 = event.value;
                     break;
                 }
 
+                /* All four IR axes are now up-to-date — compute position. */
+                bool outOfBounds = true;
                 if ((x0 != 1023) && (x1 != 1023) && (y0 != 1023) && (y1 != 1023))
                 {
                     /* Set screen in player 1 */
