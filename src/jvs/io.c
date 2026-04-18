@@ -32,19 +32,20 @@ int initIO(JVSIO *io)
 	/* Compute the maximum representable value for each channel type.
 	 * Use integer bit-shifts instead of pow() to keep this as pure integer
 	 * arithmetic.  Guard against bits == 0 (would produce max == 0, silently
-	 * zeroing all channel output) and bits > 15 (shift would be ≥ 16, which
-	 * is implementation-defined for a 16-bit int on C99). */
-	io->analogueMax = (io->capabilities.analogueInBits > 0 && io->capabilities.analogueInBits <= 15)
+	 * zeroing all channel output) and bits > 16 (shift would be > 16, which
+	 * is undefined behaviour on C99).  16 is the maximum supported by the JVS
+	 * wire format and is valid on the Raspberry Pi where int is 32-bit. */
+	io->analogueMax = (io->capabilities.analogueInBits > 0 && io->capabilities.analogueInBits <= 16)
 	                  ? (1 << io->capabilities.analogueInBits) - 1 : 0;
-	io->gunXMax     = (io->capabilities.gunXBits > 0 && io->capabilities.gunXBits <= 15)
+	io->gunXMax     = (io->capabilities.gunXBits > 0 && io->capabilities.gunXBits <= 16)
 	                  ? (1 << io->capabilities.gunXBits) - 1 : 0;
-	io->gunYMax     = (io->capabilities.gunYBits > 0 && io->capabilities.gunYBits <= 15)
+	io->gunYMax     = (io->capabilities.gunYBits > 0 && io->capabilities.gunYBits <= 16)
 	                  ? (1 << io->capabilities.gunYBits) - 1 : 0;
 
 	if (io->capabilities.analogueInChannels > 0 && io->analogueMax == 0)
-		debug(0, "Warning: analogueInBits is 0 or >15 — analogue output will be zeroed\n");
+		debug(0, "Warning: analogueInBits is 0 or >16 — analogue output will be zeroed\n");
 	if (io->capabilities.gunChannels > 0 && (io->gunXMax == 0 || io->gunYMax == 0))
-		debug(0, "Warning: gunXBits/gunYBits is 0 or >15 — lightgun output will be zeroed\n");
+		debug(0, "Warning: gunXBits/gunYBits is 0 or >16 — lightgun output will be zeroed\n");
 
 	pthread_mutex_init(&io->state_mutex, NULL);
 
