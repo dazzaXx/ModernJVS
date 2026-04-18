@@ -1,4 +1,4 @@
-# Version 6.0.0-dev - IN DEVELOPMENT - Code Refactoring, More Bugfixes and Optimizations
+# Version 6.0.0-dev - IN DEVELOPMENT & TESTING - Code Refactoring, More Bugfixes and Optimizations
 
 # ![ModernJVS](docs/modernjvs2.png)
 
