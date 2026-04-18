@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <fcntl.h>
 #include <signal.h>
 #include <string.h>
 #include <unistd.h>
@@ -42,7 +43,7 @@ static void writeTestModeState(int active)
     /* Write to a temporary file first, then atomically rename into place.
      * This ensures a WebUI reader polling the file never sees a torn (empty)
      * state between the open-truncate and the data write. */
-    int fd = open(TESTMODE_STATE_PATH_TMP, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    int fd = open(TESTMODE_STATE_PATH_TMP, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
     if (fd < 0)
     {
         debug(1, "Warning: Could not write test mode state file: %s\n", TESTMODE_STATE_PATH_TMP);

@@ -135,7 +135,7 @@ static void *wiiDeviceThread(void *_args)
 {
     MappingThreadArguments *args = (MappingThreadArguments *)_args;
 
-    int fd = open(args->devicePath, O_RDONLY);
+    int fd = open(args->devicePath, O_RDONLY | O_CLOEXEC);
     if (fd < 0)
     {
         debug(0, "Warning: Failed to open Wii Remote device '%s': %s\n", args->devicePath, strerror(errno));
@@ -324,7 +324,7 @@ static void *deviceThread(void *_args)
 {
     MappingThreadArguments *args = (MappingThreadArguments *)_args;
 
-    int fd = open(args->devicePath, O_RDONLY);
+    int fd = open(args->devicePath, O_RDONLY | O_CLOEXEC);
     if (fd < 0)
     {
         debug(0, "Critical: Failed to open device '%s': %s\n", args->devicePath, strerror(errno));
@@ -996,7 +996,7 @@ JVSInputStatus getInputs(DeviceList *deviceList)
         {
             if (aimtrakCount == 3)
             {
-                debug(0, "Warning: More than 3 Aimtrak devices detected; sub-device name cycling back to slot 0 — 4th+ device may conflict with the first\n");
+                debug(0, "Warning: 4 or more Aimtrak devices detected; sub-device name cycling back to slot 0 — 4th+ device may conflict with the first\n");
                 aimtrakCount = 0;
             }
             strncpy(dev->name, aimtrakRemap[aimtrakCount++], MAX_PATH - 1);
