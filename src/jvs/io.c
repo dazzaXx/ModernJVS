@@ -52,6 +52,12 @@ int initIO(JVSIO *io)
 	if (io->capabilities.gunChannels > 0 && (io->gunXMax == 0 || io->gunYMax == 0))
 		debug(0, "Warning: gunXBits/gunYBits is 0 or >16 — lightgun output will be zeroed\n");
 
+	/* Destroy any previous mutex before re-initialising.  POSIX states that
+	 * calling pthread_mutex_init on an already-initialised mutex without a
+	 * preceding pthread_mutex_destroy is undefined behaviour and leaks the
+	 * kernel resource on Linux.  The destroy is a no-op if the mutex was
+	 * never initialised (the struct is zero-initialised in main). */
+	pthread_mutex_destroy(&io->state_mutex);
 	pthread_mutex_init(&io->state_mutex, NULL);
 
 	return 1;
@@ -66,18 +72,12 @@ int setSwitch(JVSIO *io, JVSPlayer player, JVSInput switchNumber, int value)
 		return 0;
 	}
 
+	pthread_mutex_lock(&io->state_mutex);
 	if (value)
-	{
-		pthread_mutex_lock(&io->state_mutex);
 		io->state.inputSwitch[player] |= switchNumber;
-		pthread_mutex_unlock(&io->state_mutex);
-	}
 	else
-	{
-		pthread_mutex_lock(&io->state_mutex);
 		io->state.inputSwitch[player] &= ~switchNumber;
-		pthread_mutex_unlock(&io->state_mutex);
-	}
+	pthread_mutex_unlock(&io->state_mutex);
 
 	return 1;
 }

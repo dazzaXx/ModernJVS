@@ -3,6 +3,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <limits.h>
+#include <errno.h>
 
 #include "jvs/io.h"
 #include "console/debug.h"
@@ -50,11 +52,17 @@ static double clampDeadzone(double deadzone)
 static int parseConfigInt(const char *token, int fallback)
 {
     char *end;
+    errno = 0;
     long val = strtol(token, &end, 10);
     /* end must advance past at least one digit and reach NUL or whitespace */
     if (end == token || (*end != '\0' && *end != '\n' && *end != '\r'))
     {
         debug(0, "Warning: Config value '%s' is not a valid integer, using default %d\n", token, fallback);
+        return fallback;
+    }
+    if (errno == ERANGE || val > INT_MAX || val < INT_MIN)
+    {
+        debug(0, "Warning: Config value '%s' is out of int range, using default %d\n", token, fallback);
         return fallback;
     }
     return (int)val;

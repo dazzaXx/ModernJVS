@@ -555,6 +555,11 @@ static void *deviceThread(void *_args)
 
                 // Useful for mapping analogue buttons to digital buttons,
                 // for example the triggers on a gamepad.
+                // NOTE: When processMappings() stores a SWITCH-type mapping for an ABS axis,
+                // the output mapping is placed in key[code] (not abs[code]), matching the
+                // EV_KEY handler's layout.  abs[code].type is set to SWITCH as a type tag
+                // only; all payload fields (output, jvsPlayer, secondaryIO) must be read
+                // from key[code].  See processMappings() in input.c for the write side.
                 if (args->inputs.abs[event.code].type == SWITCH)
                 {
                     JVSIO *io = args->jvsIO;
@@ -911,7 +916,7 @@ JVSInputStatus getInputs(DeviceList *deviceList)
         snprintf(tempPath, sizeof(tempPath), "%s/%s", DEV_INPUT_EVENT, namelist[i]->d_name);
         free(namelist[i]);
 
-        int device = open(tempPath, O_RDONLY);
+        int device = open(tempPath, O_RDONLY | O_CLOEXEC);
         if (device < 0)
             continue;
 
@@ -989,10 +994,13 @@ JVSInputStatus getInputs(DeviceList *deviceList)
         // Assign the correct names for the aimtracks
         if (strcmp(dev->name, AIMTRAK_DEVICE_NAME) == 0)
         {
+            if (aimtrakCount == 3)
+            {
+                debug(0, "Warning: More than 3 Aimtrak devices detected; sub-device name cycling back to slot 0 — 4th+ device may conflict with the first\n");
+                aimtrakCount = 0;
+            }
             strncpy(dev->name, aimtrakRemap[aimtrakCount++], MAX_PATH - 1);
             dev->name[MAX_PATH - 1] = '\0';
-            if (aimtrakCount == 3)
-                aimtrakCount = 0;
         }
 
         // Attempt to work out the device type
