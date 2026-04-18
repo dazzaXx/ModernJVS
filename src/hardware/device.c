@@ -180,7 +180,8 @@ int flushDevice(void)
 
 int closeDevice(void)
 {
-  tcflush(serialIO, TCIOFLUSH);
+  if (tcflush(serialIO, TCIOFLUSH) != 0)
+    debug(1, "Warning: Failed to flush serial buffers on close: %s\n", strerror(errno));
   
 #ifdef GPIOD_API_V2
   // Clean up libgpiod v2 resources

@@ -175,6 +175,11 @@ int setAnalogue(JVSIO *io, JVSInput channel, double value)
 	if ((int)channel < 0 || channel >= io->capabilities.analogueInChannels ||
 	    (int)channel >= JVS_MAX_STATE_SIZE)
 		return 0;
+	/* Clamp to [0.0, 1.0] so a caller that passes an out-of-range value
+	 * cannot produce a negative channel value or one that exceeds analogueMax,
+	 * both of which would corrupt the JVS wire data. */
+	if (value < 0.0) value = 0.0;
+	else if (value > 1.0) value = 1.0;
 	pthread_mutex_lock(&io->state_mutex);
 	io->state.analogueChannel[channel] = (int)((double)value * (double)io->analogueMax);
 	pthread_mutex_unlock(&io->state_mutex);
@@ -190,6 +195,11 @@ int setGun(JVSIO *io, JVSInput channel, double value)
 	if ((int)channel < 0 || channel >= io->capabilities.gunChannels * 2 ||
 	    (int)channel >= JVS_MAX_STATE_SIZE)
 		return 0;
+
+	/* Clamp to [0.0, 1.0] so a caller that passes an out-of-range value
+	 * cannot produce a negative channel value or one that exceeds gunXMax/gunYMax. */
+	if (value < 0.0) value = 0.0;
+	else if (value > 1.0) value = 1.0;
 
 	pthread_mutex_lock(&io->state_mutex);
 	if (channel % 2 == 0)
