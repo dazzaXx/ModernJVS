@@ -1007,7 +1007,7 @@ JVSInputStatus getInputs(DeviceList *deviceList)
         {
             if (aimtrakCount == 3)
             {
-                debug(0, "Warning: 4 or more Aimtrak devices detected; sub-device name cycling back to slot 0 — 4th+ device may conflict with the first\n");
+                debug(0, "Warning: 4th Aimtrak device detected; cycling sub-device name back to slot 0 — this device may conflict with the first\n");
                 aimtrakCount = 0;
             }
             strncpy(dev->name, aimtrakRemap[aimtrakCount++], MAX_PATH - 1);

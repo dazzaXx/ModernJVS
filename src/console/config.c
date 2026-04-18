@@ -60,7 +60,7 @@ static int parseConfigInt(const char *token, int fallback)
         debug(0, "Warning: Config value '%s' is not a valid integer, using default %d\n", token, fallback);
         return fallback;
     }
-    /* errno == ERANGE: strtol overflowed the long range.
+    /* errno == ERANGE: strtol exceeded the representable long range.
      * val > INT_MAX / val < INT_MIN: value fits in long but not int (on 64-bit
      * platforms where sizeof(long) > sizeof(int)); on 32-bit targets where
      * long == int these comparisons are always false but ERANGE still catches
