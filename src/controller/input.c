@@ -43,11 +43,14 @@ extern volatile int testButtonActive;
 /**
  * Apply analog stick deadzone and rescale the remaining range.
  *
- * @param scaled     Normalised axis value in [0, 1].
- * @param deadzone   Deadzone radius around the centre (0.0 – MAX_ANALOG_DEADZONE).
- * @returns          Deadzone-corrected value in [0, 1].
+ * @param scaled        Normalised axis value in [0, 1].
+ * @param deadzone      Deadzone radius around the centre (0.0 – MAX_ANALOG_DEADZONE).
+ * @param deadzoneRange Precomputed value of (MAX_ANALOG_DEADZONE - deadzone); caller
+ *                      computes this once before the event loop to avoid repeating the
+ *                      subtraction on every EV_ABS event.
+ * @returns             Deadzone-corrected value in [0, 1].
  */
-static double applyDeadzone(double scaled, double deadzone)
+static double applyDeadzone(double scaled, double deadzone, double deadzoneRange)
 {
     double centered  = scaled - ANALOG_CENTER_VALUE;
     double magnitude = fabs(centered);
@@ -57,11 +60,11 @@ static double applyDeadzone(double scaled, double deadzone)
         return ANALOG_CENTER_VALUE;
     }
 
-    if (MAX_ANALOG_DEADZONE - deadzone > MIN_DIVISION_THRESHOLD)
+    if (deadzoneRange > MIN_DIVISION_THRESHOLD)
     {
         double sign = (centered > 0) ? 1.0 : -1.0;
         return ANALOG_CENTER_VALUE +
-               sign * ((magnitude - deadzone) / (MAX_ANALOG_DEADZONE - deadzone)) *
+               sign * ((magnitude - deadzone) / deadzoneRange) *
                ANALOG_CENTER_VALUE;
     }
 
@@ -128,6 +131,7 @@ typedef struct
     EVInputs inputs;
     int player;
     double analogDeadzone;
+    double deadzoneRange; /* precomputed MAX_ANALOG_DEADZONE - analogDeadzone */
     double wiiIRScale;
 } MappingThreadArguments;
 
@@ -135,7 +139,7 @@ static void *wiiDeviceThread(void *_args)
 {
     MappingThreadArguments *args = (MappingThreadArguments *)_args;
 
-    int fd = open(args->devicePath, O_RDONLY);
+    int fd = open(args->devicePath, O_RDONLY | O_CLOEXEC);
     if (fd < 0)
     {
         debug(0, "Warning: Failed to open Wii Remote device '%s': %s\n", args->devicePath, strerror(errno));
@@ -324,7 +328,7 @@ static void *deviceThread(void *_args)
 {
     MappingThreadArguments *args = (MappingThreadArguments *)_args;
 
-    int fd = open(args->devicePath, O_RDONLY);
+    int fd = open(args->devicePath, O_RDONLY | O_CLOEXEC);
     if (fd < 0)
     {
         debug(0, "Critical: Failed to open device '%s': %s\n", args->devicePath, strerror(errno));
@@ -389,7 +393,7 @@ static void *deviceThread(void *_args)
             (args->inputs.abs[axisIndex].input == CONTROLLER_ANALOGUE_X ||
              args->inputs.abs[axisIndex].input == CONTROLLER_ANALOGUE_Y))
         {
-            scaled = applyDeadzone(scaled, args->analogDeadzone);
+            scaled = applyDeadzone(scaled, args->analogDeadzone, args->deadzoneRange);
         }
 
         /* Apply reverse logic if configured */
@@ -510,7 +514,13 @@ static void *deviceThread(void *_args)
 
                 int reverse = args->inputs.rel[event.code].reverse;
 
-                incrementRotary(io, args->inputs.rel[event.code].output, reverse ? event.value * -1 : event.value);
+                /* Apply the per-mapping sensitivity multiplier.  The default multiplier
+                 * is 1.0 so the common case is unchanged.  lround() ensures half-count
+                 * boundaries round away from zero rather than truncating toward zero,
+                 * which would silently discard events when multiplier < 1.0. */
+                int delta = (int)lround((double)event.value * args->inputs.relMultiplier[event.code]);
+                if (delta != 0)
+                    incrementRotary(io, args->inputs.rel[event.code].output, reverse ? -delta : delta);
             }
             break;
 
@@ -555,6 +565,11 @@ static void *deviceThread(void *_args)
 
                 // Useful for mapping analogue buttons to digital buttons,
                 // for example the triggers on a gamepad.
+                // NOTE: When processMappings() stores a SWITCH-type mapping for an ABS axis,
+                // the output mapping is placed in key[code] (not abs[code]), matching the
+                // EV_KEY handler's layout.  abs[code].type is set to SWITCH as a type tag
+                // only; all payload fields (output, jvsPlayer, secondaryIO) must be read
+                // from key[code].  See processMappings() in input.c for the write side.
                 if (args->inputs.abs[event.code].type == SWITCH)
                 {
                     JVSIO *io = args->jvsIO;
@@ -600,7 +615,7 @@ static void *deviceThread(void *_args)
                         (args->inputs.abs[event.code].input == CONTROLLER_ANALOGUE_X ||
                          args->inputs.abs[event.code].input == CONTROLLER_ANALOGUE_Y))
                     {
-                        scaled = applyDeadzone(scaled, args->analogDeadzone);
+                        scaled = applyDeadzone(scaled, args->analogDeadzone, args->deadzoneRange);
                     }
 
                     /* Route to the chained IO when secondaryIO is set, matching the
@@ -656,6 +671,7 @@ static ThreadStatus startThread(EVInputs *inputs, char *devicePath, int wiiMode,
     args->player = player;
     args->jvsIO = jvsIO;
     args->analogDeadzone = analogDeadzone;
+    args->deadzoneRange  = MAX_ANALOG_DEADZONE - analogDeadzone;
     args->wiiIRScale  = wiiIRScale;
 
     ThreadStatus status;
@@ -911,7 +927,7 @@ JVSInputStatus getInputs(DeviceList *deviceList)
         snprintf(tempPath, sizeof(tempPath), "%s/%s", DEV_INPUT_EVENT, namelist[i]->d_name);
         free(namelist[i]);
 
-        int device = open(tempPath, O_RDONLY);
+        int device = open(tempPath, O_RDONLY | O_CLOEXEC);
         if (device < 0)
             continue;
 
@@ -989,10 +1005,13 @@ JVSInputStatus getInputs(DeviceList *deviceList)
         // Assign the correct names for the aimtracks
         if (strcmp(dev->name, AIMTRAK_DEVICE_NAME) == 0)
         {
+            if (aimtrakCount == 3)
+            {
+                debug(0, "Warning: 4th Aimtrak device detected; cycling sub-device name back to slot 0 — this device may conflict with the first\n");
+                aimtrakCount = 0;
+            }
             strncpy(dev->name, aimtrakRemap[aimtrakCount++], MAX_PATH - 1);
             dev->name[MAX_PATH - 1] = '\0';
-            if (aimtrakCount == 3)
-                aimtrakCount = 0;
         }
 
         // Attempt to work out the device type

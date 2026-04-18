@@ -54,6 +54,18 @@ typedef enum
 JVSConfigStatus getDefaultConfig(JVSConfig *config);
 JVSConfigStatus parseConfig(char *path, JVSConfig *config);
 JVSConfigStatus parseInputMapping(char *path, InputMappings *inputMappings);
+/**
+ * Parse a game output-mapping file.
+ *
+ * @param path            Filename of the game mapping (relative to DEFAULT_GAME_MAPPING_PATH).
+ * @param outputMappings  Populated with the parsed button/axis mappings.
+ * @param configPath      Buffer (MAX_PATH_LENGTH) that receives the IO board path when the
+ *                        mapping file contains an EMULATE directive.  **The buffer is written
+ *                        in-place** — on entry it holds the current default; on return it may
+ *                        have been overwritten with a game-specific override.
+ * @param secondConfigPath Buffer (MAX_PATH_LENGTH) for an optional second IO board path
+ *                        (EMULATE_SECOND directive).  Same in-place mutation semantics.
+ */
 JVSConfigStatus parseOutputMapping(char *path, OutputMappings *outputMappings, char *configPath, char* secondConfigPath);
 JVSConfigStatus parseIO(char *path, JVSCapabilities *capabilities);
 

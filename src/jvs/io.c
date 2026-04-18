@@ -4,6 +4,72 @@
 #include "jvs/io.h"
 #include "console/debug.h"
 
+/* String-to-enum lookup tables – defined here (not in io.h) so that each
+ * translation unit that includes io.h does not get its own private copy. */
+static const struct
+{
+	const char *string;
+	JVSInput input;
+} jvsInputConversion[] = {
+	{"BUTTON_TEST", BUTTON_TEST},
+	{"BUTTON_TILT_1", BUTTON_TILT_1},
+	{"BUTTON_TILT_2", BUTTON_TILT_2},
+	{"BUTTON_TILT_3", BUTTON_TILT_3},
+	{"BUTTON_TILT_4", BUTTON_TILT_4},
+	{"BUTTON_TILT_5", BUTTON_TILT_5},
+	{"BUTTON_TILT_6", BUTTON_TILT_6},
+	{"BUTTON_TILT_7", BUTTON_TILT_7},
+	{"BUTTON_START", BUTTON_START},
+	{"BUTTON_SERVICE", BUTTON_SERVICE},
+	{"BUTTON_UP", BUTTON_UP},
+	{"BUTTON_DOWN", BUTTON_DOWN},
+	{"BUTTON_LEFT", BUTTON_LEFT},
+	{"BUTTON_RIGHT", BUTTON_RIGHT},
+	{"BUTTON_1", BUTTON_1},
+	{"BUTTON_2", BUTTON_2},
+	{"BUTTON_3", BUTTON_3},
+	{"BUTTON_4", BUTTON_4},
+	{"BUTTON_5", BUTTON_5},
+	{"BUTTON_6", BUTTON_6},
+	{"BUTTON_7", BUTTON_7},
+	{"BUTTON_8", BUTTON_8},
+	{"BUTTON_9", BUTTON_9},
+	{"BUTTON_10", BUTTON_10},
+	{"ANALOGUE_1", ANALOGUE_1},
+	{"ANALOGUE_2", ANALOGUE_2},
+	{"ANALOGUE_3", ANALOGUE_3},
+	{"ANALOGUE_4", ANALOGUE_4},
+	{"ANALOGUE_5", ANALOGUE_5},
+	{"ANALOGUE_6", ANALOGUE_6},
+	{"ANALOGUE_7", ANALOGUE_7},
+	{"ANALOGUE_8", ANALOGUE_8},
+	{"ANALOGUE_9", ANALOGUE_9},
+	{"ANALOGUE_10", ANALOGUE_10},
+	{"ROTARY_1", ROTARY_1},
+	{"ROTARY_2", ROTARY_2},
+	{"ROTARY_3", ROTARY_3},
+	{"ROTARY_4", ROTARY_4},
+	{"ROTARY_5", ROTARY_5},
+	{"ROTARY_6", ROTARY_6},
+	{"ROTARY_7", ROTARY_7},
+	{"ROTARY_8", ROTARY_8},
+	{"ROTARY_9", ROTARY_9},
+	{"ROTARY_10", ROTARY_10},
+	{"COIN", COIN},
+};
+
+static const struct
+{
+	const char *string;
+	JVSPlayer player;
+} jvsPlayerConversion[] = {
+	{"SYSTEM", SYSTEM},
+	{"PLAYER_1", PLAYER_1},
+	{"PLAYER_2", PLAYER_2},
+	{"PLAYER_3", PLAYER_3},
+	{"PLAYER_4", PLAYER_4},
+};
+
 int initIO(JVSIO *io)
 {
 	/* Clamp loop bounds to the state array size to prevent out-of-bounds writes
@@ -29,6 +95,11 @@ int initIO(JVSIO *io)
 	for (int player = 0; player < maxCoins; player++)
 		io->state.coinCount[player] = 0;
 
+	int maxGun = io->capabilities.gunChannels * 2;
+	if (maxGun > JVS_MAX_STATE_SIZE) maxGun = JVS_MAX_STATE_SIZE;
+	for (int i = 0; i < maxGun; i++)
+		io->state.gunChannel[i] = 0;
+
 	/* Compute the maximum representable value for each channel type.
 	 * Use integer bit-shifts instead of pow() to keep this as pure integer
 	 * arithmetic.  Guard against bits == 0 (would produce max == 0, silently
@@ -47,6 +118,12 @@ int initIO(JVSIO *io)
 	if (io->capabilities.gunChannels > 0 && (io->gunXMax == 0 || io->gunYMax == 0))
 		debug(0, "Warning: gunXBits/gunYBits is 0 or >16 — lightgun output will be zeroed\n");
 
+	/* Destroy any previous mutex before re-initialising.  POSIX states that
+	 * calling pthread_mutex_init on an already-initialised mutex without a
+	 * preceding pthread_mutex_destroy is undefined behaviour and leaks the
+	 * kernel resource on Linux.  The destroy is a no-op if the mutex was
+	 * never initialised (the struct is zero-initialised in main). */
+	pthread_mutex_destroy(&io->state_mutex);
 	pthread_mutex_init(&io->state_mutex, NULL);
 
 	return 1;
@@ -61,18 +138,12 @@ int setSwitch(JVSIO *io, JVSPlayer player, JVSInput switchNumber, int value)
 		return 0;
 	}
 
+	pthread_mutex_lock(&io->state_mutex);
 	if (value)
-	{
-		pthread_mutex_lock(&io->state_mutex);
 		io->state.inputSwitch[player] |= switchNumber;
-		pthread_mutex_unlock(&io->state_mutex);
-	}
 	else
-	{
-		pthread_mutex_lock(&io->state_mutex);
 		io->state.inputSwitch[player] &= ~switchNumber;
-		pthread_mutex_unlock(&io->state_mutex);
-	}
+	pthread_mutex_unlock(&io->state_mutex);
 
 	return 1;
 }
@@ -104,6 +175,11 @@ int setAnalogue(JVSIO *io, JVSInput channel, double value)
 	if ((int)channel < 0 || channel >= io->capabilities.analogueInChannels ||
 	    (int)channel >= JVS_MAX_STATE_SIZE)
 		return 0;
+	/* Clamp to [0.0, 1.0] so a caller that passes an out-of-range value
+	 * cannot produce a negative channel value or one that exceeds analogueMax,
+	 * both of which would corrupt the JVS wire data. */
+	if (value < 0.0) value = 0.0;
+	else if (value > 1.0) value = 1.0;
 	pthread_mutex_lock(&io->state_mutex);
 	io->state.analogueChannel[channel] = (int)((double)value * (double)io->analogueMax);
 	pthread_mutex_unlock(&io->state_mutex);
@@ -120,18 +196,17 @@ int setGun(JVSIO *io, JVSInput channel, double value)
 	    (int)channel >= JVS_MAX_STATE_SIZE)
 		return 0;
 
+	/* Clamp to [0.0, 1.0] so a caller that passes an out-of-range value
+	 * cannot produce a negative channel value or one that exceeds gunXMax/gunYMax. */
+	if (value < 0.0) value = 0.0;
+	else if (value > 1.0) value = 1.0;
+
+	pthread_mutex_lock(&io->state_mutex);
 	if (channel % 2 == 0)
-	{
-		pthread_mutex_lock(&io->state_mutex);
 		io->state.gunChannel[channel] = (int)((double)value * (double)io->gunXMax);
-		pthread_mutex_unlock(&io->state_mutex);
-	}
 	else
-	{
-		pthread_mutex_lock(&io->state_mutex);
-		io->state.gunChannel[channel] = (int)((double)((double)1.0 - value) * (double)io->gunYMax);
-		pthread_mutex_unlock(&io->state_mutex);
-	}
+		io->state.gunChannel[channel] = (int)((double)(1.0 - value) * (double)io->gunYMax);
+	pthread_mutex_unlock(&io->state_mutex);
 	return 1;
 }
 

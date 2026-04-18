@@ -11,6 +11,11 @@ FFBStatus initFFB(FFBState *state, FFBEmulationType type, char *serialPath)
     state->serial = -1;
     state->controller = -1;
 
+    /* NOTE: `state` is passed directly to the FFB thread and must remain valid
+     * for the entire lifetime of that thread.  The caller must not free or
+     * re-use `state` until after stopAllThreads() has returned.  When the FFB
+     * thread body is fully implemented it should either receive a malloc'd copy
+     * (like deviceThread does) or the caller must guarantee the lifetime above. */
     if (createThread(ffbThread, state) != THREAD_STATUS_SUCCESS)
         return FFB_STATUS_ERROR;
 

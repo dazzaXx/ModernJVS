@@ -180,7 +180,8 @@ int flushDevice(void)
 
 int closeDevice(void)
 {
-  tcflush(serialIO, TCIOFLUSH);
+  if (tcflush(serialIO, TCIOFLUSH) != 0)
+    debug(1, "Warning: Failed to flush serial buffers on close: %s\n", strerror(errno));
   
 #ifdef GPIOD_API_V2
   // Clean up libgpiod v2 resources
@@ -276,7 +277,8 @@ int setSerialAttributes(int fd, int myBaud)
   status |= TIOCM_DTR;
   status |= TIOCM_RTS;
 
-  ioctl(fd, TIOCMSET, &status);
+  if (ioctl(fd, TIOCMSET, &status) < 0)
+    debug(1, "Warning: TIOCMSET failed: %s — DTR/RTS may not be asserted\n", strerror(errno));
 
   usleep(100 * 1000); // 100ms
 

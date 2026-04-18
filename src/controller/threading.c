@@ -56,17 +56,22 @@ void stopAllThreads(void)
     /* Signal all threads to terminate themselves */
     setThreadsRunning(0);
 
+    /* Snapshot the thread IDs and reset the count while holding the lock,
+     * then release the lock before joining.  Holding mutex_manager across
+     * pthread_join() would deadlock if any of the threads attempted to call
+     * createThread() before exiting (createThread also acquires mutex_manager). */
     pthread_mutex_lock(&ThreadManagerData.mutex_manager);
 
-    for (int i = 0; i < ThreadManagerData.threadCount; i++)
-    {
-        pthread_join(ThreadManagerData.threadID[i], NULL);
-        ThreadManagerData.threadID[i] = 0;
-    }
-
+    int count = ThreadManagerData.threadCount;
+    pthread_t ids[THREAD_MAX_NUMBER];
+    memcpy(ids, ThreadManagerData.threadID, count * sizeof(pthread_t));
+    memset(ThreadManagerData.threadID, 0, sizeof(ThreadManagerData.threadID));
     ThreadManagerData.threadCount = 0;
 
     pthread_mutex_unlock(&ThreadManagerData.mutex_manager);
+
+    for (int i = 0; i < count; i++)
+        pthread_join(ids[i], NULL);
 }
 
 int getThreadsRunning(void)

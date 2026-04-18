@@ -3,6 +3,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <limits.h>
+#include <errno.h>
 
 #include "jvs/io.h"
 #include "console/debug.h"
@@ -50,11 +52,22 @@ static double clampDeadzone(double deadzone)
 static int parseConfigInt(const char *token, int fallback)
 {
     char *end;
+    errno = 0;
     long val = strtol(token, &end, 10);
     /* end must advance past at least one digit and reach NUL or whitespace */
     if (end == token || (*end != '\0' && *end != '\n' && *end != '\r'))
     {
         debug(0, "Warning: Config value '%s' is not a valid integer, using default %d\n", token, fallback);
+        return fallback;
+    }
+    /* errno == ERANGE: strtol exceeded the representable long range.
+     * val > INT_MAX / val < INT_MIN: value fits in long but not int (on 64-bit
+     * platforms where sizeof(long) > sizeof(int)); on 32-bit targets where
+     * long == int these comparisons are always false but ERANGE still catches
+     * any overflow at the long level, so the combined check is correct on both. */
+    if (errno == ERANGE || val > (long)INT_MAX || val < (long)INT_MIN)
+    {
+        debug(0, "Warning: Config value '%s' is out of int range, using default %d\n", token, fallback);
         return fallback;
     }
     return (int)val;
