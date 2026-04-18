@@ -1,5 +1,6 @@
 #include <string.h>
 #include <math.h>
+#include <stdint.h>
 
 #include "jvs/io.h"
 #include "console/debug.h"
@@ -256,6 +257,14 @@ int incrementRotary(JVSIO *io, JVSInput channel, int delta)
 
 	pthread_mutex_lock(&io->state_mutex);
 	io->state.rotaryChannel[channel] += delta;
+	/* Clamp to the signed 16-bit range that the JVS wire format can represent.
+	 * Without this, a fast spinner or trackball can accumulate a value that
+	 * overflows int (undefined behaviour in C99) or silently truncates to the
+	 * wrong 16-bit value when sent via CMD_READ_ROTARY. */
+	if (io->state.rotaryChannel[channel] > INT16_MAX)
+		io->state.rotaryChannel[channel] = INT16_MAX;
+	else if (io->state.rotaryChannel[channel] < INT16_MIN)
+		io->state.rotaryChannel[channel] = INT16_MIN;
 	pthread_mutex_unlock(&io->state_mutex);
 	return 1;
 }
