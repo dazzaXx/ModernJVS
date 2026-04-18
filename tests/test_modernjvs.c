@@ -658,7 +658,7 @@ static void test_setRotary_out_of_range(void)
     TEST_PASS();
 }
 
-/* ── incrementRotary tests ──────────────────────────────────────────────── */
+/* -- incrementRotary tests ------------------------------------------------- */
 
 /* Basic accumulation: increment twice, values must sum */
 static void test_incrementRotary_basic(void)
@@ -3406,10 +3406,13 @@ static void test_processPacket_cmd_read_lightgun_extra_guns_zero(void)
     JVSResponse r = jvs_read_response(afd);
     ASSERT(r.valid == 1, "response valid");
     ASSERT_EQ_INT(r.data[1], REPORT_SUCCESS, "REPORT_SUCCESS");
-    /* Gun 3 (index 2, beyond declared): both X and Y must be zero */
-    /* data layout: [STATUS][REPORT][gun1_X_hi][gun1_X_lo][gun1_Y_hi][gun1_Y_lo]
-     *              [gun2_X_hi][gun2_X_lo][gun2_Y_hi][gun2_Y_lo]
-     *              [gun3_X_hi][gun3_X_lo][gun3_Y_hi][gun3_Y_lo] */
+    /* Gun 3 (index 2, beyond declared): both X and Y must be zero.
+     * Response byte layout:
+     *   [0] = STATUS_SUCCESS
+     *   [1] = REPORT_SUCCESS
+     *   [2..5]  = gun1 X_hi, X_lo, Y_hi, Y_lo
+     *   [6..9]  = gun2 X_hi, X_lo, Y_hi, Y_lo
+     *   [10..13] = gun3 X_hi, X_lo, Y_hi, Y_lo  (undeclared, must be 0) */
     ASSERT_EQ_INT(r.data[10], 0x00, "gun3 X high = 0x00");
     ASSERT_EQ_INT(r.data[11], 0x00, "gun3 X low = 0x00");
     ASSERT_EQ_INT(r.data[12], 0x00, "gun3 Y high = 0x00");
@@ -3462,7 +3465,7 @@ static const TestFn tests[] = {
     test_setGun_negative_channel,
     test_setRotary_negative_channel,
     test_incrementCoin_cap_at_16383,
-    /* initIO / initJVS tests */
+    /* initIO and initJVS capability / bit-depth tests */
     test_initIO_oversized_capabilities,
     test_initIO_zero_analogue_bits,
     test_initIO_oversized_analogue_bits,
