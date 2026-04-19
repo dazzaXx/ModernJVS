@@ -764,8 +764,8 @@ JVSStatus processPacket(JVSIO *jvsIO)
 		case CMD_REMAINING_PAYOUT:
 		{
 			/* Per JVS spec: request contains a single 1-indexed channel number.
-			 * Response: REPORT_SUCCESS + hopper_status(1) + remaining(2 bytes, 16-bit big-endian).
-			 * Matches the 2-byte count width used by CMD_SET_PAYOUT and CMD_SUBTRACT_PAYOUT.
+			 * Response: REPORT_SUCCESS + hopper_status(1) + remaining(3 bytes, 24-bit big-endian).
+			 * Hopper counts are 24-bit (up to 16 777 215 medals), unlike the 14-bit coin counts.
 			 * We always report 0 remaining medals and normal (0x00) hopper status. */
 			size = 2;
 			if (index + 1 >= (int)inputPacket.length - 1)
@@ -775,10 +775,11 @@ JVSStatus processPacket(JVSIO *jvsIO)
 			}
 			int channelIndex = inputPacket.data[index + 1];
 			debug(1, "CMD_REMAINING_PAYOUT - Channel %d\n", channelIndex);
-			CHECK_OUTPUT_SPACE(&outputPacket, 4);
+			CHECK_OUTPUT_SPACE(&outputPacket, 5);
 			outputPacket.data[outputPacket.length++] = REPORT_SUCCESS;
 			outputPacket.data[outputPacket.length++] = 0x00; /* hopper status: normal */
 			outputPacket.data[outputPacket.length++] = 0x00; /* remaining (hi)  */
+			outputPacket.data[outputPacket.length++] = 0x00; /* remaining (mid) */
 			outputPacket.data[outputPacket.length++] = 0x00; /* remaining (lo)  */
 		}
 		break;
