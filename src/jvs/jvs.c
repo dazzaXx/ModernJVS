@@ -247,7 +247,7 @@ static void writeFeatures(JVSPacket *packet, JVSCapabilities *capabilities)
 		writeFeature(packet, CAP_LIGHTGUN, capabilities->gunXBits, capabilities->gunYBits, capabilities->gunChannels);
 
 	if (capabilities->generalPurposeInputs)
-		writeFeature(packet, CAP_GPI, 0x00, capabilities->generalPurposeInputs, 0x00);
+		writeFeature(packet, CAP_GPI, capabilities->generalPurposeInputs, 0x00, 0x00);
 
 	/* Output Functions */
 
@@ -629,8 +629,8 @@ JVSStatus processPacket(JVSIO *jvsIO)
 					debug(0, "Error: Output packet size exceeded in CMD_READ_COINS\n");
 					return JVS_STATUS_ERROR;
 				}
-				// Send coin count as 2 bytes (high byte with 5-bit limit, then low byte)
-				outputPacket.data[outputPacket.length] = (coinSnapshot[i] >> 8) & 0x1F;
+				// Send coin count as 2 bytes: CC NNNNNN NNNNNNNN (2-bit condition + 14-bit count)
+				outputPacket.data[outputPacket.length] = (coinSnapshot[i] >> 8) & 0x3F;
 				outputPacket.data[outputPacket.length + 1] = coinSnapshot[i] & 0xFF;
 				outputPacket.length += 2;
 			}

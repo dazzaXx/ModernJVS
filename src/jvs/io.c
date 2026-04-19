@@ -162,7 +162,7 @@ int incrementCoin(JVSIO *io, JVSPlayer player, int amount)
 
 	pthread_mutex_lock(&io->state_mutex);
 	io->state.coinCount[player - 1] += amount;
-	/* Cap at 16383 (max representable by the 13-bit JVS wire format) */
+	/* Cap at 16383 (max representable by the 14-bit JVS wire format) */
 	if (io->state.coinCount[player - 1] > 16383)
 		io->state.coinCount[player - 1] = 16383;
 	pthread_mutex_unlock(&io->state_mutex);
