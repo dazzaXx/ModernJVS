@@ -309,6 +309,36 @@ JVSStatus processPacket(JVSIO *jvsIO)
 			debug(0, "JVS: Connection lost\n");
 			connectionLostLogged = 1;
 		}
+		else if (readPacketStatus == JVS_STATUS_ERROR_CHECKSUM)
+		{
+			/* Per JVS spec: when a slave detects a checksum error it must respond with
+			 * STATUS_CHECKSUM_FAILURE so the master knows to issue CMD_RETRANSMIT.
+			 * Only send the error response when we have a valid address assigned and the
+			 * destination field of the (potentially corrupt) packet matches this device,
+			 * to avoid spurious replies to packets that were not meant for us. */
+			if (jvsIO->deviceID != -1)
+			{
+				JVSIO *checkIO = jvsIO;
+				int forUs = 0;
+				while (checkIO != NULL)
+				{
+					if (inputPacket.destination == (unsigned char)checkIO->deviceID)
+					{
+						forUs = 1;
+						break;
+					}
+					checkIO = checkIO->chainedIO;
+				}
+				if (forUs)
+				{
+					JVSPacket errorPacket = {0};
+					errorPacket.destination = BUS_MASTER;
+					errorPacket.length = 1;
+					errorPacket.data[0] = STATUS_CHECKSUM_FAILURE;
+					writePacket(&errorPacket);
+				}
+			}
+		}
 		return readPacketStatus;
 	}
 
@@ -429,11 +459,9 @@ JVSStatus processPacket(JVSIO *jvsIO)
 		}
 		break;
 
-		/* Sent by some boards to switch the comms mode (e.g. baud rate or
-		 * RS232 vs RS485).  We always acknowledge with REPORT_SUCCESS without
-		 * actually changing anything — the board will simply continue in its
-		 * current mode, which is the correct behaviour for an emulator.
-		 * size=2 because the command byte is followed by one mode argument. */
+		/* CMD_SET_COMMS_MODE is a broadcast-only command (NODE NO.FF) and the JVS
+		 * spec defines its response size as 0 — no acknowledge should be sent.
+		 * We accept the command and return silently. */
 		case CMD_SET_COMMS_MODE:
 		{
 			size = 2;
@@ -442,9 +470,8 @@ JVSStatus processPacket(JVSIO *jvsIO)
 				debug(0, "Error: CMD_SET_COMMS_MODE - packet too short\n");
 				break;
 			}
-			debug(1, "CMD_SET_COMMS_MODE - Mode 0x%02X (acknowledged)\n", inputPacket.data[index + 1]);
-			CHECK_OUTPUT_SPACE(&outputPacket, 1);
-			outputPacket.data[outputPacket.length++] = REPORT_SUCCESS;
+			debug(1, "CMD_SET_COMMS_MODE - Mode 0x%02X (no response required)\n", inputPacket.data[index + 1]);
+			return JVS_STATUS_SUCCESS;
 		}
 		break;
 
@@ -736,32 +763,23 @@ JVSStatus processPacket(JVSIO *jvsIO)
 
 		case CMD_REMAINING_PAYOUT:
 		{
+			/* Per JVS spec: request contains a single 1-indexed channel number.
+			 * Response: REPORT_SUCCESS + hopper_status(1) + remaining(3 bytes, 24-bit big-endian).
+			 * We always report 0 remaining medals and normal (0x00) hopper status. */
 			size = 2;
 			if (index + 1 >= (int)inputPacket.length - 1)
 			{
 				debug(0, "Error: CMD_REMAINING_PAYOUT - packet too short\n");
 				break;
 			}
-			int numberSlots = inputPacket.data[index + 1];
-			debug(1, "CMD_REMAINING_PAYOUT - Reading %d slot(s)\n", numberSlots);
-			if (numberSlots > JVS_MAX_STATE_SIZE)
-			{
-				debug(0, "Error: Slot count %d exceeds maximum %d in CMD_REMAINING_PAYOUT\n", numberSlots, JVS_MAX_STATE_SIZE);
-				return JVS_STATUS_ERROR;
-			}
-			CHECK_OUTPUT_SPACE(&outputPacket, 1);
+			int channelIndex = inputPacket.data[index + 1];
+			debug(1, "CMD_REMAINING_PAYOUT - Channel %d\n", channelIndex);
+			CHECK_OUTPUT_SPACE(&outputPacket, 5);
 			outputPacket.data[outputPacket.length++] = REPORT_SUCCESS;
-			for (int i = 0; i < numberSlots; i++)
-			{
-				if (outputPacket.length + 2 > JVS_MAX_PACKET_SIZE)
-				{
-					debug(0, "Error: Output packet size exceeded in CMD_REMAINING_PAYOUT\n");
-					return JVS_STATUS_ERROR;
-				}
-				outputPacket.data[outputPacket.length] = 0;
-				outputPacket.data[outputPacket.length + 1] = 0;
-				outputPacket.length += 2;
-			}
+			outputPacket.data[outputPacket.length++] = 0x00; /* hopper status: normal */
+			outputPacket.data[outputPacket.length++] = 0x00; /* remaining (hi)  */
+			outputPacket.data[outputPacket.length++] = 0x00; /* remaining (mid) */
+			outputPacket.data[outputPacket.length++] = 0x00; /* remaining (lo)  */
 		}
 		break;
 
@@ -856,9 +874,10 @@ JVSStatus processPacket(JVSIO *jvsIO)
 
 		case CMD_SUBTRACT_PAYOUT:
 		{
+			/* Per JVS spec: request is 30, slot, amount_hi, amount_lo (4 bytes). */
 			debug(1, "CMD_SUBTRACT_PAYOUT - Subtracting payout\n");
-			size = 3;
-			if (index + 2 >= (int)inputPacket.length - 1)
+			size = 4;
+			if (index + 3 >= (int)inputPacket.length - 1)
 			{
 				debug(0, "Error: CMD_SUBTRACT_PAYOUT - packet too short\n");
 				break;
@@ -1062,9 +1081,16 @@ JVSStatus processPacket(JVSIO *jvsIO)
 			switch (inputPacket.data[index + 1])
 			{
 
-			// Read 8 bytes of memory
+			// NAMCOEXTREAD: read 8 bytes from I/O memory; request has 2 address bytes
 			case 0x01:
 			{
+				/* Consume the 2 address bytes that follow the sub-command byte if the
+				 * packet is long enough to contain them; without this they would be
+				 * misinterpreted as the next command code. */
+				if (index + 3 < (int)inputPacket.length - 1)
+				{
+					size += 2;
+				}
 				if (outputPacket.length + 8 > JVS_MAX_PACKET_SIZE)
 				{
 					debug(0, "Error: Output packet size exceeded in CMD_NAMCO_SPECIFIC 0x01\n");
@@ -1075,7 +1101,7 @@ JVSStatus processPacket(JVSIO *jvsIO)
 			}
 			break;
 
-			// Read the program date
+			// NAMCOEXTID: returns a fixed 8-byte I/O identification token per spec
 			case 0x02:
 			{
 				if (outputPacket.length + 8 > JVS_MAX_PACKET_SIZE)
@@ -1083,9 +1109,9 @@ JVSStatus processPacket(JVSIO *jvsIO)
 					debug(0, "Error: Output packet size exceeded in CMD_NAMCO_SPECIFIC 0x02\n");
 					return JVS_STATUS_ERROR;
 				}
-				// 1998 October 26th at 12:00:00 (Unsure what last 00 is)
-				unsigned char programDate[] = {0x19, 0x98, 0x10, 0x26, 0x12, 0x00, 0x00, 0x00};
-				memcpy(&outputPacket.data[outputPacket.length], programDate, 8);
+				/* Fixed I/O identity bytes as specified in the JVS WIP document */
+				unsigned char extId[] = {0x19, 0x97, 0x03, 0x05, 0x03, 0x19, 0x35, 0x29};
+				memcpy(&outputPacket.data[outputPacket.length], extId, 8);
 				outputPacket.length += 8;
 			}
 			break;
@@ -1142,9 +1168,11 @@ JVSStatus processPacket(JVSIO *jvsIO)
 		default:
 		{
 			debug(0, "CMD_UNSUPPORTED - Unsupported command: 0x%02hhX\n", inputPacket.data[index]);
-			/* Per JVS spec: reply with STATUS_UNSUPPORTED and stop processing further commands */
+			/* Per JVS spec: return STATUS_UNSUPPORTED but preserve all REPORT_SUCCESS
+			 * bytes accumulated for commands that were processed before this one.
+			 * Only the overall status byte (data[0]) is changed; the length is left
+			 * intact so previously-built response data is still sent to the master. */
 			outputPacket.data[0] = STATUS_UNSUPPORTED;
-			outputPacket.length = 1;
 			return writePacket(&outputPacket);
 		}
 		}
