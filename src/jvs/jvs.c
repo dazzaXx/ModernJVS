@@ -71,6 +71,24 @@ static int connectionLostLogged = 0;
 	} while (0)
 
 /**
+ * Append a single REPORT byte to a JVS output packet if space permits.
+ *
+ * Used to emit per-command error reports (e.g. REPORT_PARAMETER_ERROR1)
+ * without duplicating the bounds-check everywhere.
+ *
+ * @param packet The output packet to write to.
+ * @param report The REPORT byte value (e.g. REPORT_PARAMETER_ERROR1).
+ * @returns 1 if the byte was written, 0 if the buffer was full.
+ */
+static int writeReport(JVSPacket *packet, unsigned char report)
+{
+	if (packet->length >= JVS_MAX_PACKET_SIZE)
+		return 0;
+	packet->data[packet->length++] = report;
+	return 1;
+}
+
+/**
  * Get the name of a JVS command
  *
  * Returns a human-readable string for a given JVS command byte.
@@ -916,8 +934,7 @@ JVSStatus processPacket(JVSIO *jvsIO)
 			if (slot_index < 0 || slot_index >= JVS_MAX_STATE_SIZE)
 			{
 				debug(0, "Error: Slot index out of bounds in CMD_WRITE_COINS\n");
-				CHECK_OUTPUT_SPACE(&outputPacket, 1);
-				outputPacket.data[outputPacket.length++] = REPORT_PARAMETER_ERROR1;
+				writeReport(&outputPacket, REPORT_PARAMETER_ERROR1);
 				break;
 			}
 
@@ -981,8 +998,7 @@ JVSStatus processPacket(JVSIO *jvsIO)
 			if (slot_index < 0 || slot_index >= JVS_MAX_STATE_SIZE)
 			{
 				debug(0, "Error: Slot index out of bounds in CMD_DECREASE_COINS\n");
-				CHECK_OUTPUT_SPACE(&outputPacket, 1);
-				outputPacket.data[outputPacket.length++] = REPORT_PARAMETER_ERROR1;
+				writeReport(&outputPacket, REPORT_PARAMETER_ERROR1);
 				break;
 			}
 

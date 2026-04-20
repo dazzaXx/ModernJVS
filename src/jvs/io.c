@@ -257,12 +257,10 @@ int incrementRotary(JVSIO *io, JVSInput channel, int delta)
 
 	pthread_mutex_lock(&io->state_mutex);
 	io->state.rotaryChannel[channel] += delta;
-	/* Wrap at the signed 16-bit boundary so that the JVS master can track
-	 * cumulative position using standard 16-bit modular arithmetic.  Clamping
-	 * would cause the spinner to appear frozen once it reached ±32767 because
-	 * the game's per-frame delta (computed as current minus previous, read as
-	 * uint16_t) would always be zero.  Wrapping preserves the natural rollover
-	 * that the game expects and is safe because rotaryChannel[] is int. */
+	/* Cast through int16_t to wrap modularly at the 16-bit boundary, then
+	 * widen back to int.  The JVS master computes per-frame delta using
+	 * 16-bit modular arithmetic; wrapping here keeps the counter in the
+	 * range that the wire format can represent and allows natural rollover. */
 	io->state.rotaryChannel[channel] = (int)(int16_t)io->state.rotaryChannel[channel];
 	pthread_mutex_unlock(&io->state_mutex);
 	return 1;
