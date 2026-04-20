@@ -308,6 +308,12 @@ static void writeFeatures(JVSPacket *packet, JVSCapabilities *capabilities)
  */
 JVSStatus processPacket(JVSIO *jvsIO)
 {
+	/* Save the root IO pointer before the routing loop may advance jvsIO to a
+	 * chained device.  Broadcast commands (e.g. CMD_RESET) must always operate
+	 * on the full chain starting from the root, regardless of which device the
+	 * enclosing packet was addressed to. */
+	JVSIO *rootIO = jvsIO;
+
 	/* Initially read in a packet */
 	JVSStatus readPacketStatus = readPacket(&inputPacket);
 	if (readPacketStatus != JVS_STATUS_SUCCESS)
@@ -402,9 +408,26 @@ JVSStatus processPacket(JVSIO *jvsIO)
 		/* The arcade hardware sends a reset command and we clear our memory */
 		case CMD_RESET:
 		{
-			debug(1, "CMD_RESET - Resetting all devices\n");
 			size = 2;
-			JVSIO *tmpIO = jvsIO;
+			if (index + 1 >= (int)inputPacket.length - 1)
+			{
+				debug(0, "Error: CMD_RESET - packet too short\n");
+				break;
+			}
+			/* Per JVS spec the second byte must be 0xD9 (CMD_RESET_ARG).
+			 * This extra guard byte exists so that a single corrupted byte
+			 * on the RS485 bus cannot accidentally trigger a global reset.
+			 * Consume both bytes but take no action if the argument is wrong. */
+			if (inputPacket.data[index + 1] != CMD_RESET_ARG)
+			{
+				debug(0, "Warning: CMD_RESET received with invalid argument 0x%02X (expected 0x%02X), ignoring\n",
+				      inputPacket.data[index + 1], CMD_RESET_ARG);
+				break;
+			}
+			debug(1, "CMD_RESET - Resetting all devices\n");
+			/* Walk from rootIO so that even a non-broadcast (malformed) packet
+			 * addressed to a chained device resets the entire chain. */
+			JVSIO *tmpIO = rootIO;
 			__atomic_store_n(&tmpIO->deviceID, -1, __ATOMIC_RELEASE);
 			while (tmpIO->chainedIO != NULL)
 			{
@@ -584,12 +607,13 @@ JVSStatus processPacket(JVSIO *jvsIO)
 			outputPacket.data[outputPacket.length] = REPORT_SUCCESS;
 			outputPacket.data[outputPacket.length + 1] = switchSnapshot[0];
 			outputPacket.length += 2;
-			/* Clamp switch-byte count to 2: our inputSwitch register is 16 bits wide.
-			 * More than 2 bytes would require a right-shift of (8 - j*8) with j>=2,
-			 * i.e. a negative shift amount, which is undefined behaviour in C99. */
+			/* Clamp switch-byte count to [1, 2]: our inputSwitch register is 16 bits wide.
+			 * A value of 0 would produce an empty response (no bytes per player) which
+			 * misaligns every subsequent command in the same batch.  More than 2 bytes
+			 * would require a shift of (8 - j*8) with j>=2, i.e. a negative shift
+			 * amount, which is undefined behaviour in C99. */
 			int playerSwitchBytes = inputPacket.data[index + 2];
-			if (playerSwitchBytes > 2)
-				playerSwitchBytes = 2;
+			playerSwitchBytes = (playerSwitchBytes < 1) ? 1 : (playerSwitchBytes > 2) ? 2 : playerSwitchBytes;
 			for (int i = 0; i < inputPacket.data[index + 1]; i++)
 			{
 				// Bounds check to prevent inputSwitch array overflow
@@ -1105,6 +1129,10 @@ JVSStatus processPacket(JVSIO *jvsIO)
 				break;
 			}
 
+			/* Record the output position before writing REPORT_SUCCESS so that the
+			 * default case can restore the length exactly if the sub-command turns
+			 * out to be unsupported, without relying on a hard-coded decrement. */
+			unsigned char namcoReportOffset = (unsigned char)outputPacket.length;
 			CHECK_OUTPUT_SPACE(&outputPacket, 1);
 			outputPacket.data[outputPacket.length++] = REPORT_SUCCESS;
 
@@ -1196,6 +1224,14 @@ JVSStatus processPacket(JVSIO *jvsIO)
 			default:
 			{
 				debug(0, "CMD_NAMCO_UNSUPPORTED - Unsupported Namco command: 0x%02hhX\n", inputPacket.data[index + 1]);
+				/* Restore the output length to the position recorded before REPORT_SUCCESS
+				 * was written, then return STATUS_UNSUPPORTED for the whole packet.
+				 * Without this, an unsupported sub-command would leave a dangling
+				 * REPORT_SUCCESS in the response with no data following it, which would
+				 * cause Namco hardware to misparse subsequent bytes. */
+				outputPacket.length = namcoReportOffset;
+				outputPacket.data[0] = STATUS_UNSUPPORTED;
+				return writePacket(&outputPacket);
 			}
 			}
 		}
