@@ -44,7 +44,7 @@ static void *watchdogThread(void *_args)
         if (currentDeviceCount == -1)
         {
             debug(1, "Watchdog: Error accessing /dev/input, triggering reinitialization\n");
-            *args->running = 0;
+            __atomic_store_n(args->running, 0, __ATOMIC_RELEASE);
             break;
         }
         else if (currentDeviceCount != originalDevicesCount)
@@ -59,7 +59,7 @@ static void *watchdogThread(void *_args)
                 debug(1, "Watchdog: Device disconnected (%d -> %d), triggering reinitialization\n", 
                       originalDevicesCount, currentDeviceCount);
             }
-            *args->running = 0;
+            __atomic_store_n(args->running, 0, __ATOMIC_RELEASE);
             break;
         }
     }

@@ -128,7 +128,7 @@ int main(int argc, char **argv)
     int jvsInitialized = 0;
 
     JVSInputStatus lastInputState = JVS_INPUT_STATUS_SUCCESS;
-    while (running != -1)
+    while (__atomic_load_n(&running, __ATOMIC_ACQUIRE) != -1)
     {
         /* The watchdog thread writes 0 to `running` concurrently with the SIGTERM
          * handler writing -1.  If the watchdog's 0 is the last write, the outer
@@ -286,7 +286,7 @@ int main(int argc, char **argv)
         /* Process packets forever */
         JVSStatus processingStatus;
         int lastTestButtonActive = 0;
-        while (running == 1)
+        while (__atomic_load_n(&running, __ATOMIC_ACQUIRE) == 1)
         {
             processingStatus = processPacket(&io);
 
