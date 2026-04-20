@@ -206,7 +206,7 @@ int setGun(JVSIO *io, JVSInput channel, double value)
 	if (channel % 2 == 0)
 		io->state.gunChannel[channel] = (int)((double)value * (double)io->gunXMax);
 	else
-		io->state.gunChannel[channel] = (int)((double)(1.0 - value) * (double)io->gunYMax);
+		io->state.gunChannel[channel] = (int)((double)value * (double)io->gunYMax);
 	pthread_mutex_unlock(&io->state_mutex);
 	return 1;
 }
@@ -257,14 +257,13 @@ int incrementRotary(JVSIO *io, JVSInput channel, int delta)
 
 	pthread_mutex_lock(&io->state_mutex);
 	io->state.rotaryChannel[channel] += delta;
-	/* Clamp to the signed 16-bit range that the JVS wire format can represent.
-	 * Without this, a fast spinner or trackball can accumulate a value that
-	 * overflows int (undefined behaviour in C99) or silently truncates to the
-	 * wrong 16-bit value when sent via CMD_READ_ROTARY. */
-	if (io->state.rotaryChannel[channel] > INT16_MAX)
-		io->state.rotaryChannel[channel] = INT16_MAX;
-	else if (io->state.rotaryChannel[channel] < INT16_MIN)
-		io->state.rotaryChannel[channel] = INT16_MIN;
+	/* Wrap at the signed 16-bit boundary so that the JVS master can track
+	 * cumulative position using standard 16-bit modular arithmetic.  Clamping
+	 * would cause the spinner to appear frozen once it reached ±32767 because
+	 * the game's per-frame delta (computed as current minus previous, read as
+	 * uint16_t) would always be zero.  Wrapping preserves the natural rollover
+	 * that the game expects and is safe because rotaryChannel[] is int. */
+	io->state.rotaryChannel[channel] = (int)(int16_t)io->state.rotaryChannel[channel];
 	pthread_mutex_unlock(&io->state_mutex);
 	return 1;
 }

@@ -471,7 +471,7 @@ JVSStatus processPacket(JVSIO *jvsIO)
 				break;
 			}
 			debug(1, "CMD_SET_COMMS_MODE - Mode 0x%02X (no response required)\n", inputPacket.data[index + 1]);
-			return JVS_STATUS_SUCCESS;
+			break;
 		}
 		break;
 
@@ -554,7 +554,8 @@ JVSStatus processPacket(JVSIO *jvsIO)
 			if (outputPacket.length + 2 > JVS_MAX_PACKET_SIZE)
 			{
 				debug(0, "Error: Output packet size exceeded in CMD_READ_SWITCHES\n");
-				return JVS_STATUS_ERROR;
+				outputPacket.data[0] = STATUS_OVERFLOW;
+				return writePacket(&outputPacket);
 			}
 
 			/* Snapshot the switch state to avoid holding the mutex over the output loop
@@ -579,7 +580,8 @@ JVSStatus processPacket(JVSIO *jvsIO)
 				if (i + 1 >= JVS_MAX_STATE_SIZE)
 				{
 					debug(0, "Error: Player index out of bounds in CMD_READ_SWITCHES\n");
-					return JVS_STATUS_ERROR;
+					outputPacket.data[0] = STATUS_OVERFLOW;
+					return writePacket(&outputPacket);
 				}
 				for (int j = 0; j < playerSwitchBytes; j++)
 				{
@@ -588,7 +590,8 @@ JVSStatus processPacket(JVSIO *jvsIO)
 					if (outputPacket.length + 1 > JVS_MAX_PACKET_SIZE)
 					{
 						debug(0, "Error: Output packet size exceeded in CMD_READ_SWITCHES\n");
-						return JVS_STATUS_ERROR;
+						outputPacket.data[0] = STATUS_OVERFLOW;
+						return writePacket(&outputPacket);
 					}
 					outputPacket.data[outputPacket.length++] = switchSnapshot[i + 1] >> (8 - (j * 8));
 				}
@@ -612,7 +615,8 @@ JVSStatus processPacket(JVSIO *jvsIO)
 			if (numberCoinSlots > JVS_MAX_STATE_SIZE)
 			{
 				debug(0, "Error: Coin slot count %d exceeds maximum %d in CMD_READ_COINS\n", numberCoinSlots, JVS_MAX_STATE_SIZE);
-				return JVS_STATUS_ERROR;
+				outputPacket.data[outputPacket.length - 1] = REPORT_PARAMETER_ERROR1;
+				break;
 			}
 
 			/* Snapshot the coin state to avoid holding the mutex over the output loop. */
@@ -627,7 +631,8 @@ JVSStatus processPacket(JVSIO *jvsIO)
 				if (outputPacket.length + 2 > JVS_MAX_PACKET_SIZE)
 				{
 					debug(0, "Error: Output packet size exceeded in CMD_READ_COINS\n");
-					return JVS_STATUS_ERROR;
+					outputPacket.data[0] = STATUS_OVERFLOW;
+					return writePacket(&outputPacket);
 				}
 				// Send coin count as 2 bytes: CC NNNNNN NNNNNNNN (2-bit condition + 14-bit count)
 				outputPacket.data[outputPacket.length] = (coinSnapshot[i] >> 8) & 0x3F;
@@ -654,7 +659,8 @@ JVSStatus processPacket(JVSIO *jvsIO)
 			if (numberChannels > JVS_MAX_STATE_SIZE)
 			{
 				debug(0, "Error: Analogue channel count %d exceeds maximum %d in CMD_READ_ANALOGS\n", numberChannels, JVS_MAX_STATE_SIZE);
-				return JVS_STATUS_ERROR;
+				outputPacket.data[outputPacket.length - 1] = REPORT_PARAMETER_ERROR1;
+				break;
 			}
 
 			/* Snapshot the analogue state to avoid holding the mutex over the output loop. */
@@ -669,7 +675,8 @@ JVSStatus processPacket(JVSIO *jvsIO)
 				if (outputPacket.length + 2 > JVS_MAX_PACKET_SIZE)
 				{
 					debug(0, "Error: Output packet size exceeded in CMD_READ_ANALOGS\n");
-					return JVS_STATUS_ERROR;
+					outputPacket.data[0] = STATUS_OVERFLOW;
+					return writePacket(&outputPacket);
 				}
 				/* By default left align the data */
 				int analogueData = analogueSnapshot[i] << jvsIO->analogueRestBits;
@@ -697,7 +704,8 @@ JVSStatus processPacket(JVSIO *jvsIO)
 			if (numberChannels > JVS_MAX_STATE_SIZE)
 			{
 				debug(0, "Error: Rotary channel count %d exceeds maximum %d in CMD_READ_ROTARY\n", numberChannels, JVS_MAX_STATE_SIZE);
-				return JVS_STATUS_ERROR;
+				outputPacket.data[outputPacket.length - 1] = REPORT_PARAMETER_ERROR1;
+				break;
 			}
 
 			/* Snapshot the rotary state to avoid holding the mutex over the output loop. */
@@ -712,7 +720,8 @@ JVSStatus processPacket(JVSIO *jvsIO)
 				if (outputPacket.length + 2 > JVS_MAX_PACKET_SIZE)
 				{
 					debug(0, "Error: Output packet size exceeded in CMD_READ_ROTARY\n");
-					return JVS_STATUS_ERROR;
+					outputPacket.data[0] = STATUS_OVERFLOW;
+					return writePacket(&outputPacket);
 				}
 				outputPacket.data[outputPacket.length] = rotarySnapshot[i] >> 8;
 				outputPacket.data[outputPacket.length + 1] = rotarySnapshot[i] & 0xFF;
@@ -728,7 +737,8 @@ JVSStatus processPacket(JVSIO *jvsIO)
 			if (outputPacket.length + 2 > JVS_MAX_PACKET_SIZE)
 			{
 				debug(0, "Error: Output packet size exceeded in CMD_READ_KEYPAD\n");
-				return JVS_STATUS_ERROR;
+				outputPacket.data[0] = STATUS_OVERFLOW;
+				return writePacket(&outputPacket);
 			}
 			outputPacket.data[outputPacket.length] = REPORT_SUCCESS;
 			outputPacket.data[outputPacket.length + 1] = 0x00;
@@ -754,7 +764,8 @@ JVSStatus processPacket(JVSIO *jvsIO)
 				if (outputPacket.length + 1 > JVS_MAX_PACKET_SIZE)
 				{
 					debug(0, "Error: Output packet size exceeded in CMD_READ_GPI\n");
-					return JVS_STATUS_ERROR;
+					outputPacket.data[0] = STATUS_OVERFLOW;
+					return writePacket(&outputPacket);
 				}
 				outputPacket.data[outputPacket.length++] = 0x00;
 			}
@@ -905,7 +916,9 @@ JVSStatus processPacket(JVSIO *jvsIO)
 			if (slot_index < 0 || slot_index >= JVS_MAX_STATE_SIZE)
 			{
 				debug(0, "Error: Slot index out of bounds in CMD_WRITE_COINS\n");
-				return JVS_STATUS_ERROR;
+				CHECK_OUTPUT_SPACE(&outputPacket, 1);
+				outputPacket.data[outputPacket.length++] = REPORT_PARAMETER_ERROR1;
+				break;
 			}
 
 			CHECK_OUTPUT_SPACE(&outputPacket, 1);
@@ -968,7 +981,9 @@ JVSStatus processPacket(JVSIO *jvsIO)
 			if (slot_index < 0 || slot_index >= JVS_MAX_STATE_SIZE)
 			{
 				debug(0, "Error: Slot index out of bounds in CMD_DECREASE_COINS\n");
-				return JVS_STATUS_ERROR;
+				CHECK_OUTPUT_SPACE(&outputPacket, 1);
+				outputPacket.data[outputPacket.length++] = REPORT_PARAMETER_ERROR1;
+				break;
 			}
 
 			CHECK_OUTPUT_SPACE(&outputPacket, 1);
@@ -1030,7 +1045,8 @@ JVSStatus processPacket(JVSIO *jvsIO)
 			if (numberGuns > JVS_MAX_STATE_SIZE / 2)
 			{
 				debug(0, "Error: Gun count %d exceeds maximum %d in CMD_READ_LIGHTGUN\n", numberGuns, JVS_MAX_STATE_SIZE / 2);
-				return JVS_STATUS_ERROR;
+				outputPacket.data[outputPacket.length - 1] = REPORT_PARAMETER_ERROR1;
+				break;
 			}
 
 			/* Snapshot the gun channel state to avoid holding the mutex over the output loop. */
@@ -1044,7 +1060,8 @@ JVSStatus processPacket(JVSIO *jvsIO)
 				if (outputPacket.length + 4 > JVS_MAX_PACKET_SIZE)
 				{
 					debug(0, "Error: Output packet size exceeded in CMD_READ_LIGHTGUN\n");
-					return JVS_STATUS_ERROR;
+					outputPacket.data[0] = STATUS_OVERFLOW;
+					return writePacket(&outputPacket);
 				}
 				/* Guard against a request for more guns than this IO board declares.
 				 * Channels beyond the configured count are reported as zero. */
@@ -1095,7 +1112,8 @@ JVSStatus processPacket(JVSIO *jvsIO)
 				if (outputPacket.length + 8 > JVS_MAX_PACKET_SIZE)
 				{
 					debug(0, "Error: Output packet size exceeded in CMD_NAMCO_SPECIFIC 0x01\n");
-					return JVS_STATUS_ERROR;
+					outputPacket.data[0] = STATUS_OVERFLOW;
+					return writePacket(&outputPacket);
 				}
 				for (int i = 0; i < 8; i++)
 					outputPacket.data[outputPacket.length++] = 0xFF;
@@ -1108,7 +1126,8 @@ JVSStatus processPacket(JVSIO *jvsIO)
 				if (outputPacket.length + 8 > JVS_MAX_PACKET_SIZE)
 				{
 					debug(0, "Error: Output packet size exceeded in CMD_NAMCO_SPECIFIC 0x02\n");
-					return JVS_STATUS_ERROR;
+					outputPacket.data[0] = STATUS_OVERFLOW;
+					return writePacket(&outputPacket);
 				}
 				/* Fixed I/O identity bytes as specified in the JVS WIP document */
 				unsigned char extId[] = {0x19, 0x97, 0x03, 0x05, 0x03, 0x19, 0x35, 0x29};
@@ -1123,7 +1142,8 @@ JVSStatus processPacket(JVSIO *jvsIO)
 				if (outputPacket.length + 1 > JVS_MAX_PACKET_SIZE)
 				{
 					debug(0, "Error: Output packet size exceeded in CMD_NAMCO_SPECIFIC 0x03\n");
-					return JVS_STATUS_ERROR;
+					outputPacket.data[0] = STATUS_OVERFLOW;
+					return writePacket(&outputPacket);
 				}
 				unsigned char dips = 0xFF;
 				outputPacket.data[outputPacket.length++] = dips;
@@ -1136,7 +1156,8 @@ JVSStatus processPacket(JVSIO *jvsIO)
 				if (outputPacket.length + 2 > JVS_MAX_PACKET_SIZE)
 				{
 					debug(0, "Error: Output packet size exceeded in CMD_NAMCO_SPECIFIC 0x04\n");
-					return JVS_STATUS_ERROR;
+					outputPacket.data[0] = STATUS_OVERFLOW;
+					return writePacket(&outputPacket);
 				}
 				outputPacket.data[outputPacket.length++] = 0xFF;
 				outputPacket.data[outputPacket.length++] = 0xFF;
