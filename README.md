@@ -95,6 +95,28 @@ sudo make install WEBUI=OFF
 
 This also always reconfigures cmake with the correct flag, so it works correctly even with an existing build directory.
 
+### Updating ModernJVS
+
+To update to the latest version, pull the repository and reinstall:
+
+```
+cd ModernJVS
+git pull
+sudo make install
+```
+
+This rebuilds the binary, repacks the DEB, reinstalls it, and restarts the services.
+
+### Uninstalling ModernJVS
+
+```
+sudo systemctl stop modernjvs modernjvs-webui
+sudo systemctl disable modernjvs modernjvs-webui
+sudo apt remove -y modernjvs
+```
+
+The package's post-remove script automatically cleans up runtime files created after installation (WebUI settings, password file, audit log) and removes the `/etc/modernjvs` directory once it is empty.
+
 ### Installing without auto-enabling services
 
 To install without automatically enabling and starting the systemd services:
@@ -282,6 +304,15 @@ Set the `DEFAULT_GAME` line to match your game. Available profiles are in `/etc/
 - Usually `/dev/ttyUSB0` for USB RS485 converters
 - May be `/dev/ttyUSB1` if you have multiple USB serial devices
 
+**Wii Remote IR Scale:**
+Controls how far the IR cursor travels across the screen per physical movement. Values above 1.0 extend the reachable area so that corners and edges are reachable; values below 1.0 reduce sensitivity.
+
+```
+WII_IR_SCALE 1.3  # cursor travels ~30% further per movement
+```
+
+Valid range: `0.1` to `5.0` (default `1.0` = no scaling).
+
 ## Controller Deadzone Support
 
 Configurable deadzone can be set in the config for each player's controller. Only affects controllers with analog sticks as it's primarily used to eliminate stick drift (unwanted movement from worn analog sticks).
@@ -422,6 +453,8 @@ No extra configuration is required — device detection and merging happen autom
 
 The Wii Remote's IR camera reports screen coordinates which ModernJVS maps to `CONTROLLER_ANALOGUE_X` / `CONTROLLER_ANALOGUE_Y`. This provides accurate light-gun style aiming for games like House of the Dead, Time Crisis, and Ghost Squad when using the appropriate game profile (e.g. `generic-shooting`).
 
+You can tune how far the cursor travels per physical movement with the `WII_IR_SCALE` config option (see [Key Configuration Options](#key-configuration-options)).
+
 ## Taiko no Tatsujin (Taiko Drum Master) Support
 
 ModernJVS **is capable** of emulating the I/O requirements for Taiko no Tatsujin games on Namco System 256. Here's what you need to know:
@@ -475,6 +508,49 @@ Use one of these I/O board configurations:
 
 - **Arcade drum hardware**: Original arcade drums use piezo sensors that output analog voltage, allowing the game to detect hit strength and distinguish between Don (center) and Ka (rim) hits. For DIY builds, consider using projects like Taiko-256 or DonCon2040 that provide proper analog signal conditioning.
 - **Standard controller support**: The game is fully playable with standard gamepads, arcade sticks, or keyboards using the digital button mappings. This provides an accessible way to play without specialized drum hardware.
+
+## CLI Reference
+
+The `modernjvs` binary accepts the following command-line options when run directly (the systemd service starts it with no arguments):
+
+| Option | Description |
+|--------|-------------|
+| `modernjvs [game]` | Override the default game profile. E.g. `sudo modernjvs initial-d` |
+| `--list` | List all detected input devices, grouped by Enabled / Disabled / No Mapping Present |
+| `--enable [controller]` | Enable a specific controller mapping or, if no name is given, all disabled controllers |
+| `--disable [controller]` | Disable a specific controller mapping or, if no name is given, all active controllers |
+| `--edit <name>` | Open a game or device mapping file in `sudo editor` |
+| `--debug` | Start in debug mode (equivalent to `DEBUG_MODE 1` in config) |
+| `--version` | Print the installed ModernJVS version and exit |
+| `--help` | Display usage information and exit |
+
+**Examples:**
+
+```bash
+# See which controllers are recognised
+sudo modernjvs --list
+
+# Disable a specific controller mapping so ModernJVS ignores that device
+sudo modernjvs --disable microsoft-x-box-360-pad
+
+# Re-enable it later
+sudo modernjvs --enable microsoft-x-box-360-pad
+
+# Edit a game profile
+sudo modernjvs --edit initial-d
+
+# Run manually with a specific game (overrides DEFAULT_GAME in config)
+sudo modernjvs initial-d
+```
+
+## DietPi Automation
+
+The `scripts/` directory contains two DietPi automation files that install ModernJVS hands-free during the first boot of a fresh DietPi image:
+
+- **`dietpi.txt`** – pre-configured DietPi first-run settings (WiFi, locale, password, etc.)
+- **`Automation_Custom_Script.sh`** – DietPi's automation hook; enables Bluetooth, clones the repository, and runs `make install` automatically.
+
+To use them, write DietPi to your SD card, open the visible boot partition, and copy both files into it (replace the existing `dietpi.txt` when prompted). See `scripts/README.md` for full details including how to configure WiFi and the default password.
 
 ## Additional Resources
 
