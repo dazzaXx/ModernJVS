@@ -519,8 +519,10 @@ JVSStatus processPacket(JVSIO *jvsIO)
 		{
 			debug(1, "CMD_REQUEST_ID - Returning ID: %s\n", jvsIO->capabilities.name);
 			size_t nameLen = strlen(jvsIO->capabilities.name);
-			/* Calculate available space: total buffer - current position - REPORT_SUCCESS byte - null terminator byte */
-			size_t availableSpace = JVS_MAX_PACKET_SIZE - outputPacket.length - 2;
+			/* Calculate available space: total buffer - current position - REPORT_SUCCESS byte - null terminator byte.
+			 * Subtract 3 (not 2) so that the resulting outputPacket.length after the "+= nameLen + 2" below
+			 * remains strictly below JVS_MAX_PACKET_SIZE; writePacket rejects length >= JVS_MAX_PACKET_SIZE. */
+			size_t availableSpace = JVS_MAX_PACKET_SIZE - outputPacket.length - 3;
 			
 			/* Check if the name fits in the packet buffer */
 			if (nameLen > availableSpace)
@@ -1042,9 +1044,14 @@ JVSStatus processPacket(JVSIO *jvsIO)
 			size = 1;
 			CHECK_OUTPUT_SPACE(&outputPacket, 1);
 			outputPacket.data[outputPacket.length++] = REPORT_SUCCESS;
-			char idData[100];
+			/* idData must be 101 bytes: up to 100 payload chars (spec maximum) + null terminator. */
+			char idData[101];
 			int i;
-			for (i = 0; i < 99; i++)
+			/* Loop limit is 100 (not 99) so that a full 99-character name's null terminator
+			 * at position i=99 is consumed and counted in `size`.  Without this, the null byte
+			 * would remain as the next byte in the command stream and be misinterpreted as a
+			 * 0x00 command, triggering STATUS_UNSUPPORTED for the rest of the batch. */
+			for (i = 0; i < 100; i++)
 			{
 				/* Prevent reading past end of the received packet data */
 				if (index + 1 + i >= (int)inputPacket.length - 1)
@@ -1055,8 +1062,8 @@ JVSStatus processPacket(JVSIO *jvsIO)
 					break;
 			}
 			// Ensure null termination. When the loop breaks on the null byte,
-			// idData[i] was just copied as '\0'. When the loop runs to i == 99
-			// without finding a null (malformed packet), we terminate at [99].
+			// idData[i] was just copied as '\0'. When the loop runs to i == 100
+			// without finding a null (malformed packet), we terminate at [100].
 			idData[i] = '\0';
 			debug(0, "CMD_CONVEY_ID - Main board ID: %s\n", idData);
 		}
@@ -1273,6 +1280,17 @@ JVSStatus readPacket(JVSPacket *packet)
 
 	while (!finished)
 	{
+		/* Guard: if the receive buffer is completely full and no SYNC byte was found to
+		 * compact it, every byte in it is framing garbage.  Calling readBytes() with a
+		 * length of 0 would return "EOF" immediately, causing an infinite timeout spin.
+		 * Discard the buffer and return a timeout so the caller retries cleanly. */
+		if (rxBytesAvailable >= JVS_MAX_PACKET_SIZE)
+		{
+			debug(1, "Warning: Receive buffer full with no SYNC byte; discarding %d bytes\n", rxBytesAvailable);
+			resetPacketParser();
+			return JVS_STATUS_ERROR_TIMEOUT;
+		}
+
 		int bytesRead = readBytes(inputBuffer + rxBytesAvailable, JVS_MAX_PACKET_SIZE - rxBytesAvailable);
 
 		if (bytesRead < 0)
