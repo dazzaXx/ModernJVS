@@ -479,19 +479,17 @@ JVSStatus processPacket(JVSIO *jvsIO)
 
 		/* CMD_SET_COMMS_MODE is a broadcast-only command (NODE NO.FF) and the JVS
 		 * spec defines its response size as 0 — no acknowledge should be sent.
-		 * We accept the command and return silently. */
+		 * Return immediately without calling writePacket so nothing is transmitted. */
 		case CMD_SET_COMMS_MODE:
 		{
-			size = 2;
 			if (index + 1 >= (int)inputPacket.length - 1)
 			{
 				debug(0, "Error: CMD_SET_COMMS_MODE - packet too short\n");
-				break;
+				return JVS_STATUS_SUCCESS;
 			}
 			debug(1, "CMD_SET_COMMS_MODE - Mode 0x%02X (no response required)\n", inputPacket.data[index + 1]);
-			break;
+			return JVS_STATUS_SUCCESS;
 		}
-		break;
 
 		/* Ask for the name of the IO board */
 		case CMD_REQUEST_ID:

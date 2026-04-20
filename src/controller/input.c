@@ -125,7 +125,6 @@ static int nextSlotOrder      = 0;
 
 typedef struct
 {
-    ThreadSharedData *sharedData_p;
     JVSIO *jvsIO;
     char devicePath[MAX_PATH_LENGTH];
     EVInputs inputs;

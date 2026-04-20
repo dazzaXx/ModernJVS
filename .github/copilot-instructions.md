@@ -94,7 +94,6 @@ There is **no unit test suite**. Validate changes by building successfully and v
 ### Sense Line
 - The sense line (GPIO pin 26 by default, via `libgpiod`) signals the arcade board that a device is present.
 - On program restart, pulse LOW (200 ms) then FLOAT (100 ms stabilization) to trigger arcade re-enumeration.
-- **Namco 246/256**: requires reactive pulsing – detect wrong-address packets and re-pulse every second.
 
 ### GPIO / libgpiod
 - `libgpiod` is **required** (`pkg_check_modules(LIBGPIOD REQUIRED libgpiod)`).
