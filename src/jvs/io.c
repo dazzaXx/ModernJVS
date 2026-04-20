@@ -206,7 +206,7 @@ int setGun(JVSIO *io, JVSInput channel, double value)
 	if (channel % 2 == 0)
 		io->state.gunChannel[channel] = (int)((double)value * (double)io->gunXMax);
 	else
-		io->state.gunChannel[channel] = (int)((double)(1.0 - value) * (double)io->gunYMax);
+		io->state.gunChannel[channel] = (int)((double)value * (double)io->gunYMax);
 	pthread_mutex_unlock(&io->state_mutex);
 	return 1;
 }
@@ -257,14 +257,11 @@ int incrementRotary(JVSIO *io, JVSInput channel, int delta)
 
 	pthread_mutex_lock(&io->state_mutex);
 	io->state.rotaryChannel[channel] += delta;
-	/* Clamp to the signed 16-bit range that the JVS wire format can represent.
-	 * Without this, a fast spinner or trackball can accumulate a value that
-	 * overflows int (undefined behaviour in C99) or silently truncates to the
-	 * wrong 16-bit value when sent via CMD_READ_ROTARY. */
-	if (io->state.rotaryChannel[channel] > INT16_MAX)
-		io->state.rotaryChannel[channel] = INT16_MAX;
-	else if (io->state.rotaryChannel[channel] < INT16_MIN)
-		io->state.rotaryChannel[channel] = INT16_MIN;
+	/* Cast through int16_t to wrap modularly at the 16-bit boundary, then
+	 * widen back to int.  The JVS master computes per-frame delta using
+	 * 16-bit modular arithmetic; wrapping here keeps the counter in the
+	 * range that the wire format can represent and allows natural rollover. */
+	io->state.rotaryChannel[channel] = (int)(int16_t)io->state.rotaryChannel[channel];
 	pthread_mutex_unlock(&io->state_mutex);
 	return 1;
 }
