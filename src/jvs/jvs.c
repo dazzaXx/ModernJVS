@@ -485,7 +485,7 @@ JVSStatus processPacket(JVSIO *jvsIO)
 			if (index + 1 >= (int)inputPacket.length - 1)
 			{
 				debug(0, "Error: CMD_SET_COMMS_MODE - packet too short\n");
-				return JVS_STATUS_SUCCESS;
+				return JVS_STATUS_ERROR;
 			}
 			debug(1, "CMD_SET_COMMS_MODE - Mode 0x%02X (no response required)\n", inputPacket.data[index + 1]);
 			return JVS_STATUS_SUCCESS;
