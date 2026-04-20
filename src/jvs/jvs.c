@@ -308,6 +308,12 @@ static void writeFeatures(JVSPacket *packet, JVSCapabilities *capabilities)
  */
 JVSStatus processPacket(JVSIO *jvsIO)
 {
+	/* Save the root IO pointer before the routing loop may advance jvsIO to a
+	 * chained device.  Broadcast commands (e.g. CMD_RESET) must always operate
+	 * on the full chain starting from the root, regardless of which device the
+	 * enclosing packet was addressed to. */
+	JVSIO *rootIO = jvsIO;
+
 	/* Initially read in a packet */
 	JVSStatus readPacketStatus = readPacket(&inputPacket);
 	if (readPacketStatus != JVS_STATUS_SUCCESS)
@@ -402,9 +408,26 @@ JVSStatus processPacket(JVSIO *jvsIO)
 		/* The arcade hardware sends a reset command and we clear our memory */
 		case CMD_RESET:
 		{
-			debug(1, "CMD_RESET - Resetting all devices\n");
 			size = 2;
-			JVSIO *tmpIO = jvsIO;
+			if (index + 1 >= (int)inputPacket.length - 1)
+			{
+				debug(0, "Error: CMD_RESET - packet too short\n");
+				break;
+			}
+			/* Per JVS spec the second byte must be 0xD9 (CMD_RESET_ARG).
+			 * This extra guard byte exists so that a single corrupted byte
+			 * on the RS485 bus cannot accidentally trigger a global reset.
+			 * Consume both bytes but take no action if the argument is wrong. */
+			if (inputPacket.data[index + 1] != CMD_RESET_ARG)
+			{
+				debug(0, "Warning: CMD_RESET received with invalid argument 0x%02X (expected 0x%02X), ignoring\n",
+				      inputPacket.data[index + 1], CMD_RESET_ARG);
+				break;
+			}
+			debug(1, "CMD_RESET - Resetting all devices\n");
+			/* Walk from rootIO so that even a non-broadcast (malformed) packet
+			 * addressed to a chained device resets the entire chain. */
+			JVSIO *tmpIO = rootIO;
 			__atomic_store_n(&tmpIO->deviceID, -1, __ATOMIC_RELEASE);
 			while (tmpIO->chainedIO != NULL)
 			{
@@ -479,27 +502,27 @@ JVSStatus processPacket(JVSIO *jvsIO)
 
 		/* CMD_SET_COMMS_MODE is a broadcast-only command (NODE NO.FF) and the JVS
 		 * spec defines its response size as 0 — no acknowledge should be sent.
-		 * We accept the command and return silently. */
+		 * Return immediately without calling writePacket so nothing is transmitted. */
 		case CMD_SET_COMMS_MODE:
 		{
-			size = 2;
 			if (index + 1 >= (int)inputPacket.length - 1)
 			{
 				debug(0, "Error: CMD_SET_COMMS_MODE - packet too short\n");
-				break;
+				return JVS_STATUS_ERROR;
 			}
 			debug(1, "CMD_SET_COMMS_MODE - Mode 0x%02X (no response required)\n", inputPacket.data[index + 1]);
-			break;
+			return JVS_STATUS_SUCCESS;
 		}
-		break;
 
 		/* Ask for the name of the IO board */
 		case CMD_REQUEST_ID:
 		{
 			debug(1, "CMD_REQUEST_ID - Returning ID: %s\n", jvsIO->capabilities.name);
 			size_t nameLen = strlen(jvsIO->capabilities.name);
-			/* Calculate available space: total buffer - current position - REPORT_SUCCESS byte - null terminator byte */
-			size_t availableSpace = JVS_MAX_PACKET_SIZE - outputPacket.length - 2;
+			/* Calculate available space: total buffer - current position - REPORT_SUCCESS byte - null terminator byte.
+			 * Subtract 3 (not 2) so that the resulting outputPacket.length after the "+= nameLen + 2" below
+			 * remains strictly below JVS_MAX_PACKET_SIZE; writePacket rejects length >= JVS_MAX_PACKET_SIZE. */
+			size_t availableSpace = JVS_MAX_PACKET_SIZE - outputPacket.length - 3;
 			
 			/* Check if the name fits in the packet buffer */
 			if (nameLen > availableSpace)
@@ -586,12 +609,13 @@ JVSStatus processPacket(JVSIO *jvsIO)
 			outputPacket.data[outputPacket.length] = REPORT_SUCCESS;
 			outputPacket.data[outputPacket.length + 1] = switchSnapshot[0];
 			outputPacket.length += 2;
-			/* Clamp switch-byte count to 2: our inputSwitch register is 16 bits wide.
-			 * More than 2 bytes would require a right-shift of (8 - j*8) with j>=2,
-			 * i.e. a negative shift amount, which is undefined behaviour in C99. */
+			/* Clamp switch-byte count to [1, 2]: our inputSwitch register is 16 bits wide.
+			 * A value of 0 would produce an empty response (no bytes per player) which
+			 * misaligns every subsequent command in the same batch.  More than 2 bytes
+			 * would require a shift of (8 - j*8) with j>=2, i.e. a negative shift
+			 * amount, which is undefined behaviour in C99. */
 			int playerSwitchBytes = inputPacket.data[index + 2];
-			if (playerSwitchBytes > 2)
-				playerSwitchBytes = 2;
+			playerSwitchBytes = (playerSwitchBytes < 1) ? 1 : (playerSwitchBytes > 2) ? 2 : playerSwitchBytes;
 			for (int i = 0; i < inputPacket.data[index + 1]; i++)
 			{
 				// Bounds check to prevent inputSwitch array overflow
@@ -1020,9 +1044,14 @@ JVSStatus processPacket(JVSIO *jvsIO)
 			size = 1;
 			CHECK_OUTPUT_SPACE(&outputPacket, 1);
 			outputPacket.data[outputPacket.length++] = REPORT_SUCCESS;
-			char idData[100];
+			/* idData must be 101 bytes: up to 100 payload chars (spec maximum) + null terminator. */
+			char idData[101];
 			int i;
-			for (i = 0; i < 99; i++)
+			/* Loop limit is 100 (not 99) so that a full 99-character name's null terminator
+			 * at position i=99 is consumed and counted in `size`.  Without this, the null byte
+			 * would remain as the next byte in the command stream and be misinterpreted as a
+			 * 0x00 command, triggering STATUS_UNSUPPORTED for the rest of the batch. */
+			for (i = 0; i < 100; i++)
 			{
 				/* Prevent reading past end of the received packet data */
 				if (index + 1 + i >= (int)inputPacket.length - 1)
@@ -1033,8 +1062,8 @@ JVSStatus processPacket(JVSIO *jvsIO)
 					break;
 			}
 			// Ensure null termination. When the loop breaks on the null byte,
-			// idData[i] was just copied as '\0'. When the loop runs to i == 99
-			// without finding a null (malformed packet), we terminate at [99].
+			// idData[i] was just copied as '\0'. When the loop runs to i == 100
+			// without finding a null (malformed packet), we terminate at [100].
 			idData[i] = '\0';
 			debug(0, "CMD_CONVEY_ID - Main board ID: %s\n", idData);
 		}
@@ -1107,6 +1136,10 @@ JVSStatus processPacket(JVSIO *jvsIO)
 				break;
 			}
 
+			/* Record the output position before writing REPORT_SUCCESS so that the
+			 * default case can restore the length exactly if the sub-command turns
+			 * out to be unsupported, without relying on a hard-coded decrement. */
+			unsigned char namcoReportOffset = (unsigned char)outputPacket.length;
 			CHECK_OUTPUT_SPACE(&outputPacket, 1);
 			outputPacket.data[outputPacket.length++] = REPORT_SUCCESS;
 
@@ -1198,6 +1231,14 @@ JVSStatus processPacket(JVSIO *jvsIO)
 			default:
 			{
 				debug(0, "CMD_NAMCO_UNSUPPORTED - Unsupported Namco command: 0x%02hhX\n", inputPacket.data[index + 1]);
+				/* Restore the output length to the position recorded before REPORT_SUCCESS
+				 * was written, then return STATUS_UNSUPPORTED for the whole packet.
+				 * Without this, an unsupported sub-command would leave a dangling
+				 * REPORT_SUCCESS in the response with no data following it, which would
+				 * cause Namco hardware to misparse subsequent bytes. */
+				outputPacket.length = namcoReportOffset;
+				outputPacket.data[0] = STATUS_UNSUPPORTED;
+				return writePacket(&outputPacket);
 			}
 			}
 		}
@@ -1239,6 +1280,17 @@ JVSStatus readPacket(JVSPacket *packet)
 
 	while (!finished)
 	{
+		/* Guard: if the receive buffer is completely full and no SYNC byte was found to
+		 * compact it, every byte in it is framing garbage.  Calling readBytes() with a
+		 * length of 0 would return "EOF" immediately, causing an infinite timeout spin.
+		 * Discard the buffer and return a timeout so the caller retries cleanly. */
+		if (rxBytesAvailable >= JVS_MAX_PACKET_SIZE)
+		{
+			debug(1, "Warning: Receive buffer full with no SYNC byte; discarding %d bytes\n", rxBytesAvailable);
+			resetPacketParser();
+			return JVS_STATUS_ERROR_TIMEOUT;
+		}
+
 		int bytesRead = readBytes(inputBuffer + rxBytesAvailable, JVS_MAX_PACKET_SIZE - rxBytesAvailable);
 
 		if (bytesRead < 0)

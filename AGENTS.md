@@ -59,7 +59,6 @@ There is no automated test suite. Validate changes by:
 | Serial buffer flush | `tcflush()` then `usleep(100000)` (100 ms) before read after reset |
 | Wiimote pairing | Bluetooth only — no USB Wiimotes exist; always use proximity-based merge |
 | Hot-plug checksum errors | Expected during reinitialization; log shows this. |
-| Namco 246/256 re-enum | Reactive sense line pulse on wrong-address packet detection |
 | libgpiod version | CMake auto-detects; `GPIOD_API_V2` defined for v2+ |
 | GPIO interface | Use libgpiod exclusively — sysfs GPIO is not supported |
 
