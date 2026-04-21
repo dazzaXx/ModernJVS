@@ -562,17 +562,17 @@ static void test_setGun_x_channel(void)
     TEST_PASS();
 }
 
-static void test_setGun_y_channel_inverted(void)
+static void test_setGun_y_channel(void)
 {
-    TEST_BEGIN(test_setGun_y_channel_inverted);
+    TEST_BEGIN(test_setGun_y_channel);
     JVSIO io = make_test_io();  /* gunYBits=12, gunYMax=4095 */
 
-    /* Channel 1 = Y for gun 0, Y is inverted: stored as (1.0 - value) * gunYMax */
+    /* Channel 1 = Y for gun 0: stored as value * gunYMax */
     setGun(&io, 1, 0.0);
-    ASSERT_EQ_INT(io.state.gunChannel[1], 4095, "Y=0 → stored as 4095 (max)");
+    ASSERT_EQ_INT(io.state.gunChannel[1], 0, "Y=0.0 → stored as 0");
 
     setGun(&io, 1, 1.0);
-    ASSERT_EQ_INT(io.state.gunChannel[1], 0, "Y=1.0 → stored as 0 (min)");
+    ASSERT_EQ_INT(io.state.gunChannel[1], 4095, "Y=1.0 → stored as 4095 (max)");
     TEST_PASS();
 }
 
@@ -605,8 +605,8 @@ static void test_setGun_out_of_range(void)
  * producing out-of-range channel data.
  *   X channel (even): stored as value * gunXMax → >1.0 clamps to gunXMax,
  *                                                   <0.0 clamps to 0.
- *   Y channel (odd):  stored as (1-value) * gunYMax → value>1.0 → stored 0,
- *                                                       value<0.0 → stored gunYMax.
+ *   Y channel (odd):  stored as value * gunYMax → >1.0 clamps to gunYMax,
+ *                                                   <0.0 clamps to 0.
  */
 static void test_setGun_value_clamping(void)
 {
@@ -622,13 +622,13 @@ static void test_setGun_value_clamping(void)
     setGun(&io, 0, -1.0);
     ASSERT_EQ_INT(io.state.gunChannel[0], 0, "X value < 0.0 clamped to 0");
 
-    /* Y: value > 1.0 clamps to 1.0 → stored as (1-1)*gunYMax = 0 */
+    /* Y: value > 1.0 clamps to 1.0 → stored as 1.0*gunYMax = 4095 */
     setGun(&io, 1, 5.0);
-    ASSERT_EQ_INT(io.state.gunChannel[1], 0, "Y value > 1.0 clamped: stored as 0");
+    ASSERT_EQ_INT(io.state.gunChannel[1], 4095, "Y value > 1.0 clamped to gunYMax");
 
-    /* Y: value < 0.0 clamps to 0.0 → stored as (1-0)*gunYMax = 4095 */
+    /* Y: value < 0.0 clamps to 0.0 → stored as 0.0*gunYMax = 0 */
     setGun(&io, 1, -1.0);
-    ASSERT_EQ_INT(io.state.gunChannel[1], 4095, "Y value < 0.0 clamped: stored as gunYMax");
+    ASSERT_EQ_INT(io.state.gunChannel[1], 0, "Y value < 0.0 clamped to 0");
 
     TEST_PASS();
 }
@@ -2396,9 +2396,9 @@ static void test_processPacket_namco_specific_program_date(void)
     JVSResponse r = jvs_read_response(afd);
     ASSERT(r.valid == 1, "response valid");
     ASSERT_EQ_INT(r.data[1], REPORT_SUCCESS, "REPORT_SUCCESS");
-    /* First two bytes of date: 0x19 0x98 (year 1998) */
-    ASSERT_EQ_INT(r.data[2], 0x19, "century 0x19");
-    ASSERT_EQ_INT(r.data[3], 0x98, "year 0x98");
+    /* First two bytes of extId: 0x19 0x97 */
+    ASSERT_EQ_INT(r.data[2], 0x19, "extId byte 0 = 0x19");
+    ASSERT_EQ_INT(r.data[3], 0x97, "extId byte 1 = 0x97");
 
     close(sv[0]); close(sv[1]); serialIO = -1;
     TEST_PASS();
@@ -2985,15 +2985,13 @@ static void test_processPacket_cmd_set_comms_mode(void)
     int afd = open_test_socket(sv);
     ASSERT(afd >= 0, "socketpair");
 
-    /* Set comms mode 0x01; emulator always acknowledges without changing anything */
+    /* Set comms mode 0x01; per JVS spec CMD_SET_COMMS_MODE is broadcast-only
+     * and requires no response — the emulator returns immediately without
+     * calling writePacket. */
     unsigned char cmd[] = {CMD_SET_COMMS_MODE, 0x01};
     JVSStatus s = run_processPacket(&io, afd, 0x01, cmd, 2);
     ASSERT(s == JVS_STATUS_SUCCESS, "CMD_SET_COMMS_MODE SUCCESS");
-
-    JVSResponse r = jvs_read_response(afd);
-    ASSERT(r.valid == 1, "response valid");
-    ASSERT_EQ_INT(r.data[0], STATUS_SUCCESS,  "STATUS_SUCCESS");
-    ASSERT_EQ_INT(r.data[1], REPORT_SUCCESS,  "REPORT_SUCCESS");
+    ASSERT(!fd_has_data(afd), "CMD_SET_COMMS_MODE produces no response");
 
     close(sv[0]); close(sv[1]); serialIO = -1;
     TEST_PASS();
@@ -3104,8 +3102,8 @@ static void test_processPacket_cmd_subtract_payout(void)
     ASSERT(afd >= 0, "socketpair");
 
     /* Subtract payout: slot=1, amount high=0x00 low=0x05 */
-    unsigned char cmd[] = {CMD_SUBTRACT_PAYOUT, 0x00, 0x05};
-    JVSStatus s = run_processPacket(&io, afd, 0x01, cmd, 3);
+    unsigned char cmd[] = {CMD_SUBTRACT_PAYOUT, 0x01, 0x00, 0x05};
+    JVSStatus s = run_processPacket(&io, afd, 0x01, cmd, 4);
     ASSERT(s == JVS_STATUS_SUCCESS, "CMD_SUBTRACT_PAYOUT SUCCESS");
 
     JVSResponse r = jvs_read_response(afd);
@@ -3208,12 +3206,14 @@ static void test_processPacket_cmd_read_lightgun_y_channel(void)
 
 /*
  * CMD_READ_LIGHTGUN with two guns: verify both guns' X/Y values are reported.
- * Gun 1 is at (0, 0) (left/top), gun 2 is at (1.0, 1.0) (right/bottom).
+ * Gun 1 is at (0, 4095) (left/bottom), gun 2 is at (4095, 0) (right/top).
  *
- * setGun(even, 0.0) → xMax * 0.0 = 0.
- * setGun(odd, 1.0) → yMax * (1.0-1.0) = 0.
- * setGun(even, 1.0) → xMax * 1.0 = 4095.
- * setGun(odd, 0.0) → yMax * (1.0-0.0) = 4095.
+ * setGun(even, value) → xMax * value.
+ * setGun(odd,  value) → yMax * value.
+ * setGun(0, 0.0) → channel[0] = 0.
+ * setGun(1, 1.0) → channel[1] = 4095.
+ * setGun(2, 1.0) → channel[2] = 4095.
+ * setGun(3, 0.0) → channel[3] = 0.
  */
 static void test_processPacket_cmd_read_lightgun_two_guns(void)
 {
@@ -3221,12 +3221,12 @@ static void test_processPacket_cmd_read_lightgun_two_guns(void)
 
     JVSIO io = make_test_io();  /* gunChannels=2, 12-bit, restBits=4 */
     io.deviceID = 0x01;
-    /* Gun 1: left/top corner → X=0, Y=0 */
+    /* Gun 1: X=0, Y=4095 */
     setGun(&io, 0, 0.0);  /* channel[0] = 0    */
-    setGun(&io, 1, 1.0);  /* channel[1] = (1.0-1.0)*4095 = 0 */
-    /* Gun 2: right/bottom corner → X=4095, Y=4095 */
+    setGun(&io, 1, 1.0);  /* channel[1] = 4095 */
+    /* Gun 2: X=4095, Y=0 */
     setGun(&io, 2, 1.0);  /* channel[2] = 4095 */
-    setGun(&io, 3, 0.0);  /* channel[3] = (1.0-0.0)*4095 = 4095 */
+    setGun(&io, 3, 0.0);  /* channel[3] = 0    */
 
     int sv[2];
     int afd = open_test_socket(sv);
@@ -3241,15 +3241,15 @@ static void test_processPacket_cmd_read_lightgun_two_guns(void)
     /* Gun 1 X=0: 0<<4=0 */
     ASSERT_EQ_INT(r.data[2], 0x00, "gun1 X high = 0x00");
     ASSERT_EQ_INT(r.data[3], 0x00, "gun1 X low = 0x00");
-    /* Gun 1 Y=0: 0<<4=0 */
-    ASSERT_EQ_INT(r.data[4], 0x00, "gun1 Y high = 0x00");
-    ASSERT_EQ_INT(r.data[5], 0x00, "gun1 Y low = 0x00");
+    /* Gun 1 Y=4095: 4095<<4 = 65520 = 0xFFF0 */
+    ASSERT_EQ_INT(r.data[4], 0xFF, "gun1 Y high = 0xFF");
+    ASSERT_EQ_INT(r.data[5], 0xF0, "gun1 Y low = 0xF0");
     /* Gun 2 X=4095: 4095<<4 = 65520 = 0xFFF0 */
     ASSERT_EQ_INT(r.data[6], 0xFF, "gun2 X high = 0xFF");
     ASSERT_EQ_INT(r.data[7], 0xF0, "gun2 X low = 0xF0");
-    /* Gun 2 Y=4095: 4095<<4 = 65520 = 0xFFF0 */
-    ASSERT_EQ_INT(r.data[8], 0xFF, "gun2 Y high = 0xFF");
-    ASSERT_EQ_INT(r.data[9], 0xF0, "gun2 Y low = 0xF0");
+    /* Gun 2 Y=0: 0<<4=0 */
+    ASSERT_EQ_INT(r.data[8], 0x00, "gun2 Y high = 0x00");
+    ASSERT_EQ_INT(r.data[9], 0x00, "gun2 Y low = 0x00");
 
     close(sv[0]); close(sv[1]); serialIO = -1;
     TEST_PASS();
@@ -3345,10 +3345,10 @@ static void test_processPacket_namco_specific_18(void)
 }
 
 /*
- * An unrecognised Namco sub-command (not 0x01..0x04 or 0x18) must be handled
- * gracefully: the enclosing CMD_NAMCO_SPECIFIC handler already emitted
- * REPORT_SUCCESS before the sub-command switch, so the response must still
- * carry STATUS_SUCCESS + REPORT_SUCCESS without crashing.
+ * An unrecognised Namco sub-command (not 0x01..0x04 or 0x18) must cause the
+ * response STATUS byte to be STATUS_UNSUPPORTED (0x02).  The handler rolls
+ * back the preliminary REPORT_SUCCESS it emitted and returns STATUS_UNSUPPORTED
+ * to signal to the master that the command is not implemented.
  */
 static void test_processPacket_namco_specific_unknown(void)
 {
@@ -3367,8 +3367,7 @@ static void test_processPacket_namco_specific_unknown(void)
 
     JVSResponse r = jvs_read_response(afd);
     ASSERT(r.valid == 1, "response valid");
-    ASSERT_EQ_INT(r.data[0], STATUS_SUCCESS,  "STATUS_SUCCESS");
-    ASSERT_EQ_INT(r.data[1], REPORT_SUCCESS,  "REPORT_SUCCESS");
+    ASSERT_EQ_INT(r.data[0], STATUS_UNSUPPORTED, "STATUS_UNSUPPORTED");
 
     close(sv[0]); close(sv[1]); serialIO = -1;
     TEST_PASS();
@@ -3445,7 +3444,7 @@ static const TestFn tests[] = {
     test_setAnalogue_all_channels,
     test_setAnalogue_value_clamping,
     test_setGun_x_channel,
-    test_setGun_y_channel_inverted,
+    test_setGun_y_channel,
     test_setGun_gun2,
     test_setGun_out_of_range,
     test_setGun_value_clamping,
