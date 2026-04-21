@@ -561,7 +561,7 @@ To use them, write DietPi to your SD card, open the visible boot partition, and 
 
 ## Developer Test Suite
 
-ModernJVS includes a test suite (`tests/test_modernjvs.c`) that exercises the JVS packet framing, IO state management, config parsing, and debug-level filtering — all without requiring real hardware (it uses a `socketpair` to emulate the RS485 wire).
+ModernJVS includes a test suite (`src/testsuite/test_modernjvs.c`) that exercises the JVS packet framing, IO state management, config parsing, and debug-level filtering — all without requiring real hardware (it uses a `socketpair` to emulate the RS485 wire).
 
 > **Note:** The test suite is intended for development and is **not built by default**. There is no need to run it for normal use.
 

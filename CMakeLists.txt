@@ -166,7 +166,7 @@ include(CPack)
 option(BUILD_TESTS "Build the ModernJVS test suite" OFF)
 if(BUILD_TESTS)
     set(TEST_SOURCES
-        tests/test_modernjvs.c
+        src/testsuite/test_modernjvs.c
         src/console/cli.c
         src/console/config.c
         src/console/debug.c
