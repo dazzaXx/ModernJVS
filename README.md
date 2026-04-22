@@ -74,6 +74,8 @@ git clone https://github.com/dazzaXx/ModernJVS
 sudo make install
 ```
 
+**Personally, I prefer DietPi just because you can use it as a minimal image and it works great for the old Pi models, although with the old models, the install and setup times are extremely slow. Other than that however, I have noticed no lag whatsoever with a RPi 1 during testing.**
+
 ### Installing without the WebUI
 
 If you don't want the WebUI installed (e.g. on a minimal headless system), the recommended method is:
@@ -140,8 +142,7 @@ sudo systemctl enable --now modernjvs-webui
 
 ### Raspberry Pi Models
 ModernJVS supports all Raspberry Pi models including:
-- Raspberry Pi 1, 2, 3, 4
-- Raspberry Pi 5 (with automatic GPIO chip detection)
+- Raspberry Pi 1, 2, 3, 4 & 5
 - Raspberry Pi Zero/Zero W (may have performance limitations on demanding games)
 
 The software automatically detects the correct GPIO chip for your Raspberry Pi model.
