@@ -1,15 +1,10 @@
 # Version 6.0.0-dev - IN DEVELOPMENT & TESTING - Code Refactoring, More Bugfixes and Optimizations
 
-# ![ModernJVS](docs/modernjvs2.png)
+# ![ModernJVS](docs/modernjvs3.png)
 
 ModernJVS is fork of OpenJVS, an emulator for I/O boards in arcade machines that use the JVS protocol. It requires a USB RS485 converter.
 
 Updated to use libgpiod for GPIO access, with support for the Raspberry Pi 5. Optimized code and new features.
-
-As of v5.6.0, Sysfs support is no longer supported as no one should be running on old and outdated linux kernels.
-
-All code is tested vigorously by me personally to make sure it actually works and is secure.
-I'm not some master coder nor would I claim to be, Copilot does the majority of the heavy lifting when updating and fixing bugs, adding in new features.
 
 Thank you to the team responsible for making OpenJVS in the first place. ❤️
 
@@ -45,6 +40,8 @@ ModernJVS supports a wide range of arcade hardware platforms:
 - Taito Type X+
 - Taito Type X2
 - exA-Arcadia
+
+*Technically, any arcade hardware that uses JVS should work with this software, however it may not be configured properly for it.*
 
 ## Popular Games Supported
 
