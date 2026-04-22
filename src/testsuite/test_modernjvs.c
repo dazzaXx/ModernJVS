@@ -1192,7 +1192,7 @@ static void test_readPacket_zero_length(void)
     JVSPacket pkt;
     memset(&pkt, 0, sizeof(pkt));
     JVSStatus s = readPacket(&pkt);
-    ASSERT(s == JVS_STATUS_ERROR_CHECKSUM, "zero-length packet → ERROR_CHECKSUM");
+    ASSERT(s == JVS_STATUS_ERROR, "zero-length packet → ERROR (framing error, not checksum error)");
 
     close(fds[0]);
     close(fds[1]);
