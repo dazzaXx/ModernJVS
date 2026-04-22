@@ -470,8 +470,18 @@ JVSStatus processPacket(JVSIO *jvsIO)
 			if (ioToAssign->deviceID == -1)
 			{
 				int newID = inputPacket.data[index + 1];
-				__atomic_store_n(&ioToAssign->deviceID, newID, __ATOMIC_RELEASE);
-				debug(1, "CMD_ASSIGN_ADDR - Assigning address 0x%02X\n", newID);
+				/* Per JVS spec, valid slave addresses are 0x01–0x1F.  0x00 is
+				 * reserved for the bus master and 0xFF for broadcast; assigning
+				 * either would make the device respond to packets not meant for it. */
+				if (newID < DEVICE_ADDR_START || newID > 0x1F)
+				{
+					debug(0, "Warning: CMD_ASSIGN_ADDR - address 0x%02X is outside valid range 0x01-0x1F, ignoring\n", newID);
+				}
+				else
+				{
+					__atomic_store_n(&ioToAssign->deviceID, newID, __ATOMIC_RELEASE);
+					debug(1, "CMD_ASSIGN_ADDR - Assigning address 0x%02X\n", newID);
+				}
 			}
 			else
 			{
@@ -1373,17 +1383,19 @@ JVSStatus readPacket(JVSPacket *packet)
 			case 1: // If we have not yet got the length
 				packet->length = inputBuffer[index];
 				rxChecksum = (rxChecksum + packet->length) & 0xFF;
-				/* A JVS length of 0 is always malformed: the length field counts
+				/* A JVS length of 0 is always a framing error: the length field counts
 				 * the bytes that follow it including the checksum itself, so the
 				 * minimum valid value is 1.  If we accepted 0, the expression
 				 * (packet->length - 1) below would wrap to -1 (int promotion of
 				 * unsigned char 0 minus 1) and the checksum guard would never
 				 * trigger, causing every subsequent byte to be written to
-				 * packet->data[rxDataIndex++] without bound — a stack overflow. */
+				 * packet->data[rxDataIndex++] without bound — a stack overflow.
+				 * Return JVS_STATUS_ERROR (not ERROR_CHECKSUM) so the caller does
+				 * not send a spurious STATUS_CHECKSUM_FAILURE to the master. */
 				if (packet->length == 0)
 				{
 					resetPacketParser();
-					return JVS_STATUS_ERROR_CHECKSUM;
+					return JVS_STATUS_ERROR;
 				}
 				rxPhase++;
 				break;
