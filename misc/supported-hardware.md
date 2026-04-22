@@ -4,9 +4,7 @@
 
 ModernJVS supports all Raspberry Pi models including:
 - Raspberry Pi 1, 2, 3, 4 & 5
-- Raspberry Pi Zero/Zero W (may have performance limitations on demanding games)
-
-The software automatically detects the correct GPIO chip for your Raspberry Pi model.
+- Raspberry Pi Zero / Zero (2) W *(Not tested but should work fine.)*
 
 ## Controllers & Input Devices
 
