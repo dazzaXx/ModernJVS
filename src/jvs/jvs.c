@@ -976,7 +976,8 @@ JVSStatus processPacket(JVSIO *jvsIO)
 
 		case CMD_WRITE_DISPLAY:
 		{
-			if (index + 2 >= (int)inputPacket.length - 1)
+			/* Need at least cmd(1)+cols(1)+rows(1)+encoding(1) = 4 bytes */
+			if (index + 3 >= (int)inputPacket.length - 1)
 			{
 				debug(0, "Error: CMD_WRITE_DISPLAY - packet too short\n");
 				break;
@@ -1044,14 +1045,17 @@ JVSStatus processPacket(JVSIO *jvsIO)
 			size = 1;
 			CHECK_OUTPUT_SPACE(&outputPacket, 1);
 			outputPacket.data[outputPacket.length++] = REPORT_SUCCESS;
-			/* idData must be 101 bytes: up to 100 payload chars (spec maximum) + null terminator. */
-			char idData[101];
+			/* idData must be 102 bytes: up to 100 payload chars (spec maximum) + null terminator
+			 * + 1 spare so that the post-loop idData[i]='\0' is always in bounds even when
+			 * the loop runs all 101 iterations (i=0..100) on a maximum-length string. */
+			char idData[102];
 			int i;
-			/* Loop limit is 100 (not 99) so that a full 99-character name's null terminator
-			 * at position i=99 is consumed and counted in `size`.  Without this, the null byte
-			 * would remain as the next byte in the command stream and be misinterpreted as a
-			 * 0x00 command, triggering STATUS_UNSUPPORTED for the rest of the batch. */
-			for (i = 0; i < 100; i++)
+			/* Loop limit is <= 100 (i.e. 101 iterations) so that a full 100-character name's
+			 * null terminator at position i=100 is consumed and counted in `size`.  Without
+			 * this, the null byte would remain as the next byte in the command stream and be
+			 * misinterpreted as a 0x00 command, triggering STATUS_UNSUPPORTED for the rest
+			 * of the batch. */
+			for (i = 0; i <= 100; i++)
 			{
 				/* Prevent reading past end of the received packet data */
 				if (index + 1 + i >= (int)inputPacket.length - 1)
@@ -1062,8 +1066,8 @@ JVSStatus processPacket(JVSIO *jvsIO)
 					break;
 			}
 			// Ensure null termination. When the loop breaks on the null byte,
-			// idData[i] was just copied as '\0'. When the loop runs to i == 100
-			// without finding a null (malformed packet), we terminate at [100].
+			// idData[i] was just copied as '\0'. When the loop runs to i == 101
+			// without finding a null (malformed packet), we terminate at [101].
 			idData[i] = '\0';
 			debug(0, "CMD_CONVEY_ID - Main board ID: %s\n", idData);
 		}
@@ -1225,6 +1229,17 @@ JVSStatus processPacket(JVSIO *jvsIO)
 					size += 4;
 				CHECK_OUTPUT_SPACE(&outputPacket, 1);
 				outputPacket.data[outputPacket.length++] = 0xFF;
+			}
+			break;
+
+			/* NAMCOEXT22: write command — consumes 5 extra data bytes, returns only REPORT_SUCCESS.
+			 * CyberLead and other Namco boards send this; the I/O unit ignores the payload. */
+			case 0x22:
+			{
+				/* Consume the 5 extra data bytes if the packet is long enough to hold them. */
+				if (index + 6 < (int)inputPacket.length - 1)
+					size += 5;
+				/* REPORT_SUCCESS was already written above; nothing extra to return. */
 			}
 			break;
 
