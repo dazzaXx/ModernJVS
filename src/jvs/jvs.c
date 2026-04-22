@@ -470,8 +470,18 @@ JVSStatus processPacket(JVSIO *jvsIO)
 			if (ioToAssign->deviceID == -1)
 			{
 				int newID = inputPacket.data[index + 1];
-				__atomic_store_n(&ioToAssign->deviceID, newID, __ATOMIC_RELEASE);
-				debug(1, "CMD_ASSIGN_ADDR - Assigning address 0x%02X\n", newID);
+				/* Per JVS spec, valid slave addresses are 0x01–0x1F.  0x00 is
+				 * reserved for the bus master and 0xFF for broadcast; assigning
+				 * either would make the device respond to packets not meant for it. */
+				if (newID < DEVICE_ADDR_START || newID > 0x1F)
+				{
+					debug(0, "Warning: CMD_ASSIGN_ADDR - address 0x%02X is outside valid range 0x01-0x1F, ignoring\n", newID);
+				}
+				else
+				{
+					__atomic_store_n(&ioToAssign->deviceID, newID, __ATOMIC_RELEASE);
+					debug(1, "CMD_ASSIGN_ADDR - Assigning address 0x%02X\n", newID);
+				}
 			}
 			else
 			{
@@ -976,7 +986,8 @@ JVSStatus processPacket(JVSIO *jvsIO)
 
 		case CMD_WRITE_DISPLAY:
 		{
-			if (index + 2 >= (int)inputPacket.length - 1)
+			/* Need at least cmd(1)+cols(1)+rows(1)+encoding(1) = 4 bytes */
+			if (index + 3 >= (int)inputPacket.length - 1)
 			{
 				debug(0, "Error: CMD_WRITE_DISPLAY - packet too short\n");
 				break;
@@ -1044,14 +1055,17 @@ JVSStatus processPacket(JVSIO *jvsIO)
 			size = 1;
 			CHECK_OUTPUT_SPACE(&outputPacket, 1);
 			outputPacket.data[outputPacket.length++] = REPORT_SUCCESS;
-			/* idData must be 101 bytes: up to 100 payload chars (spec maximum) + null terminator. */
-			char idData[101];
+			/* idData must be 102 bytes: up to 100 payload chars (spec maximum) + null terminator
+			 * + 1 spare so that the post-loop idData[i]='\0' is always in bounds even when
+			 * the loop runs all 101 iterations (i=0..100) on a maximum-length string. */
+			char idData[102];
 			int i;
-			/* Loop limit is 100 (not 99) so that a full 99-character name's null terminator
-			 * at position i=99 is consumed and counted in `size`.  Without this, the null byte
-			 * would remain as the next byte in the command stream and be misinterpreted as a
-			 * 0x00 command, triggering STATUS_UNSUPPORTED for the rest of the batch. */
-			for (i = 0; i < 100; i++)
+			/* Loop limit is <= 100 (i.e. 101 iterations) so that a full 100-character name's
+			 * null terminator at position i=100 is consumed and counted in `size`.  Without
+			 * this, the null byte would remain as the next byte in the command stream and be
+			 * misinterpreted as a 0x00 command, triggering STATUS_UNSUPPORTED for the rest
+			 * of the batch. */
+			for (i = 0; i <= 100; i++)
 			{
 				/* Prevent reading past end of the received packet data */
 				if (index + 1 + i >= (int)inputPacket.length - 1)
@@ -1062,8 +1076,8 @@ JVSStatus processPacket(JVSIO *jvsIO)
 					break;
 			}
 			// Ensure null termination. When the loop breaks on the null byte,
-			// idData[i] was just copied as '\0'. When the loop runs to i == 100
-			// without finding a null (malformed packet), we terminate at [100].
+			// idData[i] was just copied as '\0'. When the loop runs to i == 101
+			// without finding a null (malformed packet), we terminate at [101].
 			idData[i] = '\0';
 			debug(0, "CMD_CONVEY_ID - Main board ID: %s\n", idData);
 		}
@@ -1228,6 +1242,17 @@ JVSStatus processPacket(JVSIO *jvsIO)
 			}
 			break;
 
+			/* NAMCOEXT22: write command — consumes 5 extra data bytes, returns only REPORT_SUCCESS.
+			 * CyberLead and other Namco boards send this; the I/O unit ignores the payload. */
+			case 0x22:
+			{
+				/* Consume the 5 extra data bytes if the packet is long enough to hold them. */
+				if (index + 6 < (int)inputPacket.length - 1)
+					size += 5;
+				/* REPORT_SUCCESS was already written above; nothing extra to return. */
+			}
+			break;
+
 			default:
 			{
 				debug(0, "CMD_NAMCO_UNSUPPORTED - Unsupported Namco command: 0x%02hhX\n", inputPacket.data[index + 1]);
@@ -1358,17 +1383,19 @@ JVSStatus readPacket(JVSPacket *packet)
 			case 1: // If we have not yet got the length
 				packet->length = inputBuffer[index];
 				rxChecksum = (rxChecksum + packet->length) & 0xFF;
-				/* A JVS length of 0 is always malformed: the length field counts
+				/* A JVS length of 0 is always a framing error: the length field counts
 				 * the bytes that follow it including the checksum itself, so the
 				 * minimum valid value is 1.  If we accepted 0, the expression
 				 * (packet->length - 1) below would wrap to -1 (int promotion of
 				 * unsigned char 0 minus 1) and the checksum guard would never
 				 * trigger, causing every subsequent byte to be written to
-				 * packet->data[rxDataIndex++] without bound — a stack overflow. */
+				 * packet->data[rxDataIndex++] without bound — a stack overflow.
+				 * Return JVS_STATUS_ERROR (not ERROR_CHECKSUM) so the caller does
+				 * not send a spurious STATUS_CHECKSUM_FAILURE to the master. */
 				if (packet->length == 0)
 				{
 					resetPacketParser();
-					return JVS_STATUS_ERROR_CHECKSUM;
+					return JVS_STATUS_ERROR;
 				}
 				rxPhase++;
 				break;
