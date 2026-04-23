@@ -2464,6 +2464,27 @@ def _is_filtered_device(name):
     return any(pat in name for pat in _FILTERED_DEVICE_PATTERNS)
 
 
+def _read_device_friendly_name(kernel_name):
+    """Read the NAME directive from the device mapping file for kernel_name, if present."""
+    # Normalise: lowercase, spaces → hyphens (mirrors input.c sanitisation)
+    normalised = kernel_name.lower().replace(" ", "-")
+    mapping_path = os.path.join(DEVICES_PATH, normalised)
+    try:
+        with open(mapping_path, "r", errors="replace") as f:
+            for line in f:
+                line = line.strip()
+                if line.startswith("#") or not line:
+                    continue
+                upper_line = line.upper()
+                if upper_line.startswith("NAME ") or upper_line.startswith("NAME\t"):
+                    parts = line.split(maxsplit=1)
+                    if len(parts) == 2:
+                        return parts[1].strip()
+    except OSError:
+        pass
+    return None
+
+
 def get_input_devices():
     """Return list of connected /dev/input/event* devices with sysfs names.
 
@@ -2483,10 +2504,11 @@ def get_input_devices():
             except OSError:
                 pass
             devices.append({
-                "event":   event_name,
-                "name":    name,
-                "path":    event_path,
-                "ignored": _is_filtered_device(name),
+                "event":         event_name,
+                "name":          name,
+                "friendly_name": _read_device_friendly_name(name),
+                "path":          event_path,
+                "ignored":       _is_filtered_device(name),
             })
     except OSError:
         pass

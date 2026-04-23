@@ -2385,6 +2385,7 @@ typedef struct
     int length;
     InputMapping mappings[MAX_MAPPING];
     int player;
+    char name[MAX_PATH];
 } InputMappings;
 
 typedef struct

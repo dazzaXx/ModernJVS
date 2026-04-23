@@ -1,3 +1,5 @@
+NAME Logitech G25 Racing Wheel
+
 ###############################################################
 #   OpenJVS: Logitech G25 mapping file
 #   ---------+--------------------+----------------
@@ -62,7 +64,3 @@ CODE_303 CONTROLLER_BUTTON_LEFT_BUMPER
 CODE_704 CONTROLLER_BUTTON_G
 CODE_705 CONTROLLER_BUTTON_H
 CODE_706 CONTROLLER_BUTTON_I
-
-
-
-

@@ -1,3 +1,5 @@
+NAME Logitech Driving Force Racing Wheel
+
 ###############################################################
 #   OpenJVS: Logitech Driving Force maping file
 #   ---------+--------------------+----------------
@@ -56,4 +58,4 @@ ABS_HAT0Y CONTROLLER_BUTTON_UP CONTROLLER_BUTTON_DOWN
 # ---------------------------------------------------
 # CONTROLLER_BUTTON_E
 # CONTROLLER_BUTTON_F
-# CONTROLLER_BUTTON_TILT
+# CONTROLLER_BUTTON_TILT

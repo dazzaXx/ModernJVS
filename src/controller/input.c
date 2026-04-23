@@ -1468,11 +1468,13 @@ JVSInputStatus initInputs(char *outputMappingPath, char *configPath, char *secon
 
             if (isFixedConfig && shouldPrintPlayerMessage)
             {
-                debug(0, "  Player %d (Fixed via config):  %s%s\n", effectivePlayerNumber, originalName, specialMap);
+                const char *displayName = (inputMappings.name[0] != '\0') ? inputMappings.name : originalName;
+                debug(0, "  Player %d (Fixed via config):  %s%s\n", effectivePlayerNumber, displayName, specialMap);
             }
             else if (isSlotHolder)
             {
-                debug(0, "  Player %d:                  %s%s\n", effectivePlayerNumber, deviceName, specialMap);
+                const char *displayName = (inputMappings.name[0] != '\0') ? inputMappings.name : deviceName;
+                debug(0, "  Player %d:                  %s%s\n", effectivePlayerNumber, displayName, specialMap);
             }
 
             controllersStarted++;
