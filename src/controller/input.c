@@ -75,6 +75,13 @@ static double applyDeadzone(double scaled, double deadzone, double deadzoneRange
  * Wiimotes are Bluetooth-only devices so proximity-based search is always used. */
 #define DEVICE_LOOKAHEAD_DISTANCE 6
 
+/* Number of struct input_event slots to read per wiiDeviceThread iteration.
+ * One IR frame from hid-wiimote emits 5 events (4× EV_ABS axes + SYN_REPORT).
+ * Reading a full buffer per select() wakeup drains the kernel queue in a single
+ * syscall, preventing the scheduler from preempting the thread between partial
+ * frame events and adding latency. */
+#define WII_EVENT_BUF_SIZE 32
+
 // Device name patterns to filter out (non-controller devices)
 // These patterns match device names that should not be treated as game controllers
 static const char *FILTERED_DEVICE_PATTERNS[] = {
@@ -154,7 +161,7 @@ static void *wiiDeviceThread(void *_args)
     }
     fcntl(fd, F_SETFL, flags | O_NONBLOCK);
 
-    struct input_event event;
+    struct input_event events[WII_EVENT_BUF_SIZE];
     fd_set file_descriptor;
     struct timeval tv;
 
@@ -179,7 +186,14 @@ static void *wiiDeviceThread(void *_args)
         if (select(fd + 1, &file_descriptor, NULL, NULL, &tv) < 1)
             continue;
 
-        ssize_t bytesRead = read(fd, &event, sizeof(event));
+        /* Read as many events as the buffer can hold in a single syscall.
+         * This drains all events the kernel has queued since the last wakeup,
+         * preventing the scheduler from preempting the thread between the
+         * individual EV_ABS axis events and the SYN_REPORT that ends each
+         * IR frame.  Without batching, those 5 separate single-event reads
+         * each represented a context-switch opportunity, which could delay
+         * the gun position update by a full scheduler quantum (~4 ms). */
+        ssize_t bytesRead = read(fd, events, sizeof(events));
         if (bytesRead == 0)
         {
             /* EOF: the device node was removed (hot-unplug).  Exit the thread
@@ -199,8 +213,10 @@ static void *wiiDeviceThread(void *_args)
             }
             continue;
         }
-        if (bytesRead == (ssize_t)sizeof(event))
+        int numEvents = (int)(bytesRead / (ssize_t)sizeof(struct input_event));
+        for (int evIdx = 0; evIdx < numEvents; evIdx++)
         {
+            struct input_event event = events[evIdx];
             switch (event.type)
             {
             case EV_ABS:
