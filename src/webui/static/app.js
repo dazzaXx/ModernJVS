@@ -51,9 +51,9 @@ async function refreshDashboard() {
   document.getElementById('svcState').textContent    = d.active_state  || '—';
   document.getElementById('svcPid').textContent      = d.main_pid      || '—';
   document.getElementById('svcUptime').textContent   = d.active_since  || '—';
-  document.getElementById('currentIO').textContent     = d.config?.emulate         || '—';
-  document.getElementById('currentIO2').textContent    = d.config?.emulate_second   || '—';
-  document.getElementById('currentGame').textContent   = d.config?.game             || '—';
+  document.getElementById('currentIO').textContent     = (d.config?.emulate_friendly_name      || d.config?.emulate)         || '—';
+  document.getElementById('currentIO2').textContent    = (d.config?.emulate_second_friendly_name || d.config?.emulate_second)  || '—';
+  document.getElementById('currentGame').textContent   = (d.config?.game_friendly_name           || d.config?.game)            || '—';
   document.getElementById('currentDevice').textContent = d.config?.device           || '—';
 
   const jvsEl = document.getElementById('jvsConnection');
@@ -71,10 +71,12 @@ async function refreshDashboard() {
   const players = d.players || [];
   const psEl = document.getElementById('playerSlots');
   const playerMap = {};
-  players.forEach(p => { playerMap[p.player] = p.profile; });
-  psEl.innerHTML = [1, 2, 3, 4].map(n =>
-    `<div class="stat-card"><div class="val" style="font-size:0.85rem;word-break:break-all;">${_escHtml(playerMap[n] || 'Not assigned')}</div><div class="lbl">Player ${n}</div></div>`
-  ).join('');
+  players.forEach(p => { playerMap[p.player] = p; });
+  psEl.innerHTML = [1, 2, 3, 4].map(n => {
+    const p = playerMap[n];
+    const label = p ? (p.profile_friendly_name || p.profile) : 'Not assigned';
+    return `<div class="stat-card"><div class="val" style="font-size:0.85rem;overflow-wrap:break-word;">${_escHtml(label)}</div><div class="lbl">Player ${n}</div></div>`;
+  }).join('');
 
   updateTestButtonUI(!!d.test_button_active, d.jvs_connected === true);
 }
