@@ -51,9 +51,9 @@ async function refreshDashboard() {
   document.getElementById('svcState').textContent    = d.active_state  || '—';
   document.getElementById('svcPid').textContent      = d.main_pid      || '—';
   document.getElementById('svcUptime').textContent   = d.active_since  || '—';
-  document.getElementById('currentIO').textContent     = d.config?.emulate         || '—';
-  document.getElementById('currentIO2').textContent    = d.config?.emulate_second   || '—';
-  document.getElementById('currentGame').textContent   = d.config?.game             || '—';
+  document.getElementById('currentIO').textContent     = (d.config?.emulate_friendly_name      || d.config?.emulate)         || '—';
+  document.getElementById('currentIO2').textContent    = (d.config?.emulate_second_friendly_name || d.config?.emulate_second)  || '—';
+  document.getElementById('currentGame').textContent   = (d.config?.game_friendly_name           || d.config?.game)            || '—';
   document.getElementById('currentDevice').textContent = d.config?.device           || '—';
 
   const jvsEl = document.getElementById('jvsConnection');
@@ -71,10 +71,12 @@ async function refreshDashboard() {
   const players = d.players || [];
   const psEl = document.getElementById('playerSlots');
   const playerMap = {};
-  players.forEach(p => { playerMap[p.player] = p.profile; });
-  psEl.innerHTML = [1, 2, 3, 4].map(n =>
-    `<div class="stat-card"><div class="val" style="font-size:0.85rem;word-break:break-all;">${_escHtml(playerMap[n] || 'Not assigned')}</div><div class="lbl">Player ${n}</div></div>`
-  ).join('');
+  players.forEach(p => { playerMap[p.player] = p; });
+  psEl.innerHTML = [1, 2, 3, 4].map(n => {
+    const p = playerMap[n];
+    const label = p ? (p.profile_friendly_name || p.profile) : 'Not assigned';
+    return `<div class="stat-card"><div class="val" style="font-size:0.85rem;overflow-wrap:break-word;">${_escHtml(label)}</div><div class="lbl">Player ${n}</div></div>`;
+  }).join('');
 
   updateTestButtonUI(!!d.test_button_active, d.jvs_connected === true);
 }
@@ -185,6 +187,12 @@ async function serviceAction(action, alertId, successMsg) {
 }
 
 // ---- Config ----
+function _profileOptionText(entry) {
+  const name = entry.name ?? entry;
+  const friendly = entry.friendly_name;
+  return friendly && friendly !== name ? `${friendly} (${name})` : (friendly || name);
+}
+
 async function loadConfig() {
   const [cfgData, iosData, gamesData] = await Promise.all([
     api('/api/config'),
@@ -196,8 +204,9 @@ async function loadConfig() {
   ioSel.innerHTML = '';
   (iosData.ios || []).forEach(io => {
     const o = document.createElement('option');
-    o.value = io; o.textContent = io;
-    if (cfgData.emulate === io) o.selected = true;
+    const ioName = io.name ?? io;
+    o.value = ioName; o.textContent = _profileOptionText(io);
+    if (cfgData.emulate === ioName) o.selected = true;
     ioSel.appendChild(o);
   });
 
@@ -205,8 +214,9 @@ async function loadConfig() {
   gameSel.innerHTML = '';
   (gamesData.games || []).forEach(g => {
     const o = document.createElement('option');
-    o.value = g; o.textContent = g;
-    if (cfgData.game === g) o.selected = true;
+    const gName = g.name ?? g;
+    o.value = gName; o.textContent = _profileOptionText(g);
+    if (cfgData.game === gName) o.selected = true;
     gameSel.appendChild(o);
   });
 
@@ -225,8 +235,9 @@ async function loadConfig() {
   io2Sel.innerHTML = '<option value="">— None —</option>';
   (iosData.ios || []).forEach(io => {
     const o = document.createElement('option');
-    o.value = io; o.textContent = io;
-    if (cfgData.emulate_second === io) o.selected = true;
+    const ioName = io.name ?? io;
+    o.value = ioName; o.textContent = _profileOptionText(io);
+    if (cfgData.emulate_second === ioName) o.selected = true;
     io2Sel.appendChild(o);
   });
 }
@@ -332,16 +343,27 @@ function renderProfilesTable(data) {
     tbody.innerHTML = '<tr><td colspan="2" style="color:var(--muted)">No files found.</td></tr>';
     return;
   }
-  tbody.innerHTML = files.map(name => `
+  tbody.innerHTML = files.map(entry => {
+    const name = typeof entry === 'object' ? entry.name : entry;
+    let displayCell;
+    if (typeof entry === 'object' && entry.friendly_name) {
+      displayCell = entry.friendly_name !== name
+        ? `${_escHtml(entry.friendly_name)} <span style="color:var(--muted);font-size:0.8rem;">(${_escHtml(name)})</span>`
+        : _escHtml(entry.friendly_name);
+    } else {
+      displayCell = `<code style="color:var(--accent2);font-family:var(--font-mono);">${_escHtml(name)}</code>`;
+    }
+    return `
     <tr>
-      <td><code style="color:var(--accent2);font-family:var(--font-mono);">${_escHtml(name)}</code></td>
+      <td>${displayCell}</td>
       <td style="white-space:nowrap;">
         <button class="btn btn-xs btn-refresh" data-name="${_escHtml(name)}" onclick="editProfile(this.dataset.name)" style="margin-right:0.25rem;">Edit</button>
         <a href="/api/profiles/download?type=${encodeURIComponent(_profilesCurrentTab)}&name=${encodeURIComponent(name)}" class="btn btn-xs" style="margin-right:0.25rem;text-decoration:none;">Download</a>
         <button class="btn btn-xs" data-name="${_escHtml(name)}" onclick="renameProfile(this.dataset.name)" style="margin-right:0.25rem;">Rename</button>
         <button class="btn btn-xs btn-danger" data-name="${_escHtml(name)}" onclick="deleteProfile(this.dataset.name)">Delete</button>
       </td>
-    </tr>`).join('');
+    </tr>`;
+  }).join('');
 }
 
 async function editProfile(name) {

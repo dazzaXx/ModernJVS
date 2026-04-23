@@ -576,20 +576,37 @@ def write_config(new_values):
 
 def config_to_api(cfg):
     """Convert raw directive dict to the API response shape."""
+    game         = cfg.get("DEFAULT_GAME",  "")
+    emulate      = cfg.get("EMULATE",       "")
+    emulate_sec  = cfg.get("EMULATE_SECOND", "")
+
+    def _game_friendly(name):
+        if not name:
+            return None
+        return _read_profile_friendly_name(os.path.join(GAMES_PATH, name), "NAME")
+
+    def _io_friendly(name):
+        if not name:
+            return None
+        return _read_profile_friendly_name(os.path.join(IOS_PATH, name), "DISPLAY_NAME")
+
     return {
-        "emulate":                    cfg.get("EMULATE",                    ""),
-        "game":                       cfg.get("DEFAULT_GAME",               ""),
-        "device":                     cfg.get("DEVICE_PATH",                ""),
-        "sense_line_type":            cfg.get("SENSE_LINE_TYPE",            "1"),
-        "sense_line_pin":             cfg.get("SENSE_LINE_PIN",             "26"),
-        "debug_mode":                 cfg.get("DEBUG_MODE",                 "0"),
-        "auto_controller_detection":  cfg.get("AUTO_CONTROLLER_DETECTION",  "1"),
-        "deadzone_p1":                cfg.get("ANALOG_DEADZONE_PLAYER_1",   "0.2"),
-        "deadzone_p2":                cfg.get("ANALOG_DEADZONE_PLAYER_2",   "0.2"),
-        "deadzone_p3":                cfg.get("ANALOG_DEADZONE_PLAYER_3",   "0.2"),
-        "deadzone_p4":                cfg.get("ANALOG_DEADZONE_PLAYER_4",   "0.2"),
-        "wii_ir_scale":               cfg.get("WII_IR_SCALE",               "1.0"),
-        "emulate_second":             cfg.get("EMULATE_SECOND",             ""),
+        "emulate":                      emulate,
+        "emulate_friendly_name":        _io_friendly(emulate),
+        "game":                         game,
+        "game_friendly_name":           _game_friendly(game),
+        "device":                       cfg.get("DEVICE_PATH",                ""),
+        "sense_line_type":              cfg.get("SENSE_LINE_TYPE",            "1"),
+        "sense_line_pin":               cfg.get("SENSE_LINE_PIN",             "26"),
+        "debug_mode":                   cfg.get("DEBUG_MODE",                 "0"),
+        "auto_controller_detection":    cfg.get("AUTO_CONTROLLER_DETECTION",  "1"),
+        "deadzone_p1":                  cfg.get("ANALOG_DEADZONE_PLAYER_1",   "0.2"),
+        "deadzone_p2":                  cfg.get("ANALOG_DEADZONE_PLAYER_2",   "0.2"),
+        "deadzone_p3":                  cfg.get("ANALOG_DEADZONE_PLAYER_3",   "0.2"),
+        "deadzone_p4":                  cfg.get("ANALOG_DEADZONE_PLAYER_4",   "0.2"),
+        "wii_ir_scale":                 cfg.get("WII_IR_SCALE",               "1.0"),
+        "emulate_second":               emulate_sec,
+        "emulate_second_friendly_name": _io_friendly(emulate_sec),
     }
 
 
@@ -691,7 +708,17 @@ def get_player_slots(logs=None):
     if last_no_controllers_idx > last_player_idx:
         return []
 
-    return [{"player": k, "profile": v} for k, v in sorted(players.items())]
+    return [
+        {
+            "player":               k,
+            "profile":              v,
+            "profile_friendly_name": _read_profile_friendly_name(
+                os.path.join(DEVICES_PATH, v.split()[0]),
+                "NAME",
+            ),
+        }
+        for k, v in sorted(players.items())
+    ]
 
 
 def get_jvs_connection_status(logs=None):
@@ -1027,6 +1054,36 @@ def list_dir(path):
         )
     except OSError:
         return []
+
+
+def _read_profile_friendly_name(file_path, directive):
+    """Read a named directive from a profile file and return its value, or None."""
+    try:
+        directive_upper = directive.upper() + " "
+        with open(file_path, "r", errors="replace") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                upper_line = line.upper()
+                # Match "DIRECTIVE value" (space-separated; tab also accepted)
+                if upper_line.startswith(directive_upper) or upper_line.startswith(directive_upper[:-1] + "\t"):
+                    parts = line.split(maxsplit=1)
+                    if len(parts) == 2:
+                        return parts[1].strip()
+    except OSError:
+        pass
+    return None
+
+
+def list_dir_with_names(path, directive):
+    """Return sorted list of dicts with 'name' and 'friendly_name' for each profile file."""
+    result = []
+    for name in list_dir(path):
+        file_path = os.path.join(path, name)
+        friendly_name = _read_profile_friendly_name(file_path, directive)
+        result.append({"name": name, "friendly_name": friendly_name})
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -3242,18 +3299,18 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(data)
         elif path == "/api/ios":
-            self._json({"ios": list_dir(IOS_PATH)})
+            self._json({"ios": list_dir_with_names(IOS_PATH, "DISPLAY_NAME")})
         elif path == "/api/games":
-            self._json({"games": list_dir(GAMES_PATH)})
+            self._json({"games": list_dir_with_names(GAMES_PATH, "NAME")})
         elif path == "/api/devices":
             self._json({"devices": list_dir(DEVICES_PATH)})
         elif path == "/api/input_devices":
             self._json({"devices": get_input_devices()})
         elif path == "/api/profiles/list":
             self._json({
-                "games":   list_dir(GAMES_PATH),
+                "games":   list_dir_with_names(GAMES_PATH, "NAME"),
                 "devices": list_dir(DEVICES_PATH),
-                "ios":     list_dir(IOS_PATH),
+                "ios":     list_dir_with_names(IOS_PATH, "DISPLAY_NAME"),
             })
         elif path == "/api/profiles/read":
             type_ = query.get("type", [""])[0]
