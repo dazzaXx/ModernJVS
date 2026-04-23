@@ -2475,10 +2475,11 @@ def _read_device_friendly_name(kernel_name):
                 line = line.strip()
                 if line.startswith("#") or not line:
                     continue
-                if line.upper().startswith("NAME ") or line.upper().startswith("NAME\t"):
-                    value = line[5:].strip()
-                    if value:
-                        return value
+                upper_line = line.upper()
+                if upper_line.startswith("NAME ") or upper_line.startswith("NAME\t"):
+                    parts = line.split(maxsplit=1)
+                    if len(parts) == 2:
+                        return parts[1].strip()
     except OSError:
         pass
     return None
