@@ -214,12 +214,14 @@ static void *wiiDeviceThread(void *_args)
                     event.code != 18 && event.code != 19)
                     continue;
 
-                /* The hid-wiimote driver emits four EV_ABS events per IR frame
-                 * (codes 16-19).  Accumulate each coordinate update and only
-                 * recompute the gun position after the last axis (code 19 = y1)
-                 * has arrived.  Without this, the outOfBounds logic would fire
-                 * on every intermediate event, causing the game to see the gun
-                 * as off-screen 3 out of 4 times per frame and missing shots. */
+                /* The hid-wiimote driver emits EV_ABS events for IR axes
+                 * (codes 16-19) followed by EV_SYN/SYN_REPORT each frame.
+                 * The Linux input subsystem suppresses EV_ABS events when an
+                 * axis value has not changed since the last frame, so triggering
+                 * position computation on code 19 alone would miss frames where
+                 * y1 is unchanged — causing stutter during slow movement.
+                 * Instead, accumulate each axis value here and compute the
+                 * gun position once per SYN_REPORT (below). */
                 switch (event.code)
                 {
                 case 16:
@@ -233,10 +235,19 @@ static void *wiiDeviceThread(void *_args)
                     continue;
                 case 19:
                     y1 = event.value;
-                    break;
+                    continue;
                 }
+                continue;
+            }
+            case EV_SYN:
+            {
+                /* Only act on SYN_REPORT — the end-of-frame marker that the
+                 * kernel always emits once per input frame, regardless of how
+                 * many (or how few) EV_ABS axes changed values. */
+                if (event.code != SYN_REPORT)
+                    continue;
 
-                /* All four IR axes are now up-to-date — compute position. */
+                /* All IR axis values are current — compute gun position. */
                 bool outOfBounds = true;
                 if ((x0 != 1023) && (x1 != 1023) && (y0 != 1023) && (y1 != 1023))
                 {
