@@ -1,3 +1,5 @@
+NAME Holdchip USB Gaming Keyboard
+
 # Keyboard Mapping
 # Author: Bobby Dilley
 
@@ -16,4 +18,3 @@ KEY_U CONTROLLER_BUTTON_A
 KEY_I CONTROLLER_BUTTON_B
 KEY_O CONTROLLER_BUTTON_C
 KEY_P CONTROLLER_BUTTON_D
-

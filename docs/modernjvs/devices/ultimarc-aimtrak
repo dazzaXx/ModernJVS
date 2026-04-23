@@ -1,3 +1,5 @@
+NAME Ultimarc AimTrak Light Gun
+
 # Ultimarc Aimtrack Mapping by Fred and bobbydilley
 
 # Left button in Screen
@@ -21,7 +23,3 @@ BTN_TOP CONTROLLER_BUTTON_START
 # Pointer Position
 ABS_X CONTROLLER_ANALOGUE_X
 ABS_Y CONTROLLER_ANALOGUE_Y
-
-
-
-

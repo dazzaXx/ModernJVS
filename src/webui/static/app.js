@@ -783,7 +783,10 @@ async function loadDevices() {
     const statusHtml = dev.ignored
       ? '<span style="color:var(--yellow);font-size:0.8rem;">⚠ Ignored by ModernJVS</span>'
       : '<span style="color:var(--green);font-size:0.8rem;">✓ Active</span>';
-    return `<tr><td><code>${_escHtml(dev.event)}</code></td><td>${_escHtml(dev.name)}</td><td>${statusHtml}</td></tr>`;
+    const displayName = dev.friendly_name
+        ? `${_escHtml(dev.friendly_name)} <span style="color:var(--muted);font-size:0.8rem;">(${_escHtml(dev.name)})</span>`
+        : _escHtml(dev.name);
+    return `<tr><td><code>${_escHtml(dev.event)}</code></td><td>${displayName}</td><td>${statusHtml}</td></tr>`;
   }).join('');
 }
 

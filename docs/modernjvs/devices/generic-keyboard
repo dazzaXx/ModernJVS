@@ -1,3 +1,5 @@
+NAME Generic Keyboard
+
 # Keyboard Mapping
 # Author: Bobby Dilley
 
@@ -24,4 +26,3 @@ KEY_A CONTROLLER_BUTTON_E
 KEY_S CONTROLLER_BUTTON_F
 KEY_D CONTROLLER_BUTTON_G
 KEY_F CONTROLLER_BUTTON_H
-

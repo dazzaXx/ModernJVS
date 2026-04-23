@@ -346,6 +346,18 @@ static JVSConfigStatus parseInputMappingInternal(char *path, InputMappings *inpu
                 inputMappings->player = player;
             }
         }
+        else if (strcmp(command, "NAME") == 0)
+        {
+            char *token = getNextToken(NULL, "\n", &saveptr);
+            if (token)
+            {
+                /* Strip leading whitespace from the name value */
+                while (*token == ' ' || *token == '\t')
+                    token++;
+                strncpy(inputMappings->name, token, MAX_PATH - 1);
+                inputMappings->name[MAX_PATH - 1] = '\0';
+            }
+        }
         else if (command[0] == 'K' || command[0] == 'B' || command[0] == 'C')
         {
             char *token = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
