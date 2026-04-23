@@ -1059,14 +1059,15 @@ def list_dir(path):
 def _read_profile_friendly_name(file_path, directive):
     """Read a named directive from a profile file and return its value, or None."""
     try:
-        directive_upper = directive.upper()
+        directive_upper = directive.upper() + " "
         with open(file_path, "r", errors="replace") as f:
             for line in f:
                 line = line.strip()
                 if not line or line.startswith("#"):
                     continue
                 upper_line = line.upper()
-                if upper_line.startswith(directive_upper) and len(upper_line) > len(directive_upper) and upper_line[len(directive_upper)].isspace():
+                # Match "DIRECTIVE value" (space-separated; tab also accepted)
+                if upper_line.startswith(directive_upper) or upper_line.startswith(directive_upper[:-1] + "\t"):
                     parts = line.split(maxsplit=1)
                     if len(parts) == 2:
                         return parts[1].strip()
