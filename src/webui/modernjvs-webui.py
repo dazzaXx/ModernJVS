@@ -1029,6 +1029,35 @@ def list_dir(path):
         return []
 
 
+def _read_profile_friendly_name(file_path, directive):
+    """Read a named directive from a profile file and return its value, or None."""
+    try:
+        directive_upper = directive.upper()
+        with open(file_path, "r", errors="replace") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                upper_line = line.upper()
+                if upper_line.startswith(directive_upper + " ") or upper_line.startswith(directive_upper + "\t"):
+                    parts = line.split(maxsplit=1)
+                    if len(parts) == 2:
+                        return parts[1].strip()
+    except OSError:
+        pass
+    return None
+
+
+def list_dir_with_names(path, directive):
+    """Return sorted list of dicts with 'name' and 'friendly_name' for each profile file."""
+    result = []
+    for name in list_dir(path):
+        file_path = os.path.join(path, name)
+        friendly_name = _read_profile_friendly_name(file_path, directive)
+        result.append({"name": name, "friendly_name": friendly_name})
+    return result
+
+
 # ---------------------------------------------------------------------------
 # Diagnostics helpers
 # ---------------------------------------------------------------------------
@@ -3242,18 +3271,18 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(data)
         elif path == "/api/ios":
-            self._json({"ios": list_dir(IOS_PATH)})
+            self._json({"ios": list_dir_with_names(IOS_PATH, "DISPLAY_NAME")})
         elif path == "/api/games":
-            self._json({"games": list_dir(GAMES_PATH)})
+            self._json({"games": list_dir_with_names(GAMES_PATH, "NAME")})
         elif path == "/api/devices":
             self._json({"devices": list_dir(DEVICES_PATH)})
         elif path == "/api/input_devices":
             self._json({"devices": get_input_devices()})
         elif path == "/api/profiles/list":
             self._json({
-                "games":   list_dir(GAMES_PATH),
+                "games":   list_dir_with_names(GAMES_PATH, "NAME"),
                 "devices": list_dir(DEVICES_PATH),
-                "ios":     list_dir(IOS_PATH),
+                "ios":     list_dir_with_names(IOS_PATH, "DISPLAY_NAME"),
             })
         elif path == "/api/profiles/read":
             type_ = query.get("type", [""])[0]

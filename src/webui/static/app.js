@@ -196,8 +196,12 @@ async function loadConfig() {
   ioSel.innerHTML = '';
   (iosData.ios || []).forEach(io => {
     const o = document.createElement('option');
-    o.value = io; o.textContent = io;
-    if (cfgData.emulate === io) o.selected = true;
+    const ioName = io.name ?? io;
+    const ioDisplay = io.friendly_name && io.friendly_name !== ioName
+        ? `${io.friendly_name} (${ioName})`
+        : (io.friendly_name || ioName);
+    o.value = ioName; o.textContent = ioDisplay;
+    if (cfgData.emulate === ioName) o.selected = true;
     ioSel.appendChild(o);
   });
 
@@ -205,8 +209,12 @@ async function loadConfig() {
   gameSel.innerHTML = '';
   (gamesData.games || []).forEach(g => {
     const o = document.createElement('option');
-    o.value = g; o.textContent = g;
-    if (cfgData.game === g) o.selected = true;
+    const gName = g.name ?? g;
+    const gDisplay = g.friendly_name && g.friendly_name !== gName
+        ? `${g.friendly_name} (${gName})`
+        : (g.friendly_name || gName);
+    o.value = gName; o.textContent = gDisplay;
+    if (cfgData.game === gName) o.selected = true;
     gameSel.appendChild(o);
   });
 
@@ -225,8 +233,12 @@ async function loadConfig() {
   io2Sel.innerHTML = '<option value="">— None —</option>';
   (iosData.ios || []).forEach(io => {
     const o = document.createElement('option');
-    o.value = io; o.textContent = io;
-    if (cfgData.emulate_second === io) o.selected = true;
+    const ioName = io.name ?? io;
+    const ioDisplay = io.friendly_name && io.friendly_name !== ioName
+        ? `${io.friendly_name} (${ioName})`
+        : (io.friendly_name || ioName);
+    o.value = ioName; o.textContent = ioDisplay;
+    if (cfgData.emulate_second === ioName) o.selected = true;
     io2Sel.appendChild(o);
   });
 }
@@ -332,16 +344,27 @@ function renderProfilesTable(data) {
     tbody.innerHTML = '<tr><td colspan="2" style="color:var(--muted)">No files found.</td></tr>';
     return;
   }
-  tbody.innerHTML = files.map(name => `
+  tbody.innerHTML = files.map(entry => {
+    const name = typeof entry === 'object' ? entry.name : entry;
+    let displayCell;
+    if (typeof entry === 'object' && entry.friendly_name) {
+      displayCell = entry.friendly_name !== name
+        ? `${_escHtml(entry.friendly_name)} <span style="color:var(--muted);font-size:0.8rem;">(${_escHtml(name)})</span>`
+        : _escHtml(entry.friendly_name);
+    } else {
+      displayCell = `<code style="color:var(--accent2);font-family:var(--font-mono);">${_escHtml(name)}</code>`;
+    }
+    return `
     <tr>
-      <td><code style="color:var(--accent2);font-family:var(--font-mono);">${_escHtml(name)}</code></td>
+      <td>${displayCell}</td>
       <td style="white-space:nowrap;">
         <button class="btn btn-xs btn-refresh" data-name="${_escHtml(name)}" onclick="editProfile(this.dataset.name)" style="margin-right:0.25rem;">Edit</button>
         <a href="/api/profiles/download?type=${encodeURIComponent(_profilesCurrentTab)}&name=${encodeURIComponent(name)}" class="btn btn-xs" style="margin-right:0.25rem;text-decoration:none;">Download</a>
         <button class="btn btn-xs" data-name="${_escHtml(name)}" onclick="renameProfile(this.dataset.name)" style="margin-right:0.25rem;">Rename</button>
         <button class="btn btn-xs btn-danger" data-name="${_escHtml(name)}" onclick="deleteProfile(this.dataset.name)">Delete</button>
       </td>
-    </tr>`).join('');
+    </tr>`;
+  }).join('');
 }
 
 async function editProfile(name) {
