@@ -185,6 +185,12 @@ async function serviceAction(action, alertId, successMsg) {
 }
 
 // ---- Config ----
+function _profileOptionText(entry) {
+  const name = entry.name ?? entry;
+  const friendly = entry.friendly_name;
+  return friendly && friendly !== name ? `${friendly} (${name})` : (friendly || name);
+}
+
 async function loadConfig() {
   const [cfgData, iosData, gamesData] = await Promise.all([
     api('/api/config'),
@@ -197,10 +203,7 @@ async function loadConfig() {
   (iosData.ios || []).forEach(io => {
     const o = document.createElement('option');
     const ioName = io.name ?? io;
-    const ioDisplay = io.friendly_name && io.friendly_name !== ioName
-        ? `${io.friendly_name} (${ioName})`
-        : (io.friendly_name || ioName);
-    o.value = ioName; o.textContent = ioDisplay;
+    o.value = ioName; o.textContent = _profileOptionText(io);
     if (cfgData.emulate === ioName) o.selected = true;
     ioSel.appendChild(o);
   });
@@ -210,10 +213,7 @@ async function loadConfig() {
   (gamesData.games || []).forEach(g => {
     const o = document.createElement('option');
     const gName = g.name ?? g;
-    const gDisplay = g.friendly_name && g.friendly_name !== gName
-        ? `${g.friendly_name} (${gName})`
-        : (g.friendly_name || gName);
-    o.value = gName; o.textContent = gDisplay;
+    o.value = gName; o.textContent = _profileOptionText(g);
     if (cfgData.game === gName) o.selected = true;
     gameSel.appendChild(o);
   });
@@ -234,10 +234,7 @@ async function loadConfig() {
   (iosData.ios || []).forEach(io => {
     const o = document.createElement('option');
     const ioName = io.name ?? io;
-    const ioDisplay = io.friendly_name && io.friendly_name !== ioName
-        ? `${io.friendly_name} (${ioName})`
-        : (io.friendly_name || ioName);
-    o.value = ioName; o.textContent = ioDisplay;
+    o.value = ioName; o.textContent = _profileOptionText(io);
     if (cfgData.emulate_second === ioName) o.selected = true;
     io2Sel.appendChild(o);
   });
