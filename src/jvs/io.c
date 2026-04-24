@@ -122,10 +122,13 @@ int initIO(JVSIO *io)
 	/* Destroy any previous mutex before re-initialising.  POSIX states that
 	 * calling pthread_mutex_init on an already-initialised mutex without a
 	 * preceding pthread_mutex_destroy is undefined behaviour and leaks the
-	 * kernel resource on Linux.  The destroy is a no-op if the mutex was
-	 * never initialised (the struct is zero-initialised in main). */
-	pthread_mutex_destroy(&io->state_mutex);
+	 * kernel resource on Linux.  Guard with mutexInitialized == 1 so that
+	 * the first call (where the field is zero or garbage) skips the destroy
+	 * and avoids UB on a non-zero-initialised struct. */
+	if (io->mutexInitialized == 1)
+		pthread_mutex_destroy(&io->state_mutex);
 	pthread_mutex_init(&io->state_mutex, NULL);
+	io->mutexInitialized = 1;
 
 	return 1;
 }
@@ -136,6 +139,15 @@ int setSwitch(JVSIO *io, JVSPlayer player, JVSInput switchNumber, int value)
 	    (int)player >= JVS_MAX_STATE_SIZE)
 	{
 		debug(0, "Error: That player %d does not exist.\n", player);
+		return 0;
+	}
+
+	/* Reject an invalid (out-of-range) switch number.  jvsInputFromString()
+	 * returns (JVSInput)-1 when a button name is not found; using -1 in the
+	 * bitwise OR/AND below would corrupt the entire switch state word. */
+	if ((int)switchNumber < 0)
+	{
+		debug(0, "Error: Invalid switch number %d — likely an unrecognised button name in a mapping file.\n", (int)switchNumber);
 		return 0;
 	}
 
