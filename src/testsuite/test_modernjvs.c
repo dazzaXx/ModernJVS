@@ -2575,12 +2575,13 @@ static void test_processPacket_cmd_remaining_payout_two_slots(void)
     ASSERT(r.valid == 1, "response valid");
     ASSERT_EQ_INT(r.data[0], STATUS_SUCCESS,  "STATUS_SUCCESS");
     ASSERT_EQ_INT(r.data[1], REPORT_SUCCESS,  "REPORT_SUCCESS");
-    /* 2 slots × 2 bytes each = 4 data bytes, all zero */
-    ASSERT_EQ_INT(r.data[2], 0x00, "slot1 high = 0");
-    ASSERT_EQ_INT(r.data[3], 0x00, "slot1 low = 0");
-    ASSERT_EQ_INT(r.data[4], 0x00, "slot2 high = 0");
-    ASSERT_EQ_INT(r.data[5], 0x00, "slot2 low = 0");
-    /* Total response data length: STATUS(1) + REPORT(1) + 2*2 = 6 */
+    /* Single-slot response: REPORT(1) + hopper_status(1) + remaining_hi(1)
+     * + remaining_mid(1) + remaining_lo(1) = 5 bytes; all zero because we
+     * always report 0 remaining.  Total: STATUS(1) + 5 = 6. */
+    ASSERT_EQ_INT(r.data[2], 0x00, "hopper_status = 0");
+    ASSERT_EQ_INT(r.data[3], 0x00, "remaining_hi = 0");
+    ASSERT_EQ_INT(r.data[4], 0x00, "remaining_mid = 0");
+    ASSERT_EQ_INT(r.data[5], 0x00, "remaining_lo = 0");
     ASSERT_EQ_INT(r.data_len, 6, "data_len = 6");
 
     close(sv[0]); close(sv[1]); serialIO = -1;

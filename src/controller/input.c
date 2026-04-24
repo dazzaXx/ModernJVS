@@ -1403,6 +1403,11 @@ JVSInputStatus initInputs(char *outputMappingPath, char *configPath, char *secon
                     continue;
                 }
             }
+            /* When autoDetect is off (or no generic map matched), skip any
+             * device that still has no mappings rather than starting a
+             * pointless thread that never produces JVS output. */
+            if (inputMappings.length == 0)
+                continue;
         }
 
         EVInputs evInputs = {0};
