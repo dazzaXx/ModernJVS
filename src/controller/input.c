@@ -574,6 +574,19 @@ static void *deviceThread(void *_args)
                     if (args->inputs.abs[event.code].secondaryIO && args->jvsIO->chainedIO != NULL)
                         io = args->jvsIO->chainedIO;
 
+                    /* Mirror the EV_KEY BUTTON_TEST guard: BUTTON_TEST and BUTTON_3
+                     * share the same numeric value (0x80); if either is mapped to the
+                     * SYSTEM player on a HAT axis, route through the test-button latch
+                     * rather than calling setSwitch directly to keep behaviour consistent
+                     * with the key-based test button path. */
+                    if (args->inputs.abs[event.code].output == BUTTON_TEST &&
+                        args->inputs.abs[event.code].jvsPlayer == SYSTEM)
+                    {
+                        if (event.value != 0 && __atomic_load_n(&args->jvsIO->deviceID, __ATOMIC_ACQUIRE) != -1)
+                            __sync_fetch_and_xor(&testButtonActive, 1);
+                        continue;
+                    }
+
                     if (event.value == args->inputs.absMin[event.code])
                     {
                         /* Activate primary direction and clear secondary to prevent
@@ -618,6 +631,18 @@ static void *deviceThread(void *_args)
                         }
                         continue;
                     }
+
+                    /* Mirror the EV_KEY BUTTON_TEST guard (BUTTON_TEST == BUTTON_3 == 0x80):
+                     * route through the latch rather than calling setSwitch directly. */
+                    if (args->inputs.key[event.code].output == BUTTON_TEST &&
+                        args->inputs.key[event.code].jvsPlayer == SYSTEM)
+                    {
+                        if (event.value != args->inputs.absMin[event.code] &&
+                            __atomic_load_n(&args->jvsIO->deviceID, __ATOMIC_ACQUIRE) != -1)
+                            __sync_fetch_and_xor(&testButtonActive, 1);
+                        continue;
+                    }
+
                     else if (event.value == args->inputs.absMin[event.code])
                     {
                         setSwitch(io, args->inputs.key[event.code].jvsPlayer, args->inputs.key[event.code].output, 0);
@@ -1378,6 +1403,11 @@ JVSInputStatus initInputs(char *outputMappingPath, char *configPath, char *secon
                     continue;
                 }
             }
+            /* When autoDetect is off (or no generic map matched), skip any
+             * device that still has no mappings rather than starting a
+             * pointless thread that never produces JVS output. */
+            if (inputMappings.length == 0)
+                continue;
         }
 
         EVInputs evInputs = {0};

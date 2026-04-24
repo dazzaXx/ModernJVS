@@ -748,6 +748,73 @@ static void test_jvsInputFromString_unknown(void)
 /* ── New tests for PR bug-fixes ──────────────────────────────────────────── */
 
 /*
+ * setSwitch must reject a negative switchNumber.
+ * jvsInputFromString("BAD_NAME") returns (JVSInput)-1; before the fix that
+ * value was used directly in a bitwise OR, setting ALL bits of inputSwitch
+ * and making every button appear simultaneously pressed on the JVS bus.
+ */
+static void test_setSwitch_invalid_switch_number(void)
+{
+    TEST_BEGIN(test_setSwitch_invalid_switch_number);
+    JVSIO io = make_test_io();
+
+    /* Ensure the state starts clean */
+    ASSERT_EQ_INT(io.state.inputSwitch[1], 0, "P1 switch state starts at 0");
+
+    /* Pass the -1 sentinel returned by jvsInputFromString on lookup failure */
+    int r = setSwitch(&io, PLAYER_1, (JVSInput)-1, 1);
+    ASSERT_EQ_INT(r, 0, "setSwitch with switchNumber -1 must return 0");
+
+    /* The switch state must not be corrupted (must still be 0, not 0xFFFF) */
+    ASSERT_EQ_INT(io.state.inputSwitch[1], 0,
+                  "switch state must not be corrupted by invalid switchNumber");
+
+    /* Also verify the release path doesn't clear everything */
+    setSwitch(&io, PLAYER_1, BUTTON_START, 1);
+    setSwitch(&io, PLAYER_1, (JVSInput)-1, 0);
+    ASSERT(io.state.inputSwitch[1] & BUTTON_START,
+           "valid BUTTON_START bit must survive invalid-switch release");
+
+    TEST_PASS();
+}
+
+/*
+ * Calling initIO() twice on the same JVSIO must not produce undefined behaviour.
+ * The first call initialises the mutex; the second call must destroy then
+ * re-initialise it safely, confirmed by the mutexInitialized guard introduced
+ * to prevent pthread_mutex_destroy on a garbage-initialised struct.
+ */
+static void test_initIO_reinit_mutex_safety(void)
+{
+    TEST_BEGIN(test_initIO_reinit_mutex_safety);
+
+    JVSIO io;
+    memset(&io, 0, sizeof(io));
+    io.capabilities.players            = 2;
+    io.capabilities.analogueInChannels = 2;
+    io.capabilities.analogueInBits     = 10;
+    io.capabilities.coins              = 2;
+    io.capabilities.rotaryChannels     = 0;
+    io.capabilities.gunChannels        = 0;
+
+    int r1 = initIO(&io);
+    ASSERT_EQ_INT(r1, 1, "first initIO returns 1");
+    ASSERT_EQ_INT(io.mutexInitialized, 1, "mutexInitialized set after first init");
+
+    /* Set some state, then re-init; state must be zeroed again */
+    io.state.inputSwitch[1] = 0xFFFF;
+    int r2 = initIO(&io);
+    ASSERT_EQ_INT(r2, 1, "second initIO returns 1");
+    ASSERT_EQ_INT(io.state.inputSwitch[1], 0, "state zeroed by second initIO");
+
+    /* The mutex must still be usable after re-init */
+    int r3 = setSwitch(&io, PLAYER_1, BUTTON_START, 1);
+    ASSERT_EQ_INT(r3, 1, "setSwitch works after re-init");
+
+    TEST_PASS();
+}
+
+/*
  * setSwitch must reject a negative player index.
  * jvsPlayerFromString("INVALID") returns (JVSPlayer)-1, which before the fix
  * would pass the "player > capabilities.players" check and underflow the array.
@@ -2508,12 +2575,13 @@ static void test_processPacket_cmd_remaining_payout_two_slots(void)
     ASSERT(r.valid == 1, "response valid");
     ASSERT_EQ_INT(r.data[0], STATUS_SUCCESS,  "STATUS_SUCCESS");
     ASSERT_EQ_INT(r.data[1], REPORT_SUCCESS,  "REPORT_SUCCESS");
-    /* 2 slots × 2 bytes each = 4 data bytes, all zero */
-    ASSERT_EQ_INT(r.data[2], 0x00, "slot1 high = 0");
-    ASSERT_EQ_INT(r.data[3], 0x00, "slot1 low = 0");
-    ASSERT_EQ_INT(r.data[4], 0x00, "slot2 high = 0");
-    ASSERT_EQ_INT(r.data[5], 0x00, "slot2 low = 0");
-    /* Total response data length: STATUS(1) + REPORT(1) + 2*2 = 6 */
+    /* Single-slot response: REPORT(1) + hopper_status(1) + remaining_hi(1)
+     * + remaining_mid(1) + remaining_lo(1) = 5 bytes; all zero because we
+     * always report 0 remaining.  Total: STATUS(1) + 5 = 6. */
+    ASSERT_EQ_INT(r.data[2], 0x00, "hopper_status = 0");
+    ASSERT_EQ_INT(r.data[3], 0x00, "remaining_hi = 0");
+    ASSERT_EQ_INT(r.data[4], 0x00, "remaining_mid = 0");
+    ASSERT_EQ_INT(r.data[5], 0x00, "remaining_lo = 0");
     ASSERT_EQ_INT(r.data_len, 6, "data_len = 6");
 
     close(sv[0]); close(sv[1]); serialIO = -1;
@@ -2997,6 +3065,46 @@ static void test_processPacket_cmd_set_comms_mode(void)
     TEST_PASS();
 }
 
+/*
+ * CMD_SET_COMMS_MODE appearing after another command in a batch must NOT
+ * silently discard the REPORT bytes already assembled for the prior command.
+ * Before the fix the handler did an unconditional `return`, dropping any
+ * partially-built response.
+ *
+ * Batch: CMD_COMMAND_VERSION | CMD_SET_COMMS_MODE 0x01
+ * Expected response: STATUS_SUCCESS + REPORT_SUCCESS + commandVersion byte
+ *   (the SET_COMMS_MODE does not add a REPORT byte but the version reply
+ *    must be present in the wire output).
+ */
+static void test_processPacket_cmd_set_comms_mode_batch_preserves_prior(void)
+{
+    TEST_BEGIN(test_processPacket_cmd_set_comms_mode_batch_preserves_prior);
+
+    JVSIO io = make_test_io();
+    io.deviceID = 0x01;
+    int sv[2];
+    int afd = open_test_socket(sv);
+    ASSERT(afd >= 0, "socketpair");
+
+    /* Build a two-command batch: CMD_COMMAND_VERSION (no args) followed by
+     * CMD_SET_COMMS_MODE 0x01. */
+    unsigned char cmd[] = {CMD_COMMAND_VERSION, CMD_SET_COMMS_MODE, 0x01};
+    JVSStatus s = run_processPacket(&io, afd, 0x01, cmd, 3);
+    ASSERT(s == JVS_STATUS_SUCCESS, "batch with CMD_SET_COMMS_MODE SUCCESS");
+
+    /* The response for CMD_COMMAND_VERSION must be present; without the fix
+     * the SET_COMMS_MODE early-return would have dropped it entirely. */
+    JVSResponse r = jvs_read_response(afd);
+    ASSERT(r.valid == 1, "response checksum valid");
+    ASSERT_EQ_INT(r.data[0], STATUS_SUCCESS, "STATUS_SUCCESS present");
+    ASSERT_EQ_INT(r.data[1], REPORT_SUCCESS, "REPORT_SUCCESS for CMD_COMMAND_VERSION");
+    ASSERT_EQ_INT(r.data[2], io.capabilities.commandVersion,
+                  "commandVersion byte preserved in response");
+
+    close(sv[0]); close(sv[1]); serialIO = -1;
+    TEST_PASS();
+}
+
 static void test_processPacket_cmd_read_keypad(void)
 {
     TEST_BEGIN(test_processPacket_cmd_read_keypad);
@@ -3459,6 +3567,7 @@ static const TestFn tests[] = {
     test_jvsPlayerFromString_known,
     test_jvsPlayerFromString_unknown,
     /* New bounds-check tests (PR bug-fixes) */
+    test_setSwitch_invalid_switch_number,
     test_setSwitch_negative_player,
     test_setAnalogue_negative_channel,
     test_setGun_negative_channel,
@@ -3468,6 +3577,7 @@ static const TestFn tests[] = {
     test_initIO_oversized_capabilities,
     test_initIO_zero_analogue_bits,
     test_initIO_oversized_analogue_bits,
+    test_initIO_reinit_mutex_safety,
     test_initJVS_right_align_bits,
     test_initJVS_chained_io_rest_bits,
     /* Config parsing */
@@ -3543,6 +3653,7 @@ static const TestFn tests[] = {
     test_processPacket_cmd_remaining_payout_two_slots,
     /* Additional command coverage */
     test_processPacket_cmd_set_comms_mode,
+    test_processPacket_cmd_set_comms_mode_batch_preserves_prior,
     test_processPacket_cmd_read_keypad,
     test_processPacket_cmd_write_gpo_bit,
     test_processPacket_cmd_write_analog,

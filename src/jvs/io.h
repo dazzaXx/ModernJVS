@@ -112,6 +112,11 @@ typedef struct
 typedef struct JVSIO
 {
     int deviceID;
+    /* Set to 1 by initIO after the first pthread_mutex_init call so that
+     * subsequent initIO calls can safely call pthread_mutex_destroy first.
+     * Checked with == 1 (not just != 0) so that a struct poisoned with
+     * memset(0xFF) skips the destroy, which is the correct safe behaviour. */
+    int mutexInitialized;
     int analogueRestBits;
     int gunXRestBits;
     int gunYRestBits;
