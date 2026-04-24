@@ -27,7 +27,7 @@ Thank you to the team responsible for making OpenJVS in the first place. ❤️
 ## Quick Install
 
 ```
-sudo apt install -y build-essential cmake git file libgpiod-dev
+sudo apt install -y build-essential cmake git file libgpiod-dev pkg-config python3
 git clone https://github.com/dazzaXx/ModernJVS
 sudo make install
 ```
