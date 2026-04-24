@@ -18,7 +18,7 @@ git clone https://github.com/dazzaXx/ModernJVS
 sudo make install
 ```
 
-**Personally, I prefer DietPi just because you can use it as a minimal image and it works great for the old Pi models, although with the old models, the install and setup times are extremely slow. Other than that however, I have noticed no lag whatsoever with a RPi 1 during testing.**
+**Personally, I prefer DietPi just because you can use it as a minimal image and it works great for the old Pi models, although with the old models, the install and setup times are extremely slow. Other than that however, I have noticed no lag whatsoever with a RPi 1 B+ during testing with the WebUI also installed.**
 
 ## Installing without the WebUI
 
