@@ -887,12 +887,16 @@ JVSStatus processPacket(JVSIO *jvsIO)
 			int numBytes = inputPacket.data[index + 1];
 			debug(1, "CMD_WRITE_GPO - Writing %d byte(s) to GPO\n", numBytes);
 			size = 2 + numBytes;
-			/* Warn when the computed size would skip past the end of the packet, which
-			 * would cause all remaining commands in this packet to be silently dropped. */
-			if (index + size > (int)inputPacket.length - 1)
+			/* Clamp size to the remaining available packet bytes so that
+			 * subsequent commands in the same batch are not silently skipped
+			 * when the GPO byte count exceeds the packet payload. */
+			int maxSize = (int)inputPacket.length - 1 - index;
+			if (maxSize < 1) maxSize = 1;
+			if (size > maxSize)
 			{
-				debug(0, "Warning: CMD_WRITE_GPO - %d GPO byte(s) (%d total) exceeds remaining packet length; remaining commands in this packet will be skipped\n",
-				      numBytes, size);
+				debug(0, "Warning: CMD_WRITE_GPO - %d GPO byte(s) (%d total) exceeds remaining packet length (%d bytes); clamping\n",
+				      numBytes, size, maxSize);
+				size = maxSize;
 			}
 			CHECK_OUTPUT_SPACE(&outputPacket, 1);
 			outputPacket.data[outputPacket.length] = REPORT_SUCCESS;
@@ -940,12 +944,16 @@ JVSStatus processPacket(JVSIO *jvsIO)
 			int numChannels = inputPacket.data[index + 1];
 			debug(1, "CMD_WRITE_ANALOG - Writing %d analog channel(s)\n", numChannels);
 			size = numChannels * 2 + 2;
-			/* Warn when the computed size would skip past the end of the packet, which
-			 * would cause all remaining commands in this packet to be silently dropped. */
-			if (index + size > (int)inputPacket.length - 1)
+			/* Clamp size to the remaining available packet bytes so that
+			 * subsequent commands in the same batch are not silently skipped
+			 * when the channel count exceeds the packet payload. */
+			int maxSize = (int)inputPacket.length - 1 - index;
+			if (maxSize < 1) maxSize = 1;
+			if (size > maxSize)
 			{
-				debug(0, "Warning: CMD_WRITE_ANALOG - %d channel(s) (%d total bytes) exceeds remaining packet length; remaining commands in this packet will be skipped\n",
-				      numChannels, size);
+				debug(0, "Warning: CMD_WRITE_ANALOG - %d channel(s) (%d total bytes) exceeds remaining packet length (%d bytes); clamping\n",
+				      numChannels, size, maxSize);
+				size = maxSize;
 			}
 			CHECK_OUTPUT_SPACE(&outputPacket, 1);
 			outputPacket.data[outputPacket.length++] = REPORT_SUCCESS;

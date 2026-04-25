@@ -3160,8 +3160,10 @@ static int processMappings(InputMappings *inputMappings, OutputMappings *outputM
         if (inputMappings->mappings[i].type == CARD)
         {
             evInputs->key[code] = tempMapping;
-            evInputs->abs[code].type = (InputType)COIN;
-            evInputs->absEnabled[code] = 1;
+            /* CARD events arrive as EV_MSC and are handled solely via key[code].
+             * Do NOT mark absEnabled or set abs[code].type: doing so would cause
+             * any EV_ABS event on the same code to fall through to the analogue
+             * path and corrupt analogue channel 0. */
         }
     }
     return 1;
