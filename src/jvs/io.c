@@ -127,11 +127,7 @@ int initIO(JVSIO *io)
 	 * and avoids UB on a non-zero-initialised struct. */
 	if (io->mutexInitialized == 1)
 		pthread_mutex_destroy(&io->state_mutex);
-	if (pthread_mutex_init(&io->state_mutex, NULL) != 0)
-	{
-		debug(0, "Critical: Could not initialise state mutex\n");
-		return 0;
-	}
+	pthread_mutex_init(&io->state_mutex, NULL);
 	io->mutexInitialized = 1;
 
 	return 1;
