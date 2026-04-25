@@ -543,13 +543,8 @@ JVSStatus processPacket(JVSIO *jvsIO)
 			/* Calculate available space: total buffer - current position - REPORT_SUCCESS byte - null terminator byte.
 			 * Subtract 3 (not 2) so that the resulting outputPacket.length after the "+= nameLen + 2" below
 			 * remains strictly below JVS_MAX_PACKET_SIZE; writePacket rejects length >= JVS_MAX_PACKET_SIZE. */
-			/* Use signed arithmetic to detect underflow before converting to
-			 * size_t: if outputPacket.length >= JVS_MAX_PACKET_SIZE - 3 the
-			 * result would be negative (wrapping to SIZE_MAX), which would
-			 * cause the guard below to never fire and allow a buffer overrun. */
-			int _avail = (int)JVS_MAX_PACKET_SIZE - (int)outputPacket.length - 3;
-			size_t availableSpace = (_avail > 0) ? (size_t)_avail : 0;
-
+			size_t availableSpace = JVS_MAX_PACKET_SIZE - outputPacket.length - 3;
+			
 			/* Check if the name fits in the packet buffer */
 			if (nameLen > availableSpace)
 			{
@@ -1596,10 +1591,6 @@ JVSStatus writePacket(JVSPacket *packet)
 		if (result <= 0)
 		{
 			timeout++;
-			/* Brief pause so a transient TX-buffer-full (EAGAIN) can resolve
-			 * before the next attempt, rather than busy-spinning all 4 retries
-			 * within a single scheduler quantum. */
-			usleep(1000);
 			continue;
 		}
 		written += result;
