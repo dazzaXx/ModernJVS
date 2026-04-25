@@ -3436,7 +3436,8 @@ JVSInputStatus initInputs(char *outputMappingPath, char *configPath, char *secon
 
     /* Work on local copies of the caller's path buffers so that a failed
      * parseOutputMapping call never leaves them in a partially-overwritten
-     * state.  Only write the results back after a successful parse. */
+     * state.  Only write the results back after a successful parse.
+     * These are 2×1 KB (MAX_PATH_LENGTH) and safe to stack-allocate. */
     char localConfigPath[MAX_PATH_LENGTH];
     char localSecondConfigPath[MAX_PATH_LENGTH];
     strncpy(localConfigPath, configPath, MAX_PATH_LENGTH - 1);
