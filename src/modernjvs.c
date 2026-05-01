@@ -4,6 +4,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <errno.h>
+#include <time.h>
 #include <sys/stat.h>
 
 #include "console/cli.h"
@@ -20,6 +21,14 @@
 
 /* Delay between controller reinit cycles, in microseconds (200 ms) */
 #define TIME_REINIT (200 * 1000)
+
+/* Duration in milliseconds for which the test button is held active on
+ * systems that manage their own test menu exit (TEST_BUTTON_SELF_MANAGED).
+ * These systems latch into test mode on the press edge and ignore the
+ * button-up signal, so a brief pulse is all that is needed.  After the
+ * pulse the software latch is automatically released so that the WebUI
+ * reflects the machine's actual state once the user exits the test menu. */
+#define TEST_PULSE_MS 300
 
 /* Runtime state file: records the current testButtonActive value (0 or 1)
  * so the WebUI can read it without relying on signal bookkeeping. */
@@ -286,6 +295,9 @@ int main(int argc, char **argv)
         /* Process packets forever */
         JVSStatus processingStatus;
         int lastTestButtonActive = 0;
+        /* Timestamp at which test mode was activated on a self-managed system.
+         * tv_sec == 0 means "not currently timing a pulse". */
+        struct timespec testPulseStart = {0, 0};
         while (__atomic_load_n(&running, __ATOMIC_ACQUIRE) == 1)
         {
             processingStatus = processPacket(&io);
@@ -298,21 +310,49 @@ int main(int argc, char **argv)
              * and the setSwitch call then operate on the same consistent value.
              * When active, re-assert on every iteration so that a controller
              * button mapped to BUTTON_TEST cannot override the software latch
-             * via its key-up event. */
+             * via its key-up event.
+             *
+             * Exception: for systems where TEST_BUTTON_SELF_MANAGED is set the
+             * button is only held for TEST_PULSE_MS milliseconds.  These systems
+             * latch into test mode on the press edge and ignore the button-up
+             * signal, so holding the button active indefinitely would leave the
+             * WebUI showing "Active" permanently — even after the user has
+             * already exited the test menu on the machine. */
             int activeSnapshot = __atomic_load_n(&testButtonActive, __ATOMIC_ACQUIRE);
             if (activeSnapshot != lastTestButtonActive)
             {
                 lastTestButtonActive = activeSnapshot;
                 setSwitch(&io, SYSTEM, BUTTON_TEST, activeSnapshot);
                 writeTestModeState(activeSnapshot);
-                if (!activeSnapshot && io.capabilities.testButtonSelfManaged)
+                if (activeSnapshot && io.capabilities.testButtonSelfManaged)
                 {
-                    debug(0, "Notice: Test mode deactivated, but this system manages its own test menu exit.\n"
-                             "        Please use the \"Exit & Save\" option inside the test menu to leave it.\n");
+                    /* Record when the pulse started. */
+                    clock_gettime(CLOCK_MONOTONIC, &testPulseStart);
+                }
+                else
+                {
+                    /* Manual deactivation or non-self-managed system; clear timer. */
+                    testPulseStart.tv_sec = 0;
+                    testPulseStart.tv_nsec = 0;
                 }
             }
             else if (activeSnapshot)
             {
+                if (io.capabilities.testButtonSelfManaged && testPulseStart.tv_sec != 0)
+                {
+                    /* Auto-release once the pulse duration has elapsed. */
+                    struct timespec now;
+                    clock_gettime(CLOCK_MONOTONIC, &now);
+                    long elapsed_ms = (now.tv_sec - testPulseStart.tv_sec) * 1000L
+                                      + (now.tv_nsec - testPulseStart.tv_nsec) / 1000000L;
+                    if (elapsed_ms >= TEST_PULSE_MS)
+                    {
+                        /* XOR from 1 → 0; mirrors how SIGUSR1 toggles the flag. */
+                        __sync_fetch_and_xor(&testButtonActive, 1);
+                        testPulseStart.tv_sec = 0;
+                        testPulseStart.tv_nsec = 0;
+                    }
+                }
                 setSwitch(&io, SYSTEM, BUTTON_TEST, 1);
             }
             switch (processingStatus)
