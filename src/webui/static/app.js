@@ -90,10 +90,21 @@ function updateTestButtonUI(active, jvsConnected, selfManaged) {
   const isActive = canUse && !!active;
   card.classList.toggle('stat-card-disabled', !canUse);
   card.dataset.selfManaged = selfManaged ? 'true' : 'false';
-  card.title = canUse ? (isActive ? 'Click to deactivate test mode' : 'Click to activate test mode') : 'No active JVS connection';
+  if (!canUse) {
+    card.title = 'No active JVS connection';
+  } else if (selfManaged) {
+    card.title = 'Click to send test button signal (self-managed — use Exit & Save inside the test menu to exit)';
+  } else {
+    card.title = isActive ? 'Click to deactivate test mode' : 'Click to activate test mode';
+  }
   if (val) {
-    val.textContent = isActive ? 'Active' : 'Inactive';
-    val.style.color = isActive ? 'var(--green)' : 'var(--muted)';
+    if (canUse && selfManaged) {
+      val.textContent = 'Self-Managed';
+      val.style.color = 'var(--yellow)';
+    } else {
+      val.textContent = isActive ? 'Active' : 'Inactive';
+      val.style.color = isActive ? 'var(--green)' : 'var(--muted)';
+    }
   }
   if (note) {
     note.style.display = (canUse && selfManaged) ? '' : 'none';
