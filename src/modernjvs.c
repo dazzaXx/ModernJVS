@@ -340,15 +340,24 @@ int main(int argc, char **argv)
             {
                 if (io.capabilities.testButtonSelfManaged && testPulseStart.tv_sec != 0)
                 {
-                    /* Auto-release once the pulse duration has elapsed. */
+                    /* Auto-release once the pulse duration has elapsed.
+                     * Use a normalised subtraction to handle the case where
+                     * now.tv_nsec < testPulseStart.tv_nsec (nanosecond borrow). */
                     struct timespec now;
                     clock_gettime(CLOCK_MONOTONIC, &now);
-                    long elapsed_ms = (now.tv_sec - testPulseStart.tv_sec) * 1000L
-                                      + (now.tv_nsec - testPulseStart.tv_nsec) / 1000000L;
+                    long sec_diff  = now.tv_sec  - testPulseStart.tv_sec;
+                    long nsec_diff = now.tv_nsec - testPulseStart.tv_nsec;
+                    if (nsec_diff < 0)
+                    {
+                        sec_diff  -= 1;
+                        nsec_diff += 1000000000L;
+                    }
+                    long elapsed_ms = sec_diff * 1000L + nsec_diff / 1000000L;
                     if (elapsed_ms >= TEST_PULSE_MS)
                     {
-                        /* XOR from 1 → 0; mirrors how SIGUSR1 toggles the flag. */
-                        __sync_fetch_and_xor(&testButtonActive, 1);
+                        /* Force the flag to 0 regardless of any concurrent
+                         * SIGUSR1 toggle — the pulse is unconditionally done. */
+                        __atomic_store_n(&testButtonActive, 0, __ATOMIC_RELEASE);
                         testPulseStart.tv_sec = 0;
                         testPulseStart.tv_nsec = 0;
                     }
