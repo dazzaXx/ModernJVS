@@ -98,7 +98,10 @@ function updateTestButtonUI(active, jvsConnected, selfManaged) {
     card.title = isActive ? 'Click to deactivate test mode' : 'Click to activate test mode';
   }
   if (val) {
-    if (canUse && selfManaged) {
+    if (!canUse) {
+      val.textContent = '—';
+      val.style.color = 'var(--muted)';
+    } else if (selfManaged) {
       val.textContent = 'Self-Managed';
       val.style.color = 'var(--yellow)';
     } else {
