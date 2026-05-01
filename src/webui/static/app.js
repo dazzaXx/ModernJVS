@@ -105,9 +105,7 @@ async function toggleTestButton() {
   if (card && card.classList.contains('stat-card-disabled')) return;
   const d = await api('/api/control/test_button', {method: 'POST'});
   if (d.error) { showAlert('dashAlert', 'Error: ' + d.error, true); return; }
-  // selfManaged is not returned by the toggle endpoint, so read from card dataset
-  const selfManaged = card ? card.dataset.selfManaged === 'true' : false;
-  updateTestButtonUI(!!d.test_button_active, d.jvs_connected === true, selfManaged);
+  updateTestButtonUI(!!d.test_button_active, d.jvs_connected === true, !!d.emulate_test_self_managed);
 }
 
 async function refreshSysinfo() {

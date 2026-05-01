@@ -30,6 +30,10 @@
  * reflects the machine's actual state once the user exits the test menu. */
 #define TEST_PULSE_MS 300
 
+/* Zero out a struct timespec used as a pulse timer; tv_sec == 0 is the
+ * sentinel that means "not currently timing". */
+#define CLEAR_PULSE_TIMER(ts) do { (ts).tv_sec = 0; (ts).tv_nsec = 0; } while (0)
+
 /* Runtime state file: records the current testButtonActive value (0 or 1)
  * so the WebUI can read it without relying on signal bookkeeping. */
 #define TESTMODE_STATE_PATH "/run/modernjvs/testmode"
@@ -332,8 +336,7 @@ int main(int argc, char **argv)
                 else
                 {
                     /* Manual deactivation or non-self-managed system; clear timer. */
-                    testPulseStart.tv_sec = 0;
-                    testPulseStart.tv_nsec = 0;
+                    CLEAR_PULSE_TIMER(testPulseStart);
                 }
             }
             else if (activeSnapshot)
@@ -358,8 +361,7 @@ int main(int argc, char **argv)
                         /* Force the flag to 0 regardless of any concurrent
                          * SIGUSR1 toggle — the pulse is unconditionally done. */
                         __atomic_store_n(&testButtonActive, 0, __ATOMIC_RELEASE);
-                        testPulseStart.tv_sec = 0;
-                        testPulseStart.tv_nsec = 0;
+                        CLEAR_PULSE_TIMER(testPulseStart);
                     }
                 }
                 setSwitch(&io, SYSTEM, BUTTON_TEST, 1);

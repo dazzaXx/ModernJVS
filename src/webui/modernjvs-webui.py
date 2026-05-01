@@ -3525,8 +3525,10 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
                     "Test mode " + ("activated" if active else "deactivated"),
                     ip=self.client_address[0],
                 )
+                cfg = config_to_api(read_config())
                 self._json({"ok": True, "test_button_active": active,
-                            "jvs_connected": get_jvs_connection_status()})
+                            "jvs_connected": get_jvs_connection_status(),
+                            "emulate_test_self_managed": cfg.get("emulate_test_self_managed", False)})
             else:
                 self._json({"error": err}, HTTPStatus.INTERNAL_SERVER_ERROR)
 
