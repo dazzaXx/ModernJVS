@@ -305,6 +305,11 @@ int main(int argc, char **argv)
                 lastTestButtonActive = activeSnapshot;
                 setSwitch(&io, SYSTEM, BUTTON_TEST, activeSnapshot);
                 writeTestModeState(activeSnapshot);
+                if (!activeSnapshot && io.capabilities.testButtonSelfManaged)
+                {
+                    debug(0, "Notice: Test mode deactivated, but this system manages its own test menu exit.\n"
+                             "        Please use the \"Exit & Save\" option inside the test menu to leave it.\n");
+                }
             }
             else if (activeSnapshot)
             {

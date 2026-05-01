@@ -78,20 +78,25 @@ async function refreshDashboard() {
     return `<div class="stat-card"><div class="val" style="font-size:0.85rem;overflow-wrap:break-word;">${_escHtml(label)}</div><div class="lbl">Player ${n}</div></div>`;
   }).join('');
 
-  updateTestButtonUI(!!d.test_button_active, d.jvs_connected === true);
+  updateTestButtonUI(!!d.test_button_active, d.jvs_connected === true, !!(d.config && d.config.emulate_test_self_managed));
 }
 
-function updateTestButtonUI(active, jvsConnected) {
+function updateTestButtonUI(active, jvsConnected, selfManaged) {
   const card = document.getElementById('testBtnToggle');
   const val  = document.getElementById('testModeVal');
+  const note = document.getElementById('testModeSelfManagedNote');
   if (!card) return;
   const canUse = !!jvsConnected;
   const isActive = canUse && !!active;
   card.classList.toggle('stat-card-disabled', !canUse);
+  card.dataset.selfManaged = selfManaged ? 'true' : 'false';
   card.title = canUse ? (isActive ? 'Click to deactivate test mode' : 'Click to activate test mode') : 'No active JVS connection';
   if (val) {
     val.textContent = isActive ? 'Active' : 'Inactive';
     val.style.color = isActive ? 'var(--green)' : 'var(--muted)';
+  }
+  if (note) {
+    note.style.display = (canUse && selfManaged) ? '' : 'none';
   }
 }
 
@@ -100,7 +105,9 @@ async function toggleTestButton() {
   if (card && card.classList.contains('stat-card-disabled')) return;
   const d = await api('/api/control/test_button', {method: 'POST'});
   if (d.error) { showAlert('dashAlert', 'Error: ' + d.error, true); return; }
-  updateTestButtonUI(!!d.test_button_active, d.jvs_connected === true);
+  // selfManaged is not returned by the toggle endpoint, so read from card dataset
+  const selfManaged = card ? card.dataset.selfManaged === 'true' : false;
+  updateTestButtonUI(!!d.test_button_active, d.jvs_connected === true, selfManaged);
 }
 
 async function refreshSysinfo() {
