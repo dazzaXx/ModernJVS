@@ -78,20 +78,39 @@ async function refreshDashboard() {
     return `<div class="stat-card"><div class="val" style="font-size:0.85rem;overflow-wrap:break-word;">${_escHtml(label)}</div><div class="lbl">Player ${n}</div></div>`;
   }).join('');
 
-  updateTestButtonUI(!!d.test_button_active, d.jvs_connected === true);
+  updateTestButtonUI(!!d.test_button_active, d.jvs_connected === true, !!(d.config && d.config.emulate_test_self_managed));
 }
 
-function updateTestButtonUI(active, jvsConnected) {
+function updateTestButtonUI(active, jvsConnected, selfManaged) {
   const card = document.getElementById('testBtnToggle');
   const val  = document.getElementById('testModeVal');
+  const note = document.getElementById('testModeSelfManagedNote');
   if (!card) return;
   const canUse = !!jvsConnected;
   const isActive = canUse && !!active;
   card.classList.toggle('stat-card-disabled', !canUse);
-  card.title = canUse ? (isActive ? 'Click to deactivate test mode' : 'Click to activate test mode') : 'No active JVS connection';
+  card.dataset.selfManaged = selfManaged ? 'true' : 'false';
+  if (!canUse) {
+    card.title = 'No active JVS connection';
+  } else if (selfManaged) {
+    card.title = 'Click to send test button signal (self-managed — use Exit & Save inside the test menu to exit)';
+  } else {
+    card.title = isActive ? 'Click to deactivate test mode' : 'Click to activate test mode';
+  }
   if (val) {
-    val.textContent = isActive ? 'Active' : 'Inactive';
-    val.style.color = isActive ? 'var(--green)' : 'var(--muted)';
+    if (!canUse) {
+      val.textContent = '—';
+      val.style.color = 'var(--muted)';
+    } else if (selfManaged) {
+      val.textContent = 'Self-Managed';
+      val.style.color = 'var(--yellow)';
+    } else {
+      val.textContent = isActive ? 'Active' : 'Inactive';
+      val.style.color = isActive ? 'var(--green)' : 'var(--muted)';
+    }
+  }
+  if (note) {
+    note.style.display = (canUse && selfManaged) ? '' : 'none';
   }
 }
 
@@ -100,7 +119,7 @@ async function toggleTestButton() {
   if (card && card.classList.contains('stat-card-disabled')) return;
   const d = await api('/api/control/test_button', {method: 'POST'});
   if (d.error) { showAlert('dashAlert', 'Error: ' + d.error, true); return; }
-  updateTestButtonUI(!!d.test_button_active, d.jvs_connected === true);
+  updateTestButtonUI(!!d.test_button_active, d.jvs_connected === true, !!d.emulate_test_self_managed);
 }
 
 async function refreshSysinfo() {

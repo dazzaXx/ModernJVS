@@ -27,14 +27,16 @@ Check the `/etc/modernjvs/ios` folder to see which I/O boards can be emulated an
 | `namco-rays-v100` | Namco RAYS Gun IO |
 | `namco-rays-v106` | Namco RAYS PCB |
 | `namco-taiko` | Namco Taiko (System 256) |
-| `sega-type-1` | Sega Type 1 IO |
-| `sega-type-2` | Sega Type 2 IO |
-| `sega-type-3` | Sega Type 3 IO |
-| `sega-838-13683B` | Sega 838-13683B IO |
-| `sega-trackball` | Sega Trackball IO |
+| `sega-type-1` | Sega Type 1 IO ⚠ |
+| `sega-type-2` | Sega Type 2 IO ⚠ |
+| `sega-type-3` | Sega Type 3 IO ⚠ |
+| `sega-838-13683B` | Sega 838-13683B IO ⚠ |
+| `sega-trackball` | Sega Trackball IO ⚠ |
 | `capcom-naomi` | Capcom NAOMI IO |
 | `taito-type-x` | Taito Type X IO |
 | `nrc-lion` | NRC LION-Board |
+
+*⚠ = These systems manage their own test menu exit. Deactivating test mode via ModernJVS sends the button-up signal, but the system will stay in the test menu until you select **Exit & Save** from within it.*
 
 **Chaining two I/O boards:**
 Some arcade systems enumerate two I/O boards on a single JVS bus. Use `EMULATE_SECOND` to specify a second I/O board to chain after the first:

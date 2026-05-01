@@ -910,6 +910,12 @@ JVSConfigStatus parseIO(char *path, JVSCapabilities *capabilities)
             if (token)
                 capabilities->rightAlignBits = (unsigned char)parseConfigInt(token, capabilities->rightAlignBits);
         }
+        else if (strcmp(command, "TEST_BUTTON_SELF_MANAGED") == 0)
+        {
+            char *token = getNextToken(NULL, TOKEN_SEPARATOR, &saveptr);
+            if (token)
+                capabilities->testButtonSelfManaged = (unsigned char)parseConfigInt(token, capabilities->testButtonSelfManaged);
+        }
 
         else
             debug(0, "Error: Unknown IO configuration command %s\n", command);

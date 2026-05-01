@@ -107,6 +107,11 @@ typedef struct
     unsigned char backup;
     unsigned char rightAlignBits;
     char displayName[MAX_JVS_NAME_SIZE];
+    /* When set to 1 the arcade system manages its own test-mode exit (e.g. via
+     * an "Exit & Save" menu option) and ignores the JVS test button being
+     * deactivated externally.  Used to surface a warning to the user so they
+     * know they must exit the test menu on the machine itself. */
+    unsigned char testButtonSelfManaged;
 } JVSCapabilities;
 
 typedef struct JVSIO

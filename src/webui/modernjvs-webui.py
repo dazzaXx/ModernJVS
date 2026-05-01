@@ -590,23 +590,31 @@ def config_to_api(cfg):
             return None
         return _read_profile_friendly_name(os.path.join(IOS_PATH, name), "DISPLAY_NAME")
 
+    def _io_self_managed(name):
+        """Return True if the IO board's test button exit is self-managed by the arcade system."""
+        if not name:
+            return False
+        val = _read_profile_friendly_name(os.path.join(IOS_PATH, name), "TEST_BUTTON_SELF_MANAGED")
+        return val == "1"
+
     return {
-        "emulate":                      emulate,
-        "emulate_friendly_name":        _io_friendly(emulate),
-        "game":                         game,
-        "game_friendly_name":           _game_friendly(game),
-        "device":                       cfg.get("DEVICE_PATH",                ""),
-        "sense_line_type":              cfg.get("SENSE_LINE_TYPE",            "1"),
-        "sense_line_pin":               cfg.get("SENSE_LINE_PIN",             "26"),
-        "debug_mode":                   cfg.get("DEBUG_MODE",                 "0"),
-        "auto_controller_detection":    cfg.get("AUTO_CONTROLLER_DETECTION",  "1"),
-        "deadzone_p1":                  cfg.get("ANALOG_DEADZONE_PLAYER_1",   "0.2"),
-        "deadzone_p2":                  cfg.get("ANALOG_DEADZONE_PLAYER_2",   "0.2"),
-        "deadzone_p3":                  cfg.get("ANALOG_DEADZONE_PLAYER_3",   "0.2"),
-        "deadzone_p4":                  cfg.get("ANALOG_DEADZONE_PLAYER_4",   "0.2"),
-        "wii_ir_scale":                 cfg.get("WII_IR_SCALE",               "1.0"),
-        "emulate_second":               emulate_sec,
-        "emulate_second_friendly_name": _io_friendly(emulate_sec),
+        "emulate":                          emulate,
+        "emulate_friendly_name":            _io_friendly(emulate),
+        "emulate_test_self_managed":        _io_self_managed(emulate),
+        "game":                             game,
+        "game_friendly_name":               _game_friendly(game),
+        "device":                           cfg.get("DEVICE_PATH",                ""),
+        "sense_line_type":                  cfg.get("SENSE_LINE_TYPE",            "1"),
+        "sense_line_pin":                   cfg.get("SENSE_LINE_PIN",             "26"),
+        "debug_mode":                       cfg.get("DEBUG_MODE",                 "0"),
+        "auto_controller_detection":        cfg.get("AUTO_CONTROLLER_DETECTION",  "1"),
+        "deadzone_p1":                      cfg.get("ANALOG_DEADZONE_PLAYER_1",   "0.2"),
+        "deadzone_p2":                      cfg.get("ANALOG_DEADZONE_PLAYER_2",   "0.2"),
+        "deadzone_p3":                      cfg.get("ANALOG_DEADZONE_PLAYER_3",   "0.2"),
+        "deadzone_p4":                      cfg.get("ANALOG_DEADZONE_PLAYER_4",   "0.2"),
+        "wii_ir_scale":                     cfg.get("WII_IR_SCALE",               "1.0"),
+        "emulate_second":                   emulate_sec,
+        "emulate_second_friendly_name":     _io_friendly(emulate_sec),
     }
 
 
@@ -3517,8 +3525,10 @@ class WebUIHandler(http.server.BaseHTTPRequestHandler):
                     "Test mode " + ("activated" if active else "deactivated"),
                     ip=self.client_address[0],
                 )
+                cfg = config_to_api(read_config())
                 self._json({"ok": True, "test_button_active": active,
-                            "jvs_connected": get_jvs_connection_status()})
+                            "jvs_connected": get_jvs_connection_status(),
+                            "emulate_test_self_managed": cfg.get("emulate_test_self_managed", False)})
             else:
                 self._json({"error": err}, HTTPStatus.INTERNAL_SERVER_ERROR)
 
