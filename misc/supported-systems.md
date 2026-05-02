@@ -27,7 +27,7 @@ ModernJVS supports a wide range of arcade hardware platforms:
 Some examples of games that work with ModernJVS:
 - **Racing**: Initial D, Wangan Midnight Maximum Tune, Mario Kart Arcade GP, Daytona USA, OutRun, R-Tuned, F-355 Challenge, F-Zero AX, Sega Race TV, 18 Wheeler
 - **Shooting**: Time Crisis 2/3, Crisis Zone, House of the Dead 2/3/4, Virtua Cop 3, Ghost Squad, Operation Ghost, Rambo, Ninja Assault, Let's Go Jungle, Alien Front, Transformers Human Alliance
-- **Fighting**: Tekken series
+- **Fighting**: Tekken series, Tatsunoko vs. Capcom: Cross Generation of Heroes
 - **Rhythm**: Taiko no Tatsujin (Taiko Drum Master) on Namco System 256
 - **Other**: Crazy Taxi, After Burner Climax, Virtua Golf, Monkey Ball, Dream Raiders, Jambo Safari, and many more
 
